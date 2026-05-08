@@ -97,18 +97,23 @@ async function downloadWithAndroidDownloadManager(url: string, filename: string)
   // DownloadManager 接管后台下载，通知栏会显示进度和完成提示
 }
 
-export async function downloadFile(params: DownloadFileParams): Promise<void> {
-  const filename = sanitizeDownloadName(params.path, params.name);
-  const url = toAbsoluteDownloadURL(buildDownloadURL(params.rootId, params.path));
-
+export async function downloadURL(url: string, filename = "download"): Promise<void> {
   if (typeof document === "undefined") {
     throw new Error("download is only available in browser runtime");
   }
 
+  const safeFilename = sanitizeDownloadName(filename, filename);
+  const absoluteURL = toAbsoluteDownloadURL(url);
   if (isCapacitorRuntime()) {
-    await downloadWithAndroidDownloadManager(url, filename);
+    await downloadWithAndroidDownloadManager(absoluteURL, safeFilename);
     return;
   }
 
-  triggerBrowserDownload(url, filename);
+  triggerBrowserDownload(absoluteURL, safeFilename);
+}
+
+export async function downloadFile(params: DownloadFileParams): Promise<void> {
+  const filename = sanitizeDownloadName(params.path, params.name);
+  const url = toAbsoluteDownloadURL(buildDownloadURL(params.rootId, params.path));
+  await downloadURL(url, filename);
 }

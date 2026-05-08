@@ -6,3 +6,61 @@
 - 重装 Android 后保留已有节点
 - 只保留重要 toolcall 的内容详情，避免 session 数据太大导致 relay加载太慢
 - 预防codex 可能的重复
+
+
+# MindFS v0.2.2
+
+## 新功能
+- 增加 Android 版本
+- 错误恢复：自动重试
+- mindfs 中已有的codex/claude 会话自动/手动同步
+
+## 优化和修复
+- 项目根目录高亮
+- 移动端发送后收起键盘
+- 探测复用 session，避免出现很多 session
+- 避免代码文件被识别为二进制
+- 刷新后保持 effort
+- 修复新session的消息跑到正在回复 session 中
+
+
+# MindFS v0.2.1
+
+## 优化和修复
+- 记住 model/effort 偏好选择
+- claude ask user 交互回答
+- 修复claude 上下文窗口显示
+- 修复可能的导入错误，增加错误信息
+
+
+# MindFS v0.2.0
+
+## 新增功能
+- 端到端加密（需主动开启）
+- thought/toolcall持久化，刷新后保持会话完整
+- 最新回复下面增加实时上下文窗口余额
+- markdown 支持图片展示
+
+## 修复和优化
+- claude toolcall 卡片展示优化
+- 修复mermaid 渲染错误
+- 修复切视图后回复展示不稳定
+
+
+# MindFS v0.1.8
+
+## 新增功能
+- 会话搜索
+- 正在回复状态，添加呼吸灯效果
+- session 重命名
+- 回复结果可以复制为 markdown 文本
+- 输入框可以直接粘贴图片
+- 增加 qoder 和 pi
+
+## 修复和优化
+- relay 模式资源加载优化
+- 关联文件移动端默认折叠
+- windows 系统目录下打开 mindfs 空白页
+- Windows 下退出终端 mindfs 退出
+- 切换项目后显示最后选中会话
+- agent 标记为不可用时仍然可以发送

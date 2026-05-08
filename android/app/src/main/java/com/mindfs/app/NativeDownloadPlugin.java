@@ -62,6 +62,10 @@ public class NativeDownloadPlugin extends Plugin {
         request.setAllowedOverMetered(true);
         request.setAllowedOverRoaming(true);
         request.setVisibleInDownloadsUi(true);
+        if (filename.toLowerCase().endsWith(".apk")) {
+            request.setMimeType("application/vnd.android.package-archive");
+            request.setDescription("Downloading app update");
+        }
         request.setDestinationInExternalPublicDir(
             Environment.DIRECTORY_DOWNLOADS,
             filename

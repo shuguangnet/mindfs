@@ -28,6 +28,16 @@ func TestParseReleaseNotesVersion(t *testing.T) {
 	}
 }
 
+func TestLatestReleaseNotesBody(t *testing.T) {
+	t.Parallel()
+
+	text := "# MindFS v0.2.3\n\n## 优化和修复\n- latest\n\n# MindFS v0.2.2\n\n## 修复\n- old\n"
+	want := "# MindFS v0.2.3\n\n## 优化和修复\n- latest"
+	if got := latestReleaseNotesBody(text); got != want {
+		t.Fatalf("latestReleaseNotesBody() = %q, want %q", got, want)
+	}
+}
+
 func TestIsNewerVersion(t *testing.T) {
 	t.Parallel()
 

@@ -319,7 +319,7 @@ func (s *Service) fetchLatestRelease(ctx context.Context) (latestRelease, error)
 	return latestRelease{
 		TagName: tag,
 		Name:    tag,
-		Body:    body,
+		Body:    latestReleaseNotesBody(body),
 		HTMLURL: fmt.Sprintf("https://github.com/%s/releases/tag/%s", s.repo, tag),
 		Assets:  []releaseAsset{s.releaseAssetForVersion(tag)},
 	}, nil
@@ -539,6 +539,17 @@ func parseReleaseNotesVersion(text string) string {
 		return version
 	}
 	return ""
+}
+
+func latestReleaseNotesBody(text string) string {
+	lines := strings.SplitAfter(text, "\n")
+	for i := 1; i < len(lines); i++ {
+		line := strings.TrimSpace(strings.TrimSuffix(lines[i], "\r"))
+		if strings.HasPrefix(line, "# MindFS ") && parseReleaseNotesVersion(line) != "" {
+			return strings.TrimSpace(strings.Join(lines[:i], ""))
+		}
+	}
+	return strings.TrimSpace(text)
 }
 
 func isNewerVersion(latest, current string) bool {
