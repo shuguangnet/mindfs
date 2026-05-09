@@ -67,6 +67,10 @@ public class MainActivity extends BridgeActivity {
             new ReplyPollerBridge(),
             "MindFSReplyPoller"
         );
+        getBridge().getWebView().addJavascriptInterface(
+            new AppInfoBridge(),
+            "MindFSAppInfo"
+        );
         clearPendingWebViewCacheIfNeeded();
         requestPostNotificationsIfNeeded();
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
@@ -283,11 +287,11 @@ public class MainActivity extends BridgeActivity {
     private String currentHTTPOrigin() {
         View view = getBridge() == null ? null : getBridge().getWebView();
         if (!(view instanceof WebView)) {
-            return launcherNodeOrigin();
+            return "";
         }
         String rawURL = ((WebView) view).getUrl();
         if (rawURL == null || rawURL.trim().isEmpty()) {
-            return launcherNodeOrigin();
+            return "";
         }
         Uri uri = Uri.parse(rawURL.trim());
         String scheme = uri.getScheme();
@@ -301,10 +305,6 @@ public class MainActivity extends BridgeActivity {
         }
         String host = uri.getHost();
         if ("localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)) {
-            String fallback = launcherNodeOrigin();
-            if (!fallback.isEmpty()) {
-                return fallback;
-            }
             return "";
         }
         return scheme.toLowerCase(java.util.Locale.US) + "://" + authority;
@@ -515,6 +515,28 @@ public class MainActivity extends BridgeActivity {
                 return "";
             } catch (Exception ex) {
                 return "Failed to enqueue download: " + ex.getMessage();
+            }
+        }
+    }
+
+    private class AppInfoBridge {
+        @JavascriptInterface
+        public String getInfo() {
+            try {
+                android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+                long versionCode;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    versionCode = info.getLongVersionCode();
+                } else {
+                    versionCode = info.versionCode;
+                }
+                String versionName = info.versionName == null ? "" : info.versionName;
+                JSONObject payload = new JSONObject();
+                payload.put("version", versionName);
+                payload.put("build", String.valueOf(versionCode));
+                return payload.toString();
+            } catch (Exception ex) {
+                return "{\"version\":\"\",\"build\":\"\"}";
             }
         }
     }

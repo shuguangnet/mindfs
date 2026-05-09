@@ -9,6 +9,13 @@ import {
   getNativeLauncherNodes,
   setNativeLauncherNodes,
 } from "../services/launcherNodeSync";
+import {
+  fetchAndroidUpdateState,
+  isAndroidRuntime,
+  normalizeAndroidUpdateState,
+  type AndroidUpdateState,
+} from "../services/androidUpdate";
+import { downloadURL } from "../services/download";
 
 type LoginProps = {
   onOpenNode: (nodeURL: string) => void;
@@ -91,6 +98,27 @@ function mergeLauncherNodes(...groups: LauncherNode[][]): LauncherNode[] {
   return sortNodes(merged);
 }
 
+function shouldShowAndroidUpdate(state: AndroidUpdateState): boolean {
+  const status = (state.status || "idle").toLowerCase();
+  return (
+    state.has_update === true ||
+    status === "downloading" ||
+    status === "downloaded" ||
+    status === "failed"
+  );
+}
+
+function androidUpdateSummary(state: AndroidUpdateState): string {
+  const notes = String(state.notes || "").trim();
+  if (notes) {
+    return notes;
+  }
+  if (state.latest_version) {
+    return `发现 Android ${state.latest_version} 新版本`;
+  }
+  return "";
+}
+
 export function Login({ onOpenNode }: LoginProps): ReactElement {
   const [nodes, setNodes] = useState<LauncherNode[]>(() => sortNodes(getStoredLauncherNodes()));
   const [composerOpen, setComposerOpen] = useState(false);
@@ -99,6 +127,10 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
   const [formError, setFormError] = useState("");
   const [editingNodeID, setEditingNodeID] = useState("");
   const [editingNodeName, setEditingNodeName] = useState("");
+  const [androidUpdateState, setAndroidUpdateState] =
+    useState<AndroidUpdateState>(() => normalizeAndroidUpdateState(null));
+  const [androidUpdateNotesOpen, setAndroidUpdateNotesOpen] = useState(false);
+  const [androidUpdateBusy, setAndroidUpdateBusy] = useState(false);
 
   function persistNodes(nextNodes: LauncherNode[]): void {
     const sorted = sortNodes(nextNodes);
@@ -181,6 +213,43 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
     onOpenNode(nextNode.url);
   }
 
+  async function handleDownloadAndroidUpdate(): Promise<void> {
+    const next = normalizeAndroidUpdateState(androidUpdateState);
+    if (!next.download_url || androidUpdateBusy) {
+      return;
+    }
+    setAndroidUpdateBusy(true);
+    setAndroidUpdateState((prev) =>
+      normalizeAndroidUpdateState({
+        ...prev,
+        status: "downloading",
+        message: "正在下载 Android 更新包",
+      }),
+    );
+    try {
+      await downloadURL(next.download_url, next.filename || "mindfs-android.apk");
+      setAndroidUpdateState((prev) =>
+        normalizeAndroidUpdateState({
+          ...prev,
+          status: "downloaded",
+          message: "更新包已开始下载，请在系统通知或下载目录中打开安装",
+        }),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Android 更新下载失败";
+      setAndroidUpdateState((prev) =>
+        normalizeAndroidUpdateState({
+          ...prev,
+          status: "failed",
+          message,
+        }),
+      );
+    } finally {
+      setAndroidUpdateBusy(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -235,6 +304,49 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isAndroidRuntime()) {
+      setAndroidUpdateState(normalizeAndroidUpdateState(null));
+      return;
+    }
+
+    let cancelled = false;
+    void fetchAndroidUpdateState()
+      .then((state) => {
+        if (!cancelled) {
+          setAndroidUpdateState(state);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn("[android-update] launcher check failed", error);
+          setAndroidUpdateState(normalizeAndroidUpdateState(null));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const showAndroidUpdate = shouldShowAndroidUpdate(androidUpdateState);
+  const androidUpdateStatus = (androidUpdateState.status || "idle").toLowerCase();
+  const androidUpdateDisabled =
+    androidUpdateBusy ||
+    androidUpdateStatus === "downloading" ||
+    androidUpdateStatus === "downloaded";
+  const androidUpdateText =
+    androidUpdateStatus === "downloading"
+      ? "下载中..."
+      : androidUpdateStatus === "downloaded"
+        ? "已开始下载"
+        : "更新APP";
+  const androidUpdateHelp =
+    androidUpdateState.message ||
+    (androidUpdateState.latest_version
+      ? `当前 ${androidUpdateState.current_version || "未知"}，最新 ${androidUpdateState.latest_version}`
+      : "");
+  const androidUpdateNotes = androidUpdateSummary(androidUpdateState);
 
   return (
     <div
@@ -470,6 +582,133 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
           </div>
         ))}
 
+        {showAndroidUpdate ? (
+          <div
+            style={{
+              border: `1px solid ${BORDER}`,
+              borderRadius: "20px",
+              background: SURFACE_STRONG,
+              padding: "14px",
+              boxShadow: SHADOW,
+              backdropFilter: "blur(20px)",
+              display: "grid",
+              gap: "10px",
+              marginTop: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+              }}
+            >
+              <div style={{ minWidth: 0, display: "grid", gap: "3px" }}>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 600,
+                    color: TEXT,
+                    lineHeight: 1.25,
+                  }}
+                >
+                  新版本
+                </div>
+                {androidUpdateHelp ? (
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: MUTED,
+                      lineHeight: 1.45,
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {androidUpdateHelp}
+                  </div>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                disabled={androidUpdateDisabled}
+                onClick={() => {
+                  void handleDownloadAndroidUpdate();
+                }}
+                style={{
+                  border: "none",
+                  borderRadius: "14px",
+                  background: androidUpdateDisabled ? "rgba(148, 163, 184, 0.35)" : ACCENT,
+                  color: androidUpdateDisabled ? MUTED : "#fff8f2",
+                  padding: "10px 14px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: androidUpdateDisabled ? "not-allowed" : "pointer",
+                  flexShrink: 0,
+                  minWidth: "86px",
+                }}
+              >
+                {androidUpdateText}
+              </button>
+            </div>
+            {androidUpdateNotes ? (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setAndroidUpdateNotesOpen((open) => !open)}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: ACCENT,
+                      padding: 0,
+                      justifySelf: "start",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {androidUpdateNotesOpen ? "收起更新说明" : "查看更新说明"}
+                  </button>
+                  <span
+                    style={{
+                      color: "#dc2626",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    请先将 mindfs 后端升级到最新版本
+                  </span>
+                </div>
+                {androidUpdateNotesOpen ? (
+                  <div
+                    style={{
+                      borderTop: `1px solid ${BORDER}`,
+                      paddingTop: "10px",
+                      color: MUTED,
+                      fontSize: "12px",
+                      lineHeight: 1.55,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      maxHeight: "180px",
+                      overflow: "auto",
+                    }}
+                  >
+                    {androidUpdateNotes}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : null}
+
         <button
           type="button"
           onClick={() => {
@@ -489,7 +728,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
             cursor: "pointer",
             boxShadow: SHADOW,
             backdropFilter: "blur(20px)",
-            marginTop: "auto",
+            marginTop: showAndroidUpdate ? 0 : "auto",
           }}
         >
           +

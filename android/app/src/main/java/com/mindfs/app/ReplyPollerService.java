@@ -9,6 +9,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
+import android.media.AudioAttributes;
+import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.VibrationEffect;
@@ -77,12 +79,13 @@ public class ReplyPollerService extends Service {
     private static final String CLIENT_ID_HEADER = "X-MindFS-Client-ID";
     private static final String PROGRESS_CHANNEL_ID = "mindfs_reply_progress_v1";
     private static final String VISIBLE_PROGRESS_CHANNEL_ID = "mindfs_reply_progress_visible_v1";
-    private static final String ALERT_CHANNEL_ID = "mindfs_reply_alert_v1";
+    private static final String ALERT_CHANNEL_ID = "mindfs_reply_alert_v3";
     private static final String REPLY_GROUP_KEY = "com.mindfs.app.REPLY_NOTIFICATIONS";
     private static final int FOREGROUND_ID = 750001;
     private static final int NOTIFICATION_BASE_ID = 760000;
     private static final long ACTIVE_POLL_INTERVAL_SECONDS = 5;
     private static final long IDLE_POLL_INTERVAL_SECONDS = 15;
+    private static final long[] ALERT_VIBRATION_PATTERN = new long[] {0, 160, 110, 160};
 
     private final Map<String, ReplyState> states = new HashMap<>();
     private final Map<Integer, String> notificationSignatures = new HashMap<>();
@@ -428,7 +431,7 @@ public class ReplyPollerService extends Service {
             if (state.status == ReplyStatus.REPLYING && !currentKeys.contains(state.sessionKey)) {
                 state.status = ReplyStatus.COMPLETED;
                 addCompletedKey(state.sessionKey);
-                vibrateOnce();
+                vibrateReplyCompletion();
             }
         }
 
@@ -605,7 +608,11 @@ public class ReplyPollerService extends Service {
             .setCategory(hasReplying ? Notification.CATEGORY_SERVICE : Notification.CATEGORY_STATUS)
             .setGroup(REPLY_GROUP_KEY)
             .setGroupSummary(true)
+            .setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY)
             .setStyle(new Notification.InboxStyle().setSummaryText(status));
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O && !hasReplying) {
+            builder.setSound(replyAlertSoundUri());
+        }
         Notification.InboxStyle style = new Notification.InboxStyle();
         for (ReplyState state : states) {
             style.addLine(buildAggregateLine(state));
@@ -689,6 +696,9 @@ public class ReplyPollerService extends Service {
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setCategory(replying ? Notification.CATEGORY_SERVICE : Notification.CATEGORY_STATUS)
             .setStyle(new Notification.BigTextStyle().bigText(text));
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O && !replying) {
+            builder.setSound(replyAlertSoundUri());
+        }
         if (!TextUtils.isEmpty(text)) {
             builder.setTicker(text);
         }
@@ -729,7 +739,11 @@ public class ReplyPollerService extends Service {
             .setCategory(replying ? Notification.CATEGORY_SERVICE : Notification.CATEGORY_STATUS)
             .setGroup(REPLY_GROUP_KEY)
             .setGroupSummary(false)
+            .setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY)
             .setStyle(new Notification.BigTextStyle().bigText(text));
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O && !replying) {
+            builder.setSound(replyAlertSoundUri());
+        }
         if (!TextUtils.isEmpty(text)) {
             builder.setTicker(text);
         }
@@ -822,9 +836,20 @@ public class ReplyPollerService extends Service {
             NotificationManager.IMPORTANCE_DEFAULT
         );
         alert.setDescription("MindFS reply completion alerts");
-        alert.enableVibration(true);
+        alert.enableVibration(false);
+        alert.setSound(
+            replyAlertSoundUri(),
+            new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+        );
         alert.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         notificationManager.createNotificationChannel(alert);
+    }
+
+    private Uri replyAlertSoundUri() {
+        return Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.mindfs_reply_alert);
     }
 
     private void startForegroundCompat(int notificationId, Notification notification) {
@@ -851,15 +876,15 @@ public class ReplyPollerService extends Service {
         }
     }
 
-    private void vibrateOnce() {
+    private void vibrateReplyCompletion() {
         Vibrator vibrator = getReplyVibrator();
         if (vibrator == null || !vibrator.hasVibrator()) {
             return;
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(180, VibrationEffect.DEFAULT_AMPLITUDE));
+            vibrator.vibrate(VibrationEffect.createWaveform(ALERT_VIBRATION_PATTERN, -1));
         } else {
-            vibrator.vibrate(180);
+            vibrator.vibrate(ALERT_VIBRATION_PATTERN, -1);
         }
     }
 

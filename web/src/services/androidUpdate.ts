@@ -26,6 +26,12 @@ type RelayVersionResponse = {
   }>;
 };
 
+type WindowWithAppInfoBridge = Window & {
+  MindFSAppInfo?: {
+    getInfo?: () => string;
+  };
+};
+
 export function normalizeAndroidUpdateState(
   input: Partial<AndroidUpdateState> | null | undefined,
 ): AndroidUpdateState {
@@ -88,6 +94,13 @@ function buildVersionEndpoint(): string {
 }
 
 async function getAppInfo(): Promise<{ version?: string; build?: string }> {
+  const nativeBridge = (window as WindowWithAppInfoBridge).MindFSAppInfo;
+  if (nativeBridge && typeof nativeBridge.getInfo === "function") {
+    try {
+      return JSON.parse(nativeBridge.getInfo()) as { version?: string; build?: string };
+    } catch {
+    }
+  }
   const { App } = await import("@capacitor/app");
   return App.getInfo();
 }

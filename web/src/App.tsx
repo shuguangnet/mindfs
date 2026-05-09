@@ -58,13 +58,6 @@ import {
 import { appPath, appURL, isRelayNodePage } from "./services/base";
 import { triggerUpdate, type UpdateState } from "./services/update";
 import {
-  fetchAndroidUpdateState,
-  isAndroidRuntime,
-  normalizeAndroidUpdateState,
-  type AndroidUpdateState,
-} from "./services/androidUpdate";
-import { downloadURL } from "./services/download";
-import {
   cancelScheduledWebViewCacheClear,
   scheduleWebViewCacheClearOnNextLaunch,
 } from "./services/nativeCacheControl";
@@ -362,43 +355,6 @@ function shouldShowUpdateButton(state: UpdateState): boolean {
     return true;
   }
   return state.auto_update_supported === true && state.has_update === true;
-}
-
-function androidUpdateButtonLabel(state: AndroidUpdateState): string {
-  const status = (state.status || "idle").toLowerCase();
-  switch (status) {
-    case "available":
-      return "更新APP";
-    case "downloading":
-      return "下载APP中...";
-    case "downloaded":
-      return "APP更新已下载";
-    case "failed":
-      return "APP更新失败";
-    default:
-      return "更新APP";
-  }
-}
-
-function androidUpdateSummaryText(state: AndroidUpdateState): string {
-  const notes = String(state.notes || "").trim();
-  if (notes) {
-    return notes;
-  }
-  if (state.latest_version) {
-    return `发现 Android ${state.latest_version} 新版本`;
-  }
-  return "";
-}
-
-function shouldShowAndroidUpdateButton(state: AndroidUpdateState): boolean {
-  const status = (state.status || "idle").toLowerCase();
-  return (
-    state.has_update === true ||
-    status === "downloading" ||
-    status === "downloaded" ||
-    status === "failed"
-  );
 }
 
 function buildFileScrollKey(
@@ -1049,9 +1005,6 @@ export function App({ onGoHome }: AppProps) {
     normalizeUpdateState(null),
   );
   const [updateSubmitting, setUpdateSubmitting] = useState(false);
-  const [androidUpdateState, setAndroidUpdateState] =
-    useState<AndroidUpdateState>(() => normalizeAndroidUpdateState(null));
-  const [androidUpdateSubmitting, setAndroidUpdateSubmitting] = useState(false);
 
   const ensureCompletionAudioContext = useCallback((): AudioContext | null => {
     if (typeof window === "undefined") {
@@ -1145,44 +1098,6 @@ export function App({ onGoHome }: AppProps) {
       setUpdateSubmitting(false);
     }
   }, [updateState]);
-
-  const handleStartAndroidUpdate = useCallback(async () => {
-    const next = normalizeAndroidUpdateState(androidUpdateState);
-    if (!next.download_url || androidUpdateSubmitting) {
-      return;
-    }
-    setAndroidUpdateSubmitting(true);
-    setAndroidUpdateState((prev) =>
-      normalizeAndroidUpdateState({
-        ...prev,
-        status: "downloading",
-        message: "正在下载 Android 更新包",
-      }),
-    );
-    try {
-      await downloadURL(next.download_url, next.filename || "mindfs-android.apk");
-      setAndroidUpdateState((prev) =>
-        normalizeAndroidUpdateState({
-          ...prev,
-          status: "downloaded",
-          message: "更新包已开始下载，请在系统通知或下载目录中打开安装",
-        }),
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Android 更新下载失败";
-      setAndroidUpdateState((prev) =>
-        normalizeAndroidUpdateState({
-          ...prev,
-          status: "failed",
-          message,
-        }),
-      );
-      reportError("network.disconnected", message);
-    } finally {
-      setAndroidUpdateSubmitting(false);
-    }
-  }, [androidUpdateState, androidUpdateSubmitting]);
 
   const playCompletionSound = useCallback(() => {
     const audioContext = ensureCompletionAudioContext();
@@ -5783,31 +5698,6 @@ export function App({ onGoHome }: AppProps) {
     setAgentsVersion((v) => v + 1);
   }, [bootstrapState.phase]);
 
-  useEffect(() => {
-    if (bootstrapState.phase !== "ready" || !isAndroidRuntime()) {
-      setAndroidUpdateState(normalizeAndroidUpdateState(null));
-      return;
-    }
-
-    let cancelled = false;
-    void fetchAndroidUpdateState()
-      .then((state) => {
-        if (!cancelled) {
-          setAndroidUpdateState(state);
-        }
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-        console.warn("[android-update] check failed", error);
-        setAndroidUpdateState(normalizeAndroidUpdateState(null));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [bootstrapState.phase]);
-
   const describeE2EEPromptError = useCallback((err: unknown) => {
     const code = err instanceof Error ? String(err.message || "").trim() : "";
     switch (code) {
@@ -6630,8 +6520,6 @@ export function App({ onGoHome }: AppProps) {
     (!relayStatus?.relay_bound &&
       (!relayStatus?.pending_code || !relayStatus?.relay_base_url));
   const showUpdateButton = shouldShowUpdateButton(updateState);
-  const showAndroidUpdateButton =
-    shouldShowAndroidUpdateButton(androidUpdateState);
   const updateBusy =
     updateSubmitting ||
     ["downloading", "installing", "restarting"].includes(
@@ -6640,15 +6528,6 @@ export function App({ onGoHome }: AppProps) {
   const updateLabel = updateButtonLabel(updateState);
   const updateHelp = updateState.message || updateSummaryText(updateState);
   const updateSummary = updateSummaryText(updateState);
-  const androidUpdateBusy =
-    androidUpdateSubmitting ||
-    ["downloading", "downloaded"].includes(
-      (androidUpdateState.status || "").toLowerCase(),
-    );
-  const androidUpdateLabel = androidUpdateButtonLabel(androidUpdateState);
-  const androidUpdateHelp =
-    androidUpdateState.message || androidUpdateSummaryText(androidUpdateState);
-  const androidUpdateSummary = androidUpdateSummaryText(androidUpdateState);
   const sessionImportMenu = (
     <div ref={importMenuRef} style={{ position: "relative" }}>
       <button
@@ -6961,39 +6840,13 @@ export function App({ onGoHome }: AppProps) {
             relayActionDisabled={relayActionDisabled}
             relayActionHelp={null}
             onRelayAction={handleRelayAction}
-            updateActionLabel={
-              showAndroidUpdateButton
-                ? androidUpdateLabel
-                : showUpdateButton
-                  ? updateLabel
-                  : null
-            }
-            updateActionDisabled={
-              showAndroidUpdateButton ? androidUpdateBusy : updateBusy
-            }
-            updateActionHelp={
-              showAndroidUpdateButton
-                ? androidUpdateHelp
-                : showUpdateButton
-                  ? updateHelp
-                  : ""
-            }
-            updateActionBusy={
-              showAndroidUpdateButton ? androidUpdateBusy : updateBusy
-            }
-            updateActionSummary={
-              showAndroidUpdateButton
-                ? androidUpdateSummary
-                : showUpdateButton
-                  ? updateSummary
-                  : ""
-            }
+            updateActionLabel={showUpdateButton ? updateLabel : null}
+            updateActionDisabled={updateBusy}
+            updateActionHelp={showUpdateButton ? updateHelp : ""}
+            updateActionBusy={updateBusy}
+            updateActionSummary={showUpdateButton ? updateSummary : ""}
             onUpdateAction={() => {
-              if (showAndroidUpdateButton) {
-                void handleStartAndroidUpdate();
-              } else {
-                void handleStartUpdate();
-              }
+              void handleStartUpdate();
             }}
             onGoHome={onGoHome}
           />
