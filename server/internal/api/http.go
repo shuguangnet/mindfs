@@ -233,6 +233,9 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/file", h.handleFile)
 	r.Get("/api/git/status", h.protectedEndpoint(h.handleGitStatus))
 	r.Get("/api/git/diff", h.protectedEndpoint(h.handleGitDiff))
+	r.Get("/api/git/branches", h.protectedEndpoint(h.handleGitBranches))
+	r.Post("/api/git/worktrees", h.protectedEndpoint(h.handleGitWorktreeCreate))
+	r.Delete("/api/git/worktrees", h.protectedEndpoint(h.handleGitWorktreeRemove))
 	r.Post("/api/upload", h.handleUpload)
 	r.Get("/api/candidates", h.protectedEndpoint(h.handleCandidates))
 	r.Post("/api/prompts", h.protectedEndpoint(h.handlePromptSave))
@@ -1085,6 +1088,71 @@ func (h *HTTPHandler) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, out.Diff)
 }
 
+func (h *HTTPHandler) handleGitBranches(w http.ResponseWriter, r *http.Request) {
+	rootID := strings.TrimSpace(r.URL.Query().Get("root"))
+	if rootID == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root required"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.ListGitBranches(r.Context(), usecase.ListGitBranchesInput{RootID: rootID})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, out)
+}
+
+func (h *HTTPHandler) handleGitWorktreeCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RootID     string `json:"root"`
+		ParentPath string `json:"parent_path"`
+		Name       string `json:"name"`
+		BranchMode string `json:"branch_mode"`
+		Branch     string `json:"branch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.CreateGitWorktree(r.Context(), usecase.CreateGitWorktreeInput{
+		RootID:     req.RootID,
+		ParentPath: req.ParentPath,
+		Name:       req.Name,
+		BranchMode: req.BranchMode,
+		Branch:     req.Branch,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	if h.AppContext != nil {
+		h.broadcastRootChanged("added", out.Dir.ID)
+	}
+	respondJSON(w, http.StatusOK, managedDirResponse(out.Dir))
+}
+
+func (h *HTTPHandler) handleGitWorktreeRemove(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RootID string `json:"root"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.RemoveGitWorktree(r.Context(), usecase.RemoveGitWorktreeInput{RootID: req.RootID})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	if h.AppContext != nil {
+		h.broadcastRootChanged("removed", out.Dir.ID)
+	}
+	respondJSON(w, http.StatusOK, managedDirResponse(out.Dir))
+}
+
 func (h *HTTPHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	rootID := strings.TrimSpace(r.URL.Query().Get("root"))
 	if rootID == "" {
@@ -1390,6 +1458,9 @@ func managedDirResponse(dir fs.RootInfo) map[string]any {
 	}
 	if ok, err := gitview.HasRepo(context.Background(), dir.RootPath); err == nil {
 		resp["is_git_repo"] = ok
+	}
+	if ok, err := gitview.IsWorktree(dir.RootPath); err == nil {
+		resp["is_git_worktree"] = ok
 	}
 	return resp
 }

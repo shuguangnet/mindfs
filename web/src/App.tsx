@@ -38,8 +38,12 @@ import {
 } from "./services/file";
 import {
   buildGitDiffCacheSignature,
+  createGitWorktree,
   fetchGitDiff,
+  fetchGitBranches,
   fetchGitStatus,
+  removeGitWorktree,
+  type GitBranchesPayload,
   type GitDiffPayload,
   type GitStatusItem,
   type GitStatusPayload,
@@ -267,6 +271,7 @@ type ManagedRootPayload = {
   display_name?: string;
   root_path?: string;
   is_git_repo?: boolean;
+  is_git_worktree?: boolean;
   size?: number;
   mtime?: string;
 };
@@ -880,6 +885,7 @@ export function App({ onGoHome }: AppProps) {
   const [importMenuOpen, setImportMenuOpen] = useState(false);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
   const projectAddPopoverRef = useRef<HTMLDivElement | null>(null);
+  const worktreeCreatePopoverRef = useRef<HTMLDivElement | null>(null);
   const [availableAgents, setAvailableAgents] = useState<AgentStatus[]>([]);
   const [selectedSession, setSelectedSession] = useState<SessionItem | null>(
     null,
@@ -907,7 +913,15 @@ export function App({ onGoHome }: AppProps) {
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
   const [creatingRootName, setCreatingRootName] = useState<string | null>(null);
   const [creatingRootParentPath, setCreatingRootParentPath] = useState<string | null>(null);
+  const [creatingRootKind, setCreatingRootKind] = useState<"root" | "worktree">("root");
   const [creatingRootBusy, setCreatingRootBusy] = useState(false);
+  const [worktreeBranches, setWorktreeBranches] = useState<GitBranchesPayload>({
+    branches: [],
+  });
+  const [worktreeBranchesLoading, setWorktreeBranchesLoading] = useState(false);
+  const [worktreeBranchError, setWorktreeBranchError] = useState("");
+  const [worktreeBranchMode, setWorktreeBranchMode] = useState<"new" | "existing">("new");
+  const [worktreeBranch, setWorktreeBranch] = useState("");
   const [projectAddMode, setProjectAddMode] = useState<ProjectAddMode | null>(
     null,
   );
@@ -3955,8 +3969,49 @@ export function App({ onGoHome }: AppProps) {
     setCreatingRootParentPath(
       parentPath && String(parentPath).trim() ? String(parentPath).trim() : null,
     );
+    setCreatingRootKind("root");
     setCreatingRootName(nextName);
   }, [creatingRootBusy]);
+
+  const loadWorktreeBranches = useCallback(async (rootID: string) => {
+    setWorktreeBranchesLoading(true);
+    setWorktreeBranchError("");
+    try {
+      const payload = await fetchGitBranches(rootID);
+      setWorktreeBranches(payload);
+    } catch (error) {
+      setWorktreeBranches({ branches: [] });
+      setWorktreeBranchError(error instanceof Error ? error.message : "加载分支失败");
+    } finally {
+      setWorktreeBranchesLoading(false);
+    }
+  }, []);
+
+  const handleCreateWorktreeStart = useCallback((parentPath: string) => {
+    if (creatingRootBusy) {
+      return;
+    }
+    const rootID = currentRootIdRef.current;
+    if (!rootID) {
+      return;
+    }
+    const existing = new Set(managedRootIdsRef.current);
+    const baseName = `${rootID}-worktree`;
+    let nextName = baseName;
+    let suffix = 2;
+    while (existing.has(nextName)) {
+      nextName = `${baseName}-${suffix}`;
+      suffix += 1;
+    }
+    setCreatingRootKind("worktree");
+    setCreatingRootParentPath(parentPath);
+    setCreatingRootName(nextName);
+    setWorktreeBranchMode("new");
+    setWorktreeBranch("");
+    setWorktreeBranches({ branches: [] });
+    setWorktreeBranchError("");
+    void loadWorktreeBranches(rootID);
+  }, [creatingRootBusy, loadWorktreeBranches]);
 
   const handleOpenProjectAdd = useCallback(() => {
     if (creatingRootBusy) {
@@ -4075,6 +4130,10 @@ export function App({ onGoHome }: AppProps) {
     }));
   }, [openDirectoryPicker]);
 
+  const handleOpenWorktreeLocation = useCallback(() => {
+    void openDirectoryPicker("worktree_location");
+  }, [openDirectoryPicker]);
+
   const handleSelectBlankProject = useCallback(() => {
     setProjectAddMode(null);
     handleCreateRootStart();
@@ -4086,7 +4145,25 @@ export function App({ onGoHome }: AppProps) {
     }
     setCreatingRootName(null);
     setCreatingRootParentPath(null);
+    setCreatingRootKind("root");
+    setWorktreeBranchMode("new");
+    setWorktreeBranch("");
+    setWorktreeBranchError("");
   }, [creatingRootBusy]);
+
+  useEffect(() => {
+    if (creatingRootKind !== "worktree" || creatingRootName === null) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (worktreeCreatePopoverRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      handleCreateRootCancel();
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [creatingRootKind, creatingRootName, handleCreateRootCancel]);
 
   const handleCreateRootSubmit = useCallback(async () => {
     const name = String(creatingRootName || "").trim();
@@ -4100,6 +4177,34 @@ export function App({ onGoHome }: AppProps) {
     }
     setCreatingRootBusy(true);
     try {
+      if (creatingRootKind === "worktree") {
+        const rootID = currentRootIdRef.current;
+        const parentPath = String(creatingRootParentPath || "").trim();
+        if (!rootID || !parentPath) {
+          throw new Error("缺少 worktree 创建位置");
+        }
+        const created = await createGitWorktree({
+          rootId: rootID,
+          parentPath,
+          name,
+          branchMode: worktreeBranchMode,
+          branch: worktreeBranchMode === "existing" ? worktreeBranch : "",
+        }) as ManagedRootPayload;
+        setCreatingRootName(null);
+        setCreatingRootParentPath(null);
+        setCreatingRootKind("root");
+        setWorktreeBranchMode("new");
+        setWorktreeBranch("");
+        await refreshManagedRoots();
+        if (created?.id) {
+          await actionHandlersRef.current.open_dir({
+            path: created.id,
+            root: created.id,
+            isRoot: true,
+          });
+        }
+        return;
+      }
       const targetPath =
         creatingRootParentPath && creatingRootParentPath.trim()
           ? `${creatingRootParentPath.replace(/[\\/]+$/, "")}/${name}`
@@ -4128,7 +4233,15 @@ export function App({ onGoHome }: AppProps) {
     } finally {
       setCreatingRootBusy(false);
     }
-  }, [creatingRootBusy, creatingRootName, creatingRootParentPath, refreshManagedRoots]);
+  }, [
+    creatingRootBusy,
+    creatingRootKind,
+    creatingRootName,
+    creatingRootParentPath,
+    refreshManagedRoots,
+    worktreeBranch,
+    worktreeBranchMode,
+  ]);
 
   const handleLocalDirSelect = useCallback((path: string) => {
     setLocalDirState((prev) => {
@@ -4168,6 +4281,11 @@ export function App({ onGoHome }: AppProps) {
       }));
       return;
     }
+    if (projectAddMode === "worktree_location") {
+      setProjectAddMode(null);
+      handleCreateWorktreeStart(localDirState.path);
+      return;
+    }
     if (!path) {
       return;
     }
@@ -4201,7 +4319,7 @@ export function App({ onGoHome }: AppProps) {
         error: error instanceof Error ? error.message : "添加目录失败",
       }));
     }
-  }, [handleCreateRootStart, loadLocalDirs, localDirState.adding, localDirState.path, localDirState.selectedPath, projectAddMode, refreshManagedRoots]);
+  }, [handleCreateRootStart, handleCreateWorktreeStart, loadLocalDirs, localDirState.adding, localDirState.path, localDirState.selectedPath, projectAddMode, refreshManagedRoots]);
 
   const handleGitHubImportStart = useCallback(async () => {
     const url = String(githubImportState.url || "").trim();
@@ -4274,7 +4392,8 @@ export function App({ onGoHome }: AppProps) {
         localDisabledAddedRoot={projectAddMode === "local"}
         localBrowseOnly={
           projectAddMode === "blank_location" ||
-          projectAddMode === "github_location"
+          projectAddMode === "github_location" ||
+          projectAddMode === "worktree_location"
         }
         githubState={githubImportState}
         onGitHubUrlChange={(value) =>
@@ -4318,6 +4437,25 @@ export function App({ onGoHome }: AppProps) {
       reportError(
         "root.delete_failed",
         String((err as Error)?.message || "移除项目失败"),
+      );
+    }
+  }, [refreshManagedRoots]);
+
+  const handleRemoveCurrentWorktree = useCallback(async () => {
+    const rootID = currentRootIdRef.current;
+    if (!rootID) {
+      return;
+    }
+    if (!window.confirm(`确认移除 worktree“${rootID}”？\n这会删除该 worktree 目录，并从 MindFS 项目列表中移除。`)) {
+      return;
+    }
+    try {
+      await removeGitWorktree(rootID);
+      await refreshManagedRoots();
+    } catch (err) {
+      reportError(
+        "git.worktree_remove_failed",
+        String((err as Error)?.message || "移除 worktree 失败"),
       );
     }
   }, [refreshManagedRoots]);
@@ -6156,6 +6294,124 @@ export function App({ onGoHome }: AppProps) {
     />
   );
 
+  const worktreeBranchSelector =
+    creatingRootKind === "worktree" ? (
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <select
+          value={worktreeBranchMode === "new" ? "__new__" : worktreeBranch}
+          disabled={creatingRootBusy}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value === "__new__") {
+              setWorktreeBranchMode("new");
+              setWorktreeBranch("");
+              return;
+            }
+            setWorktreeBranchMode("existing");
+            setWorktreeBranch(value);
+          }}
+          style={{
+            width: "100%",
+            borderRadius: "7px",
+            border: "1px solid var(--border-color)",
+            background: "var(--menu-bg)",
+            color: "var(--text-primary)",
+            fontSize: "12px",
+            padding: "6px 8px",
+            outline: "none",
+          }}
+        >
+          <option value="__new__">创建新分支</option>
+          {worktreeBranches.branches.map((branch) => (
+            <option key={branch.name} value={branch.name}>
+              {branch.current ? `${branch.name} 当前` : branch.name}
+            </option>
+          ))}
+        </select>
+        {worktreeBranchesLoading ? (
+          <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>加载分支中...</span>
+        ) : worktreeBranchError ? (
+          <span style={{ fontSize: "11px", color: "#b45309" }}>{worktreeBranchError}</span>
+        ) : null}
+      </div>
+    ) : null;
+
+  const worktreeCreateOverlay =
+    creatingRootKind === "worktree" && creatingRootName !== null ? (
+      <div
+        ref={worktreeCreatePopoverRef}
+        style={{
+          width: "248px",
+          maxWidth: "calc(100vw - 32px)",
+          padding: "10px",
+          borderRadius: "12px",
+          border: "1px solid var(--border-color)",
+          background: "var(--menu-bg)",
+          boxShadow: "0 12px 30px rgba(15, 23, 42, 0.14)",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+        }}
+      >
+        <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-primary)" }}>
+          worktree
+        </div>
+        <input
+          value={creatingRootName}
+          disabled={creatingRootBusy}
+          autoFocus
+          onChange={(event) => setCreatingRootName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void handleCreateRootSubmit();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              handleCreateRootCancel();
+            }
+          }}
+          style={{
+            width: "100%",
+            borderRadius: "8px",
+            border: "1px solid var(--border-color)",
+            background: "transparent",
+            color: "var(--text-primary)",
+            fontSize: "12px",
+            padding: "8px 10px",
+            outline: "none",
+            boxSizing: "border-box",
+          }}
+        />
+        {worktreeBranchSelector}
+        <div style={{ display: "flex" }}>
+          <button
+            type="button"
+            disabled={creatingRootBusy || !String(creatingRootName || "").trim()}
+            onClick={() => {
+              void handleCreateRootSubmit();
+            }}
+            style={{
+              width: "100%",
+              border: "none",
+              background: creatingRootBusy || !String(creatingRootName || "").trim()
+                ? "rgba(59, 130, 246, 0.65)"
+                : "var(--accent-color)",
+              color: "#fff",
+              borderRadius: "8px",
+              padding: "8px 10px",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: creatingRootBusy || !String(creatingRootName || "").trim()
+                ? "not-allowed"
+                : "pointer",
+            }}
+          >
+            {creatingRootBusy ? "处理中..." : "创建"}
+          </button>
+        </div>
+      </div>
+    ) : null;
+
   let workspaceView: React.ReactNode;
   const showGitStatusPanel = !gitDiff && !file && !!currentRootId;
   const gitStatusAvailable = filteredGitStatus?.available === true;
@@ -6389,6 +6645,15 @@ export function App({ onGoHome }: AppProps) {
         }}
         onUploadFiles={handleTreeUpload}
         onRemoveRoot={handleRemoveCurrentRoot}
+        isGitRepo={managedRootByIdRef.current[currentRootId || ""]?.is_git_repo === true}
+        isGitWorktree={managedRootByIdRef.current[currentRootId || ""]?.is_git_worktree === true}
+        onCreateWorktree={handleOpenWorktreeLocation}
+        onRemoveWorktree={handleRemoveCurrentWorktree}
+        menuOverlay={
+          projectAddMode === "worktree_location"
+            ? projectAddOverlay
+            : worktreeCreateOverlay
+        }
         onItemClick={(e) =>
           e.is_dir
             ? actionHandlers.open_dir({ path: e.path })
@@ -6814,7 +7079,9 @@ export function App({ onGoHome }: AppProps) {
             selectedPath={file?.path}
             rootId={currentRootId}
             rootSessionIndicators={rootSessionIndicators}
-            creatingRootName={creatingRootName}
+            creatingRootName={
+              creatingRootKind === "worktree" ? null : creatingRootName
+            }
             creatingRootBusy={creatingRootBusy}
             onOpenProjectAdd={handleOpenProjectAdd}
             onCreateRootStart={handleCreateRootStart}
@@ -6823,7 +7090,9 @@ export function App({ onGoHome }: AppProps) {
               void handleCreateRootSubmit();
             }}
             onCreateRootCancel={handleCreateRootCancel}
-            projectAddOverlay={projectAddOverlay}
+            projectAddOverlay={
+              projectAddMode === "worktree_location" ? null : projectAddOverlay
+            }
             onSelectFile={(e, r) => {
               actionHandlers.open({ path: e.path, root: r });
               if (isMobile) setIsLeftOpen(false);

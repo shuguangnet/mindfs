@@ -29,6 +29,16 @@ export type GitDiffPayload = CachedGitDiffPayload & {
   content: string;
 };
 
+export type GitBranchItem = {
+  name: string;
+  current: boolean;
+};
+
+export type GitBranchesPayload = {
+  current?: string;
+  branches: GitBranchItem[];
+};
+
 export async function fetchGitStatus(rootId: string): Promise<GitStatusPayload> {
   const payload = await protectedJSON<any>(appURL("/api/git/status", new URLSearchParams({ root: rootId })));
   return {
@@ -37,6 +47,49 @@ export async function fetchGitStatus(rootId: string): Promise<GitStatusPayload> 
     dirty_count: Number(payload?.dirty_count) || 0,
     items: Array.isArray(payload?.items) ? payload.items as GitStatusItem[] : [],
   };
+}
+
+export async function fetchGitBranches(rootId: string): Promise<GitBranchesPayload> {
+  const payload = await protectedJSON<any>(appURL("/api/git/branches", new URLSearchParams({ root: rootId })));
+  return {
+    current: typeof payload?.current === "string" ? payload.current : undefined,
+    branches: Array.isArray(payload?.branches)
+      ? payload.branches
+          .map((item: any) => ({
+            name: typeof item?.name === "string" ? item.name : "",
+            current: item?.current === true,
+          }))
+          .filter((item: GitBranchItem) => !!item.name)
+      : [],
+  };
+}
+
+export async function createGitWorktree(input: {
+  rootId: string;
+  parentPath: string;
+  name: string;
+  branchMode: "new" | "existing";
+  branch?: string;
+}): Promise<any> {
+  return protectedJSON<any>(appURL("/api/git/worktrees"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      root: input.rootId,
+      parent_path: input.parentPath,
+      name: input.name,
+      branch_mode: input.branchMode,
+      branch: input.branch || "",
+    }),
+  });
+}
+
+export async function removeGitWorktree(rootId: string): Promise<any> {
+  return protectedJSON<any>(appURL("/api/git/worktrees"), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ root: rootId }),
+  });
 }
 
 export function buildGitDiffCacheSignature(item?: Partial<GitStatusItem> | null): string {

@@ -60,6 +60,8 @@ type FileTreeProps = {
   onToggleDir?: (entry: FileEntry, rootId: string) => void;
   creatingRootName?: string | null;
   creatingRootBusy?: boolean;
+  creatingRootExtraContent?: React.ReactNode;
+  creatingRootSubmitOnBlur?: boolean;
   onCreateRootStart?: () => void;
   onOpenProjectAdd?: () => void;
   onCreateRootNameChange?: (name: string) => void;
@@ -151,6 +153,8 @@ export function FileTree({
   onToggleDir,
   creatingRootName = null,
   creatingRootBusy = false,
+  creatingRootExtraContent = null,
+  creatingRootSubmitOnBlur = true,
   onCreateRootStart,
   onOpenProjectAdd,
   onCreateRootNameChange,
@@ -591,7 +595,7 @@ export function FileTree({
               padding: "6px 8px",
               paddingLeft: 8,
               display: "flex",
-              alignItems: "center",
+              alignItems: creatingRootExtraContent ? "flex-start" : "center",
               gap: "8px",
               width: "100%",
               color: "var(--accent-color)",
@@ -604,37 +608,80 @@ export function FileTree({
             <div style={{ width: 20, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <ChevronRight isOpen={false} />
             </div>
-            <input
-              ref={createInputRef}
-              value={creatingRootName}
-              disabled={creatingRootBusy}
-              onChange={(event) => onCreateRootNameChange?.(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  onCreateRootSubmit?.();
-                } else if (event.key === "Escape") {
-                  event.preventDefault();
-                  onCreateRootCancel?.();
-                }
-              }}
-              onBlur={() => {
-                if (!creatingRootBusy) {
-                  onCreateRootSubmit?.();
-                }
-              }}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                border: "none",
-                background: "transparent",
-                color: "var(--text-primary)",
-                fontSize: "13px",
-                fontWeight: 600,
-                outline: "none",
-                padding: 0,
-              }}
-            />
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "8px" }}>
+              <input
+                ref={createInputRef}
+                value={creatingRootName}
+                disabled={creatingRootBusy}
+                onChange={(event) => onCreateRootNameChange?.(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    onCreateRootSubmit?.();
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    onCreateRootCancel?.();
+                  }
+                }}
+                onBlur={() => {
+                  if (!creatingRootBusy && creatingRootSubmitOnBlur) {
+                    onCreateRootSubmit?.();
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--text-primary)",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  outline: "none",
+                  padding: 0,
+                }}
+              />
+              {creatingRootExtraContent}
+            </div>
+            {!creatingRootExtraContent ? null : (
+              <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+                <button
+                  type="button"
+                  disabled={creatingRootBusy}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onCreateRootSubmit?.()}
+                  style={{
+                    border: "none",
+                    background: "var(--accent-color)",
+                    color: "#fff",
+                    borderRadius: "6px",
+                    padding: "4px 7px",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: creatingRootBusy ? "not-allowed" : "pointer",
+                    opacity: creatingRootBusy ? 0.6 : 1,
+                  }}
+                >
+                  创建
+                </button>
+                <button
+                  type="button"
+                  disabled={creatingRootBusy}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onCreateRootCancel?.()}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--text-secondary)",
+                    borderRadius: "6px",
+                    padding: "4px 6px",
+                    fontSize: "11px",
+                    cursor: creatingRootBusy ? "not-allowed" : "pointer",
+                    opacity: creatingRootBusy ? 0.6 : 1,
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            )}
           </div>
         </li>
       ) : null}

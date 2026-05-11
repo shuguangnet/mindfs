@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,16 @@ type StatusResult struct {
 	Branch     string       `json:"branch,omitempty"`
 	DirtyCount int          `json:"dirty_count"`
 	Items      []StatusItem `json:"items"`
+}
+
+type BranchItem struct {
+	Name    string `json:"name"`
+	Current bool   `json:"current"`
+}
+
+type BranchListResult struct {
+	Current  string       `json:"current,omitempty"`
+	Branches []BranchItem `json:"branches"`
 }
 
 type DiffResult struct {
@@ -82,6 +93,94 @@ func HasRepo(ctx context.Context, rootPath string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+func IsWorktree(rootPath string) (bool, error) {
+	gitPath := filepath.Join(filepath.Clean(rootPath), ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return info.Mode().IsRegular(), nil
+}
+
+func ListBranches(ctx context.Context, rootPath string) (BranchListResult, error) {
+	repo, err := loadRepoContext(ctx, rootPath)
+	if err != nil {
+		return BranchListResult{}, err
+	}
+	output, err := runGit(ctx, repo.repoRoot, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return BranchListResult{}, err
+	}
+	seen := map[string]struct{}{}
+	branches := make([]BranchItem, 0)
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		name := strings.TrimSpace(scanner.Text())
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		branches = append(branches, BranchItem{Name: name, Current: name == repo.branch})
+	}
+	if err := scanner.Err(); err != nil {
+		return BranchListResult{}, err
+	}
+	return BranchListResult{Current: repo.branch, Branches: branches}, nil
+}
+
+func AddWorktree(ctx context.Context, rootPath, targetPath, branchMode, branch string) error {
+	if _, err := loadRepoContext(ctx, rootPath); err != nil {
+		return err
+	}
+	args := []string{"worktree", "add"}
+	if branchMode == "new" {
+		if strings.TrimSpace(branch) == "" {
+			return errors.New("branch required")
+		}
+		args = append(args, "-b", branch)
+	} else if strings.TrimSpace(branch) == "" {
+		return errors.New("branch required")
+	}
+	args = append(args, targetPath)
+	if branchMode != "new" && strings.TrimSpace(branch) != "" {
+		args = append(args, branch)
+	}
+	_, err := runGit(ctx, rootPath, args...)
+	return err
+}
+
+func RemoveWorktree(ctx context.Context, rootPath string) error {
+	isWorktree, err := IsWorktree(rootPath)
+	if err != nil {
+		return err
+	}
+	if !isWorktree {
+		return errors.New("current root is not a git worktree")
+	}
+	commonDir, err := runGit(ctx, rootPath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	commonDir = strings.TrimSpace(commonDir)
+	if commonDir == "" {
+		return errors.New("empty git common dir")
+	}
+	cleanRoot := filepath.Clean(rootPath)
+	cmd := exec.CommandContext(ctx, "git", "--git-dir", commonDir, "worktree", "remove", cleanRoot)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[git] command.error dir=%q args=%q err=%v output=%q", "", cmd.Args[1:], err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("git %s failed: %w: %s", strings.Join(cmd.Args[1:], " "), err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func ReadDiff(ctx context.Context, rootPath, relPath string) (DiffResult, error) {
@@ -440,6 +539,7 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Printf("[git] command.error dir=%q args=%q err=%v output=%q", dir, append([]string{"-C", dir}, args...), err, strings.TrimSpace(string(out)))
 		return "", formatGitError(err, out)
 	}
 	return string(out), nil

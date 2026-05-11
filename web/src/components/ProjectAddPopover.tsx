@@ -5,7 +5,8 @@ export type ProjectAddMode =
   | "local"
   | "blank_location"
   | "github_location"
-  | "github";
+  | "github"
+  | "worktree_location";
 
 export type LocalDirItem = {
   name: string;
@@ -518,7 +519,7 @@ export function ProjectAddPopover({
       />
     );
   }
-  if (mode === "local" || mode === "blank_location" || mode === "github_location") {
+  if (mode === "local" || mode === "blank_location" || mode === "github_location" || mode === "worktree_location") {
     return (
       <LocalPanel
         localState={localState}
