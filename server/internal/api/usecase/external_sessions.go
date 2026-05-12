@@ -168,7 +168,7 @@ func (s *Service) ImportExternalSession(ctx context.Context, in ImportExternalSe
 		if role != "user" && role != "agent" {
 			continue
 		}
-		if err := manager.AddExchangeForAgentAt(ctx, created, role, exchange.Content, in.Agent, "", "", exchange.Timestamp); err != nil {
+		if err := manager.AddExchangeForAgentAt(ctx, created, role, exchange.Content, in.Agent, "", "", "", exchange.Timestamp); err != nil {
 			return ImportExternalSessionOutput{}, err
 		}
 	}
@@ -249,7 +249,7 @@ func (s *Service) SyncExternalSessionDelta(ctx context.Context, in SyncExternalS
 		if exchange.Timestamp.IsZero() || !exchange.Timestamp.After(lastTimestamp) {
 			continue
 		}
-		if err := manager.AddExchangeForAgentAt(ctx, current, role, exchange.Content, agentName, "", "", exchange.Timestamp); err != nil {
+		if err := manager.AddExchangeForAgentAt(ctx, current, role, exchange.Content, agentName, "", "", "", exchange.Timestamp); err != nil {
 			return out, err
 		}
 		importedCount++

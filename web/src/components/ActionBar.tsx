@@ -19,6 +19,7 @@ type SessionInfo = {
   model?: string;
   mode?: string;
   effort?: string;
+  fast_service?: string;
   pending?: boolean;
 };
 
@@ -60,6 +61,7 @@ type ActionBarProps = {
     model?: string,
     agentMode?: string,
     effort?: string,
+    fastService?: "" | "on" | "off",
   ) => void | Promise<void>;
   onCancelCurrentTurn?: (sessionKey: string) => void;
   onNewSession?: () => void;
@@ -87,7 +89,8 @@ function getAgentDefaults(agent?: AgentStatus | null) {
   return {
     model: agent?.default_model_id || agent?.current_model_id || "",
     effort: agent?.default_effort || "",
-  };
+    fastService: (agent?.default_fast_service || "") as "" | "on" | "off",
+  } as const;
 }
 
 function buildPendingAttachment(file: File): PendingAttachment {
@@ -156,6 +159,7 @@ export function ActionBar({
   const [model, setModel] = useState("");
   const [agentMode, setAgentMode] = useState("");
   const [effort, setEffort] = useState("");
+  const [fastService, setFastService] = useState<"" | "on" | "off">("");
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [serializedInput, setSerializedInput] = useState("");
   const [activeToken, setActiveToken] = useState<{ type: "file" | "slash" | "prompt"; query: string } | null>(null);
@@ -207,7 +211,8 @@ export function ActionBar({
     const nextModel = currentSession.model || "";
     const nextAgentMode = currentSession.mode || "";
     const nextEffort = currentSession.effort || "";
-    const signature = `${sessionKey || ""}::${nextMode}::${nextAgent}::${nextModel}::${nextAgentMode}::${nextEffort}`;
+    const nextFastService = (currentSession.fast_service || "") as "" | "on" | "off";
+    const signature = `${sessionKey || ""}::${nextMode}::${nextAgent}::${nextModel}::${nextAgentMode}::${nextEffort}::${nextFastService}`;
     if (syncedSessionSignatureRef.current === signature) {
       return;
     }
@@ -217,6 +222,7 @@ export function ActionBar({
     setModel(nextModel);
     setAgentMode(nextAgentMode);
     setEffort(nextEffort);
+    setFastService(nextFastService);
   }, [currentSession]);
 
   useEffect(() => {
@@ -243,6 +249,7 @@ export function ActionBar({
     setModel(defaults.model);
     setAgentMode("");
     setEffort(defaults.effort);
+    setFastService(defaults.fastService);
   }, [agent, agents, currentSession]);
 
   useEffect(() => {
@@ -269,6 +276,7 @@ export function ActionBar({
   const isCodexEffortAgent = selectedAgent?.name === "codex";
   const supportsEffort =
     availableEfforts.length > 0 && !!selectedModelInfo?.supportEffort;
+  const supportsServiceTier = !!selectedAgent?.supports_fast_service;
 
   useEffect(() => {
     if (!supportsEffort) {
@@ -277,16 +285,19 @@ export function ActionBar({
       }
       return;
     }
-    if (isCodexEffortAgent) {
-      if (!effort || !availableEfforts.includes(effort)) {
-        setEffort("medium");
-      }
+    if (effort && !availableEfforts.includes(effort)) {
+      setEffort(getAgentDefaults(selectedAgent).effort);
+    }
+  }, [supportsEffort, effort, availableEfforts, selectedAgent, isCodexEffortAgent]);
+
+  useEffect(() => {
+    if (!supportsServiceTier) {
       return;
     }
-    if (effort && !availableEfforts.includes(effort)) {
-      setEffort("");
+    if (fastService === "on" && !selectedAgent?.supports_fast_service) {
+      setFastService(getAgentDefaults(selectedAgent).fastService);
     }
-  }, [supportsEffort, effort, availableEfforts, isCodexEffortAgent]);
+  }, [supportsServiceTier, fastService, selectedAgent]);
 
   useEffect(() => () => candidateAbortRef.current?.abort(), []);
 
@@ -406,6 +417,7 @@ export function ActionBar({
         model || undefined,
         agentMode || undefined,
         supportsEffort ? effort || undefined : undefined,
+        supportsServiceTier ? fastService : undefined,
       );
       editorRef.current?.clear();
       setSerializedInput("");
@@ -432,7 +444,7 @@ export function ActionBar({
         requestAnimationFrame(() => editorRef.current?.focus());
       }
     }
-  }, [serializedInput, pendingAttachments, isConnected, sending, agent, model, agentMode, onSendMessage, mode, currentRootId, supportsEffort, effort, isMobile]);
+  }, [serializedInput, pendingAttachments, isConnected, sending, agent, model, agentMode, onSendMessage, mode, currentRootId, supportsEffort, effort, supportsServiceTier, fastService, isMobile]);
 
   const handleCancel = useCallback(async () => {
     const sessionKey = currentSession?.key;
@@ -532,6 +544,7 @@ export function ActionBar({
     setModel(defaults.model);
     setAgentMode("");
     setEffort(defaults.effort);
+    setFastService(defaults.fastService);
     syncedSessionSignatureRef.current = "";
   }, [agent, agents]);
 
@@ -815,9 +828,12 @@ export function ActionBar({
                   setModel(nextModel || defaults.model);
                   setAgentMode("");
                   setEffort(defaults.effort);
+                  setFastService(defaults.fastService);
                 }}
                 onModeChange={(nextAgentMode) => setAgentMode(nextAgentMode || "")}
                 onEffortChange={(nextEffort) => setEffort(nextEffort || "")}
+                fastService={fastService}
+                onFastServiceChange={(nextFastService) => setFastService(nextFastService || "")}
                 compact={true}
                 warnUnavailable={isSelectedAgentUnavailable}
               />

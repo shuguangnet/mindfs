@@ -23,7 +23,7 @@
 
 ### Agent 会话
 
-- **多 Agent 支持**：Claude Code · OpenAI Codex · Gemini CLI · Cursor · GitHub Copilot · Cline · Augment · Kimi · Kiro · Qwen · Qoder · Pi · OpenCode · OpenClaw，自动探测已安装的 Agent。
+- **多 Agent 支持**：Claude Code · OpenAI Codex · Gemini CLI · Cursor · Copilot · Cline · Augment · Kimi · Kiro · Qwen · Qoder · Pi · OpenCode · OpenClaw，自动探测已安装的 Agent。
 - **实时流式输出**：逐 token 推送，工具调用、思考过程、权限请求均以结构化卡片实时渲染，上下文窗口实时余量。
 - **灵活切换**：会话中随时切换 Agent 或模型，多 Agent 共享同一上下文，无需重新描述背景。
 - **会话搜索**：支持按会话标题或对话内容搜索，并可直接跳转到命中的会话和片段。
@@ -36,7 +36,7 @@
 
 - **多 Project**：同时托管多个目录，会话按 Project 独立组织，互不干扰。
 - **数据自托管**：所有对话历史、文件元数据、视图配置均存储在 Project 目录的 `.mindfs/` 子目录下，迁移和备份只需复制目录本身。
-- **文件树浏览**：完整的目录树导航，支持文件预览，Markdown、图片、代码均有对应渲染器。
+- **文件树浏览**：完整的目录树导航，支持文件预览，Markdown、图片、代码均有对应渲染器。支持 git status, git worktree。
 
 ### 交互优化
 

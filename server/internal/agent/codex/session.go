@@ -19,6 +19,7 @@ type OpenOptions struct {
 	SessionKey      string
 	Model           string
 	Effort          string
+	FastService     string
 	Probe           bool
 	RootPath        string
 	Command         string
@@ -44,6 +45,7 @@ func (r *Runtime) OpenSession(_ context.Context, opts OpenOptions) (types.Sessio
 	threadOptions := codexsdk.ThreadOptions{
 		Model:                strings.TrimSpace(opts.Model),
 		ModelReasoningEffort: codexsdk.ModelReasoningEffort(strings.TrimSpace(opts.Effort)),
+		FastService:          strings.TrimSpace(opts.FastService),
 		SandboxMode:          codexsdk.SandboxModeFullAccess,
 		WorkingDirectory:     opts.RootPath,
 		ApprovalPolicy:       codexsdk.ApprovalModeNever,
@@ -273,6 +275,7 @@ func (s *session) ListModels(ctx context.Context) (types.ModelList, error) {
 	}
 	models := make([]types.ModelInfo, 0, len(resp.Data))
 	currentModelID := ""
+	defaults, _ := s.RuntimeDefaults(ctx)
 	for _, model := range resp.Data {
 		name := strings.TrimSpace(model.DisplayName)
 		if name == "" {
@@ -289,10 +292,47 @@ func (s *session) ListModels(ctx context.Context) (types.ModelList, error) {
 			currentModelID = model.Model
 		}
 	}
+	if strings.TrimSpace(defaults.Model) != "" {
+		currentModelID = strings.TrimSpace(defaults.Model)
+	}
 	return types.ModelList{
 		CurrentModelID: currentModelID,
 		Models:         models,
 	}, nil
+}
+
+func (s *session) RuntimeDefaults(ctx context.Context) (types.RuntimeDefaults, error) {
+	if s == nil || s.client == nil {
+		return types.RuntimeDefaults{}, errors.New("codex session not initialized")
+	}
+	params := codexsdk.ConfigReadParams{
+		IncludeLayers: false,
+		Cwd:           strings.TrimSpace(s.threadOpts.WorkingDirectory),
+	}
+	resp, err := s.client.ReadConfig(ctx, params)
+	if err != nil {
+		log.Printf("[codex/runtime_defaults] config.read.error cwd=%q err=%v", params.Cwd, err)
+		return types.RuntimeDefaults{}, err
+	}
+	defaults := types.RuntimeDefaults{}
+	if resp == nil {
+		log.Printf("[codex/runtime_defaults] config.read.empty cwd=%q", params.Cwd)
+		return defaults, nil
+	}
+	if resp.Config.Model != nil {
+		defaults.Model = strings.TrimSpace(*resp.Config.Model)
+	}
+	if resp.Config.ModelReasoningEffort != nil {
+		defaults.Effort = strings.TrimSpace(string(*resp.Config.ModelReasoningEffort))
+	}
+	if resp.Config.ServiceTier != nil {
+		if strings.TrimSpace(*resp.Config.ServiceTier) == "fast" {
+			defaults.FastService = "on"
+		} else {
+			defaults.FastService = "off"
+		}
+	}
+	return defaults, nil
 }
 
 func (s *session) SetMode(_ context.Context, _ string) error {

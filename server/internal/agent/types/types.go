@@ -60,10 +60,21 @@ type OpenSessionInput struct {
 	Model          string
 	Mode           string
 	Effort         string
+	FastService    string
 	Probe          bool
 	RootPath       string
 	AgentSessionID string
 	AgentCtxSeq    int
+}
+
+type RuntimeDefaults struct {
+	Model       string `json:"model,omitempty"`
+	Effort      string `json:"effort,omitempty"`
+	FastService string `json:"fast_service,omitempty"`
+}
+
+type DefaultsReader interface {
+	RuntimeDefaults(ctx context.Context) (RuntimeDefaults, error)
 }
 
 type ExternalSessionSummary struct {

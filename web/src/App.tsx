@@ -89,6 +89,13 @@ import { fetchAgents, type AgentStatus } from "./services/agents";
 
 // 类型定义
 type SessionMode = "chat" | "plugin";
+
+function normalizeFastService(
+  value: unknown,
+): "" | "on" | "off" {
+  return value === "on" || value === "off" ? value : "";
+}
+
 export type SessionItem = {
   key: string;
   session_key: string;
@@ -99,6 +106,7 @@ export type SessionItem = {
   model?: string;
   mode?: string;
   effort?: string;
+  fast_service?: "" | "on" | "off";
   scope?: string;
   purpose?: string;
   created_at?: string;
@@ -121,6 +129,7 @@ export type SessionItem = {
     model?: string;
     mode?: string;
     effort?: string;
+    fast_service?: "" | "on" | "off";
     context_window?: {
       totalTokens: number;
       modelContextWindow: number;
@@ -131,7 +140,7 @@ export type SessionItem = {
 
 function latestExchangeText(
   exchanges: unknown,
-  field: "agent" | "mode" | "effort",
+  field: "agent" | "mode" | "effort" | "fast_service",
 ): string {
   if (!Array.isArray(exchanges)) {
     return "";
@@ -180,6 +189,9 @@ function toSessionItem(
       typeof session?.effort === "string" && session.effort.trim()
         ? session.effort
         : latestExchangeText(session?.exchanges, "effort"),
+    fast_service:
+      normalizeFastService(session?.fast_service) ||
+      normalizeFastService(latestExchangeText(session?.exchanges, "fast_service")),
     scope: typeof session?.scope === "string" ? session.scope : "",
     purpose: typeof session?.purpose === "string" ? session.purpose : "",
     created_at:
@@ -218,6 +230,7 @@ type Exchange = {
   model?: string;
   mode?: string;
   effort?: string;
+  fast_service?: "" | "on" | "off";
   content?: string;
   context_window?: {
     totalTokens: number;
@@ -235,6 +248,7 @@ type PendingSend = {
   model?: string;
   agentMode?: string;
   effort?: string;
+  fastService?: "" | "on" | "off";
   message: string;
   timestamp: string;
   requestId?: string;
@@ -247,6 +261,7 @@ type ViewerSelection = {
   startLine?: number;
   endLine?: number;
 };
+
 type AttachedFileContext = {
   filePath: string;
   fileName: string;
@@ -1700,6 +1715,7 @@ export function App({ onGoHome }: AppProps) {
       model?: string,
       agentMode?: string,
       effort?: string,
+      fastService?: "" | "on" | "off",
     ) => {
       if (!rootID || !sessionKey || !agent) return;
       const cacheKey = rootSessionKey(rootID, sessionKey);
@@ -1711,6 +1727,7 @@ export function App({ onGoHome }: AppProps) {
           model: model || "",
           mode: agentMode || "",
           effort: effort || "",
+          fast_service: fastService || "",
           updated_at: new Date().toISOString(),
         } as Session;
       }
@@ -1725,6 +1742,7 @@ export function App({ onGoHome }: AppProps) {
           model: model || "",
           mode: agentMode || "",
           effort: effort || "",
+          fast_service: fastService || "",
         } as SessionItem;
       });
       const current = drawerSessionByRootRef.current[rootID];
@@ -1734,7 +1752,8 @@ export function App({ onGoHome }: AppProps) {
         (current.agent !== agent ||
           (current as any).model !== (model || "") ||
           (current as any).mode !== (agentMode || "") ||
-          (current as any).effort !== (effort || ""))
+          (current as any).effort !== (effort || "") ||
+          ((current as any).fast_service || "") !== (fastService || ""))
       ) {
         setDrawerSessionForRoot(rootID, {
           ...(current as any),
@@ -1742,6 +1761,7 @@ export function App({ onGoHome }: AppProps) {
           model: model || "",
           mode: agentMode || "",
           effort: effort || "",
+          fast_service: fastService || "",
         } as Session);
       }
       bumpCacheVersion();
@@ -3096,6 +3116,7 @@ export function App({ onGoHome }: AppProps) {
       model?: string,
       agentMode?: string,
       effort?: string,
+      fastService?: "" | "on" | "off",
     ) => {
       const activeRoot = currentRootIdRef.current;
       if (!activeRoot) return;
@@ -3150,7 +3171,8 @@ export function App({ onGoHome }: AppProps) {
         effectiveAgent = agent,
         effectiveModel = model || "",
         effectiveAgentMode = agentMode || "",
-        effectiveEffort = effort || "";
+        effectiveEffort = effort || "",
+        effectiveFastService = (fastService || "") as "" | "on" | "off";
       if (sendSessionKey && session) {
         const targetSessionKey = sendSessionKey;
         const previousAgent = session.agent || "";
@@ -3170,6 +3192,13 @@ export function App({ onGoHome }: AppProps) {
         effectiveEffort =
           (useTargetSessionDefaults ? (session as any).effort || "" : effort) ||
           (effectiveAgent === previousAgent ? (session as any).effort || "" : "");
+        effectiveFastService =
+          (useTargetSessionDefaults
+            ? (((session as any).fast_service || "") as "" | "on" | "off")
+            : ((fastService || "") as "" | "on" | "off")) ||
+          (effectiveAgent === previousAgent
+            ? (((session as any).fast_service || "") as "" | "on" | "off")
+            : "");
         updateSessionAgentForKey(
           activeRoot,
           targetSessionKey,
@@ -3177,6 +3206,7 @@ export function App({ onGoHome }: AppProps) {
           effectiveModel,
           effectiveAgentMode,
           effectiveEffort,
+          effectiveFastService,
         );
         session = {
           ...(session as any),
@@ -3184,6 +3214,7 @@ export function App({ onGoHome }: AppProps) {
           model: effectiveModel,
           mode: effectiveAgentMode,
           effort: effectiveEffort,
+          fast_service: effectiveFastService,
         } as Session;
         setBoundSessionForRoot(activeRoot, targetSessionKey);
         setSelectedPendingByKey(targetSessionKey, true);
@@ -3201,6 +3232,7 @@ export function App({ onGoHome }: AppProps) {
           model: effectiveModel,
           mode: effectiveAgentMode,
           effort: effectiveEffort,
+          fast_service: effectiveFastService,
           name: "新会话",
           pending: true,
         } as any;
@@ -3215,6 +3247,7 @@ export function App({ onGoHome }: AppProps) {
         model: effectiveModel,
         mode: effectiveAgentMode,
         effort: effectiveEffort,
+        fast_service: effectiveFastService,
         content: message,
         timestamp: now,
         pending_ack: true,
@@ -3226,6 +3259,7 @@ export function App({ onGoHome }: AppProps) {
         model: effectiveModel,
         agentMode: effectiveAgentMode,
         effort: effectiveEffort,
+        fastService: effectiveFastService,
         message,
         timestamp: now,
         requestId,
@@ -3239,13 +3273,14 @@ export function App({ onGoHome }: AppProps) {
         const prevExchanges = Array.isArray((cached as any).exchanges)
           ? ((cached as any).exchanges as Exchange[])
           : [];
-          sessionCacheRef.current[ck] = {
-            ...(cached as any),
-            exchanges: [...prevExchanges, userEx],
-            mode: effectiveAgentMode,
-            effort: effectiveEffort,
-            updated_at: now,
-          } as Session;
+        sessionCacheRef.current[ck] = {
+          ...(cached as any),
+          exchanges: [...prevExchanges, userEx],
+          mode: effectiveAgentMode,
+          effort: effectiveEffort,
+          fast_service: effectiveFastService,
+          updated_at: now,
+        } as Session;
         session = sessionCacheRef.current[ck];
         bumpCacheVersion();
       } else {
@@ -3257,6 +3292,7 @@ export function App({ onGoHome }: AppProps) {
           model: effectiveModel,
           agentMode: effectiveAgentMode,
           effort: effectiveEffort,
+          fastService: effectiveFastService,
           message,
           timestamp: now,
           requestId,
@@ -3327,6 +3363,7 @@ export function App({ onGoHome }: AppProps) {
         effectiveModel || undefined,
         effectiveAgentMode || undefined,
         effectiveEffort || undefined,
+        effectiveFastService,
         context,
         requestId,
       );
@@ -5025,6 +5062,7 @@ export function App({ onGoHome }: AppProps) {
             model: pending.model,
             mode: pending.agentMode,
             effort: pending.effort,
+            fast_service: pending.fastService || "",
           };
           const cached =
             sessionCacheRef.current[ck] ||
@@ -5035,6 +5073,7 @@ export function App({ onGoHome }: AppProps) {
               model: pending.model,
               mode: pending.agentMode,
               effort: pending.effort,
+              fast_service: pending.fastService || "",
               name: pendingName,
               created_at: pending.timestamp,
               updated_at: pending.timestamp,
@@ -5345,7 +5384,7 @@ export function App({ onGoHome }: AppProps) {
             );
           }
           const markAccepted = (
-            sess: Session | null | undefined,
+            sess: Session | SessionItem | null | undefined,
           ): Session | null => {
             if (!sess) return null;
             const exchanges = Array.isArray((sess as any).exchanges)
@@ -5463,6 +5502,9 @@ export function App({ onGoHome }: AppProps) {
                 model: sessionMeta?.model || exchange?.model || "",
                 mode: sessionMeta?.mode || exchange?.mode || "",
                 effort: sessionMeta?.effort || exchange?.effort || "",
+                fast_service:
+                  normalizeFastService(sessionMeta?.fast_service) ||
+                  normalizeFastService(exchange?.fast_service),
                 name: sessionMeta?.name || "新会话",
                 created_at:
                   sessionMeta?.created_at ||
@@ -5507,6 +5549,10 @@ export function App({ onGoHome }: AppProps) {
                 exchange?.effort ||
                 (cached as any).effort ||
                 "",
+              fast_service:
+                normalizeFastService(sessionMeta?.fast_service) ||
+                normalizeFastService(exchange?.fast_service) ||
+                normalizeFastService((cached as any).fast_service),
               exchanges: duplicate
                 ? prevExchanges
                 : [
@@ -5517,6 +5563,7 @@ export function App({ onGoHome }: AppProps) {
                       model: exchange?.model || "",
                       mode: exchange?.mode || "",
                       effort: exchange?.effort || "",
+                      fast_service: exchange?.fast_service || "",
                       content: exchange?.content || "",
                       timestamp:
                         exchange?.timestamp || new Date().toISOString(),
@@ -5564,6 +5611,9 @@ export function App({ onGoHome }: AppProps) {
                   typeof payload.session.effort === "string"
                     ? payload.session.effort
                     : (cached as any).effort,
+                fast_service:
+                  normalizeFastService(payload.session.fast_service) ||
+                  normalizeFastService((cached as any).fast_service),
                 updated_at: payload.session.updated_at || cached.updated_at,
               } as Session;
               bumpCacheVersion();
@@ -5592,6 +5642,9 @@ export function App({ onGoHome }: AppProps) {
                         typeof payload.session.effort === "string"
                           ? payload.session.effort
                           : (prev as any).effort,
+                      fast_service:
+                        normalizeFastService(payload.session.fast_service) ||
+                        normalizeFastService((prev as any).fast_service),
                       updated_at: payload.session.updated_at || prev.updated_at,
                     } as SessionItem)
                   : prev,

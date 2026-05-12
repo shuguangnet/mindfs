@@ -26,14 +26,15 @@ type Session struct {
 }
 
 type Exchange struct {
-	Seq       int       `json:"seq"`
-	Role      string    `json:"role"`
-	Agent     string    `json:"agent,omitempty"`
-	Model     string    `json:"model,omitempty"`
-	Mode      string    `json:"mode,omitempty"`
-	Effort    string    `json:"effort,omitempty"`
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
+	Seq         int       `json:"seq"`
+	Role        string    `json:"role"`
+	Agent       string    `json:"agent,omitempty"`
+	Model       string    `json:"model,omitempty"`
+	Mode        string    `json:"mode,omitempty"`
+	Effort      string    `json:"effort,omitempty"`
+	FastService string    `json:"fast_service,omitempty"`
+	Content     string    `json:"content"`
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 type ExchangeAux struct {
@@ -125,6 +126,14 @@ func InferEffortFromSession(s *Session) string {
 		return ""
 	}
 	return strings.TrimSpace(s.Exchanges[len(s.Exchanges)-1].Effort)
+}
+
+// InferFastServiceFromSession derives the latest fast-service setting from session data.
+func InferFastServiceFromSession(s *Session) string {
+	if s == nil || len(s.Exchanges) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(s.Exchanges[len(s.Exchanges)-1].FastService)
 }
 
 // InferModeFromSession derives the latest non-empty mode from session data.

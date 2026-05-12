@@ -622,12 +622,13 @@ func (h *HTTPHandler) handleSessionRename(w http.ResponseWriter, r *http.Request
 			Payload: map[string]any{
 				"root_id": rootID,
 				"session": map[string]any{
-					"key":        renamed.Key,
-					"name":       renamed.Name,
-					"model":      renamed.Model,
-					"mode":       session.InferModeFromSession(renamed),
-					"effort":     session.InferEffortFromSession(renamed),
-					"updated_at": renamed.UpdatedAt,
+					"key":          renamed.Key,
+					"name":         renamed.Name,
+					"model":        renamed.Model,
+					"mode":         session.InferModeFromSession(renamed),
+					"effort":       session.InferEffortFromSession(renamed),
+					"fast_service": session.InferFastServiceFromSession(renamed),
+					"updated_at":   renamed.UpdatedAt,
 				},
 			},
 		})
@@ -681,6 +682,7 @@ func sessionResponse(
 		"model":          s.Model,
 		"mode":           session.InferModeFromSession(s),
 		"effort":         session.InferEffortFromSession(s),
+		"fast_service":   session.InferFastServiceFromSession(s),
 		"name":           s.Name,
 		"exchanges":      exchanges,
 		"exchange_aux":   auxPayload,
@@ -697,16 +699,17 @@ func sessionListResponse(s *session.Session) map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{
-		"key":        s.Key,
-		"type":       s.Type,
-		"agent":      session.InferAgentFromSession(s),
-		"model":      s.Model,
-		"mode":       session.InferModeFromSession(s),
-		"effort":     session.InferEffortFromSession(s),
-		"name":       s.Name,
-		"created_at": s.CreatedAt,
-		"updated_at": s.UpdatedAt,
-		"closed_at":  s.ClosedAt,
+		"key":          s.Key,
+		"type":         s.Type,
+		"agent":        session.InferAgentFromSession(s),
+		"model":        s.Model,
+		"mode":         session.InferModeFromSession(s),
+		"effort":       session.InferEffortFromSession(s),
+		"fast_service": session.InferFastServiceFromSession(s),
+		"name":         s.Name,
+		"created_at":   s.CreatedAt,
+		"updated_at":   s.UpdatedAt,
+		"closed_at":    s.ClosedAt,
 	}
 }
 

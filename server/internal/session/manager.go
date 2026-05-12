@@ -280,15 +280,15 @@ func (m *Manager) Search(_ context.Context, opts SearchOptions) ([]SearchHit, er
 	return results, nil
 }
 
-func (m *Manager) AddExchangeForAgent(_ context.Context, session *Session, role, content, agent, mode, effort string) error {
-	return m.addExchangeForAgentAt(session, role, content, agent, mode, effort, time.Time{})
+func (m *Manager) AddExchangeForAgent(_ context.Context, session *Session, role, content, agent, mode, effort, fastService string) error {
+	return m.addExchangeForAgentAt(session, role, content, agent, mode, effort, fastService, time.Time{})
 }
 
-func (m *Manager) AddExchangeForAgentAt(_ context.Context, session *Session, role, content, agent, mode, effort string, timestamp time.Time) error {
-	return m.addExchangeForAgentAt(session, role, content, agent, mode, effort, timestamp)
+func (m *Manager) AddExchangeForAgentAt(_ context.Context, session *Session, role, content, agent, mode, effort, fastService string, timestamp time.Time) error {
+	return m.addExchangeForAgentAt(session, role, content, agent, mode, effort, fastService, timestamp)
 }
 
-func (m *Manager) addExchangeForAgentAt(session *Session, role, content, agent, mode, effort string, timestamp time.Time) error {
+func (m *Manager) addExchangeForAgentAt(session *Session, role, content, agent, mode, effort, fastService string, timestamp time.Time) error {
 	if session == nil || strings.TrimSpace(session.Key) == "" {
 		return errors.New("session required")
 	}
@@ -313,14 +313,15 @@ func (m *Manager) addExchangeForAgentAt(session *Session, role, content, agent, 
 		ts = m.now().UTC()
 	}
 	record := Exchange{
-		Seq:       nextSeq,
-		Role:      role,
-		Agent:     resolvedAgent,
-		Model:     session.Model,
-		Mode:      strings.TrimSpace(mode),
-		Effort:    strings.TrimSpace(effort),
-		Content:   content,
-		Timestamp: ts,
+		Seq:         nextSeq,
+		Role:        role,
+		Agent:       resolvedAgent,
+		Model:       session.Model,
+		Mode:        strings.TrimSpace(mode),
+		Effort:      strings.TrimSpace(effort),
+		FastService: fastService,
+		Content:     content,
+		Timestamp:   ts,
 	}
 	if err := m.appendExchange(session.Key, record); err != nil {
 		log.Printf("[session/store] append.error session=%s seq=%d role=%s agent=%s err=%v", session.Key, record.Seq, role, resolvedAgent, err)

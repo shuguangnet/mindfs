@@ -26,6 +26,7 @@ export type Session = {
   model?: string;
   mode?: string;
   effort?: string;
+  fast_service?: string;
   name: string;
   created_at: string;
   updated_at: string;
@@ -43,6 +44,7 @@ export type Session = {
     model?: string;
     mode?: string;
     effort?: string;
+    fast_service?: string;
     content?: string;
     context_window?: {
       totalTokens: number;
@@ -552,6 +554,7 @@ class SessionService {
     model?: string,
     agentMode?: string,
     effort?: string,
+    fastService?: string,
     context?: Record<string, unknown>,
     requestId = this.createRequestId("msg"),
   ): Promise<boolean> {
@@ -577,6 +580,7 @@ class SessionService {
         model,
         agent_mode: agentMode,
         effort,
+        fast_service: fastService,
         context: this.compactContext(sessionKey, context),
       },
     };
@@ -1037,6 +1041,12 @@ function withSessionMeta(
     model: preferIncomingText((incoming as any).model, (base as any).model),
     mode: preferIncomingText((incoming as any).mode, (base as any).mode),
     effort: preferIncomingText((incoming as any).effort, (base as any).effort),
+    fast_service:
+      typeof (incoming as any).fast_service === "string"
+        ? (incoming as any).fast_service
+        : typeof (base as any).fast_service === "string"
+          ? (base as any).fast_service
+          : "",
     name: preferIncomingText(incoming.name, base.name) || "",
     exchanges: Array.isArray(incoming.exchanges) ? [...incoming.exchanges] : [],
     exchange_aux: cloneExchangeAux(incoming.exchange_aux || base.exchange_aux),

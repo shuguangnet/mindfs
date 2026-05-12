@@ -19,25 +19,27 @@ import (
 )
 
 type Status struct {
-	Name           string                   `json:"name"`
-	Installed      bool                     `json:"installed"`
-	Available      bool                     `json:"available"`
-	Version        string                   `json:"version,omitempty"`
-	Error          string                   `json:"error,omitempty"`
-	RuntimeError   string                   `json:"-"`
-	ProbeError     string                   `json:"-"`
-	LastProbe      time.Time                `json:"last_probe"`
-	CurrentModelID string                   `json:"current_model_id,omitempty"`
-	CurrentModeID  string                   `json:"current_mode_id,omitempty"`
-	DefaultModelID string                   `json:"default_model_id,omitempty"`
-	DefaultEffort  string                   `json:"default_effort,omitempty"`
-	Efforts        []string                 `json:"efforts,omitempty"`
-	Models         []agenttypes.ModelInfo   `json:"models,omitempty"`
-	Modes          []agenttypes.ModeInfo    `json:"modes"`
-	ModelsError    string                   `json:"models_error,omitempty"`
-	ModesError     string                   `json:"modes_error,omitempty"`
-	Commands       []agenttypes.CommandInfo `json:"commands,omitempty"`
-	CommandsError  string                   `json:"commands_error,omitempty"`
+	Name                string                   `json:"name"`
+	Installed           bool                     `json:"installed"`
+	Available           bool                     `json:"available"`
+	Version             string                   `json:"version,omitempty"`
+	Error               string                   `json:"error,omitempty"`
+	RuntimeError        string                   `json:"-"`
+	ProbeError          string                   `json:"-"`
+	LastProbe           time.Time                `json:"last_probe"`
+	CurrentModelID      string                   `json:"current_model_id,omitempty"`
+	CurrentModeID       string                   `json:"current_mode_id,omitempty"`
+	DefaultModelID      string                   `json:"default_model_id,omitempty"`
+	DefaultEffort       string                   `json:"default_effort,omitempty"`
+	DefaultFastService  string                   `json:"default_fast_service,omitempty"`
+	SupportsFastService bool                     `json:"supports_fast_service"`
+	Models              []agenttypes.ModelInfo   `json:"models,omitempty"`
+	Modes               []agenttypes.ModeInfo    `json:"modes"`
+	Efforts             []string                 `json:"efforts,omitempty"`
+	ModelsError         string                   `json:"models_error,omitempty"`
+	ModesError          string                   `json:"modes_error,omitempty"`
+	Commands            []agenttypes.CommandInfo `json:"commands,omitempty"`
+	CommandsError       string                   `json:"commands_error,omitempty"`
 }
 
 const (
@@ -683,14 +685,29 @@ func populateProbeModels(ctx context.Context, sess agenttypes.Session, status *S
 	status.CurrentModelID = models.CurrentModelID
 	status.Models = models.Models
 	status.Efforts = inferAgentEfforts(models.Models)
+	status.SupportsFastService = supportsAgentFastService(status.Name)
 
 	modes, err := sess.ListModes(modelsCtx)
 	if err != nil {
 		status.ModesError = err.Error()
-		return
+	} else {
+		status.CurrentModeID = modes.CurrentModeID
+		status.Modes = modes.Modes
 	}
-	status.CurrentModeID = modes.CurrentModeID
-	status.Modes = modes.Modes
+	if defaultsReader, ok := sess.(agenttypes.DefaultsReader); ok {
+		defaults, defaultsErr := defaultsReader.RuntimeDefaults(modelsCtx)
+		if defaultsErr != nil {
+			log.Printf("[agent/probe] defaults.error agent=%s err=%v", status.Name, defaultsErr)
+		}
+
+		if value := strings.TrimSpace(defaults.Model); value != "" {
+			status.DefaultModelID = value
+		}
+		if value := strings.TrimSpace(defaults.Effort); value != "" {
+			status.DefaultEffort = value
+		}
+		status.DefaultFastService = defaults.FastService
+	}
 }
 
 func populateProbeCommands(ctx context.Context, sess agenttypes.Session, status *Status) {
@@ -721,7 +738,11 @@ func normalizeStatus(status Status) Status {
 	}
 	status.CurrentModelID = ""
 	status.CurrentModeID = ""
+	status.DefaultModelID = ""
+	status.DefaultEffort = ""
+	status.DefaultFastService = ""
 	status.Efforts = nil
+	status.SupportsFastService = false
 	status.Models = nil
 	status.Modes = nil
 	status.ModelsError = ""
@@ -751,6 +772,10 @@ func inferAgentEfforts(models []agenttypes.ModelInfo) []string {
 		return []string{"low", "medium", "high"}
 	}
 	return []string{"low", "medium", "high", "xhigh"}
+}
+
+func supportsAgentFastService(agentName string) bool {
+	return strings.TrimSpace(agentName) == "codex"
 }
 
 func (p *Prober) collectDefinitions(include func(Status, bool) bool) []Definition {

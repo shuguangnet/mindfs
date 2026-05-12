@@ -124,6 +124,7 @@ func (p *Pool) openSession(ctx context.Context, protocol Protocol, def Definitio
 			SessionKey:      in.SessionKey,
 			Model:           in.Model,
 			Effort:          in.Effort,
+			FastService:     in.FastService,
 			Probe:           in.Probe,
 			RootPath:        in.RootPath,
 			Command:         def.Command,

@@ -14,6 +14,8 @@ export type AgentStatus = {
   current_mode_id?: string;
   default_model_id?: string;
   default_effort?: string;
+  default_fast_service?: string;
+  supports_fast_service?: boolean;
   efforts?: string[];
   models?: AgentModelInfo[];
   modes?: AgentModeInfo[];
@@ -44,7 +46,6 @@ export type AgentCommandInfo = {
 };
 
 const VALID_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
-
 function normalizeEfforts(input: unknown): string[] | undefined {
   if (!Array.isArray(input)) {
     return undefined;
@@ -73,6 +74,11 @@ function normalizeAgentStatus(input: unknown): AgentStatus | null {
   return {
     ...agent,
     efforts: normalizeEfforts(agent.efforts),
+    default_fast_service:
+      typeof agent.default_fast_service === "string"
+        ? agent.default_fast_service
+        : "",
+    supports_fast_service: !!agent.supports_fast_service,
   };
 }
 

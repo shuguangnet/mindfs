@@ -7,10 +7,12 @@ type AgentSelectorProps = {
   model?: string;
   mode?: string;
   effort?: string;
+  fastService?: "" | "on" | "off";
   agents: AgentStatus[];
   onAgentChange: (agent: string, model?: string) => void;
   onModeChange?: (mode?: string) => void;
   onEffortChange?: (effort?: string) => void;
+  onFastServiceChange?: (fastService?: "" | "on" | "off") => void;
   compact?: boolean;
   warnUnavailable?: boolean;
 };
@@ -92,10 +94,12 @@ export function AgentSelector({
   model = "",
   mode = "",
   effort = "",
+  fastService = "",
   agents,
   onAgentChange,
   onModeChange,
   onEffortChange,
+  onFastServiceChange,
   compact = false,
   warnUnavailable = false,
 }: AgentSelectorProps) {
@@ -105,6 +109,8 @@ export function AgentSelector({
   const [modelSectionExpanded, setModelSectionExpanded] = useState(true);
   const [modeSectionExpanded, setModeSectionExpanded] = useState(false);
   const [effortSectionExpanded, setEffortSectionExpanded] = useState(false);
+  const [serviceTierSectionExpanded, setServiceTierSectionExpanded] =
+    useState(false);
   const [menuBodyHeight, setMenuBodyHeight] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const agentColumnRef = useRef<HTMLDivElement>(null);
@@ -151,8 +157,13 @@ export function AgentSelector({
     () => submenuEfforts.length > 0 && !!submenuSelectedModel?.supportEffort,
     [submenuEfforts, submenuSelectedModel]
   );
-  const fallbackEffort = submenuAgentStatus?.default_effort || (submenuIsCodex ? "medium" : "");
-  const displayedEffort = submenuIsCodex ? effort || fallbackEffort : effort || fallbackEffort || "Auto";
+  const submenuSupportsServiceTier = !!submenuAgentStatus?.supports_fast_service;
+  const fallbackEffort = submenuAgentStatus?.default_effort || "";
+  const displayedEffort =
+    submenuIsCodex ? effort || fallbackEffort || "Auto" : effort || fallbackEffort || "Auto";
+  const fallbackFastService = submenuAgentStatus?.default_fast_service || "";
+  const fastModeEnabled =
+    (submenuAgentStatus?.name === agent ? fastService : fallbackFastService) === "on";
   const buttonTitle = useMemo(() => {
     if (warnUnavailable) {
       return `当前会话的 Agent（${agent}）不可用`;
@@ -172,6 +183,7 @@ export function AgentSelector({
         setModelSectionExpanded(true);
         setModeSectionExpanded(false);
         setEffortSectionExpanded(false);
+        setServiceTierSectionExpanded(false);
         setMenuBodyHeight(null);
       }
     };
@@ -206,6 +218,7 @@ export function AgentSelector({
       setModelSectionExpanded(true);
       setModeSectionExpanded(false);
       setEffortSectionExpanded(false);
+      setServiceTierSectionExpanded(false);
     },
     [onAgentChange]
   );
@@ -226,6 +239,7 @@ export function AgentSelector({
       setModelSectionExpanded(true);
       setModeSectionExpanded(false);
       setEffortSectionExpanded(false);
+      setServiceTierSectionExpanded(false);
       const node = agentColumnRef.current;
       if (node) {
         setMenuBodyHeight(
@@ -249,9 +263,25 @@ export function AgentSelector({
       setModelSectionExpanded(true);
       setModeSectionExpanded(false);
       setEffortSectionExpanded(false);
+      setServiceTierSectionExpanded(false);
       setMenuBodyHeight(null);
     },
     [onEffortChange]
+  );
+
+  const handleServiceTierSelect = useCallback(
+    (nextFastService: "" | "on" | "off") => {
+      onFastServiceChange?.(nextFastService);
+      setIsOpen(false);
+      setSubmenuAgent(null);
+      setErrorAgent(null);
+      setModelSectionExpanded(true);
+      setModeSectionExpanded(false);
+      setEffortSectionExpanded(false);
+      setServiceTierSectionExpanded(false);
+      setMenuBodyHeight(null);
+    },
+    [onFastServiceChange]
   );
 
   const handleModeSelect = useCallback(
@@ -263,6 +293,7 @@ export function AgentSelector({
       setModelSectionExpanded(true);
       setModeSectionExpanded(false);
       setEffortSectionExpanded(false);
+      setServiceTierSectionExpanded(false);
       setMenuBodyHeight(null);
     },
     [onModeChange]
@@ -281,6 +312,7 @@ export function AgentSelector({
               setModelSectionExpanded(true);
               setModeSectionExpanded(false);
               setEffortSectionExpanded(false);
+              setServiceTierSectionExpanded(false);
               setMenuBodyHeight(null);
             }
             return next;
@@ -443,6 +475,7 @@ export function AgentSelector({
                             setModelSectionExpanded(true);
                             setModeSectionExpanded(false);
                             setEffortSectionExpanded(false);
+                            setServiceTierSectionExpanded(false);
                             setErrorAgent((prev) => (prev === a.name ? null : a.name));
                           }}
                           style={{
@@ -679,6 +712,49 @@ export function AgentSelector({
                           >
                             <span style={{ fontSize: "13px", fontWeight: 500, textTransform: "capitalize" }}>
                               {item}
+                            </span>
+                          </button>
+                        ))}
+                      </>
+                    ) : null}
+                  </>
+                ) : null}
+                {submenuSupportsServiceTier ? (
+                  <>
+                    <SectionHeader
+                      title="Fast 模式"
+                      expanded={serviceTierSectionExpanded}
+                      onToggle={() =>
+                        setServiceTierSectionExpanded((prev) => !prev)
+                      }
+                      topBorder={
+                        modelSectionExpanded ||
+                        submenuModels.length > 0 ||
+                        !!submenuSelectedModel?.id ||
+                        submenuModes.length > 0 ||
+                        submenuSupportsEffort
+                      }
+                      value={fastModeEnabled ? "开启" : "关闭"}
+                    />
+                    {serviceTierSectionExpanded ? (
+                      <>
+                        {(["off", "on"] as const).map((item, index) => (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => handleServiceTierSelect(item)}
+                            style={sectionItemStyle(
+                              (item === "on") === fastModeEnabled,
+                              index > 0,
+                            )}
+                          >
+                            <span
+                              style={{
+                                fontSize: "13px",
+                                fontWeight: 500,
+                              }}
+                            >
+                              {item === "on" ? "开启" : "关闭"}
                             </span>
                           </button>
                         ))}

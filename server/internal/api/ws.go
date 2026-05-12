@@ -213,12 +213,13 @@ func (h *WSHandler) broadcastSessionMetaUpdated(rootID string, sess *session.Ses
 		Payload: map[string]any{
 			"root_id": rootID,
 			"session": map[string]any{
-				"key":        sess.Key,
-				"name":       sess.Name,
-				"model":      sess.Model,
-				"mode":       session.InferModeFromSession(sess),
-				"effort":     session.InferEffortFromSession(sess),
-				"updated_at": sess.UpdatedAt,
+				"key":          sess.Key,
+				"name":         sess.Name,
+				"model":        sess.Model,
+				"mode":         session.InferModeFromSession(sess),
+				"effort":       session.InferEffortFromSession(sess),
+				"fast_service": session.InferFastServiceFromSession(sess),
+				"updated_at":   sess.UpdatedAt,
 			},
 		},
 	}
@@ -229,21 +230,25 @@ func (h *WSHandler) broadcastAgentStatusChange(status agent.Status) {
 	resp := WSResponse{
 		Type: "agent.status.changed",
 		Payload: map[string]any{
-			"name":             status.Name,
-			"installed":        status.Installed,
-			"available":        status.Available,
-			"version":          status.Version,
-			"error":            status.Error,
-			"last_probe":       status.LastProbe,
-			"current_model_id": status.CurrentModelID,
-			"current_mode_id":  status.CurrentModeID,
-			"efforts":          status.Efforts,
-			"models":           status.Models,
-			"modes":            status.Modes,
-			"models_error":     status.ModelsError,
-			"modes_error":      status.ModesError,
-			"commands":         status.Commands,
-			"commands_error":   status.CommandsError,
+			"name":                  status.Name,
+			"installed":             status.Installed,
+			"available":             status.Available,
+			"version":               status.Version,
+			"error":                 status.Error,
+			"last_probe":            status.LastProbe,
+			"current_model_id":      status.CurrentModelID,
+			"current_mode_id":       status.CurrentModeID,
+			"default_model_id":      status.DefaultModelID,
+			"default_effort":        status.DefaultEffort,
+			"default_fast_service":  status.DefaultFastService,
+			"supports_fast_service": status.SupportsFastService,
+			"efforts":               status.Efforts,
+			"models":                status.Models,
+			"modes":                 status.Modes,
+			"models_error":          status.ModelsError,
+			"modes_error":           status.ModesError,
+			"commands":              status.Commands,
+			"commands_error":        status.CommandsError,
 		},
 	}
 	h.broadcastWS(resp)
@@ -362,6 +367,7 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 	model := getString(req.Payload, "model")
 	agentMode := getString(req.Payload, "agent_mode")
 	effort := getString(req.Payload, "effort")
+	fastService := normalizeFastServiceValue(getString(req.Payload, "fast_service"))
 	if content == "" || sessionType == "" || agentName == "" {
 		h.sendWSError(conn, clientID, req.ID, "invalid_request", "content, type and agent required")
 		return
@@ -427,16 +433,17 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 	defer cancel()
 
 	err := uc.SendMessage(msgCtx, usecase.SendMessageInput{
-		RootID:    rootID,
-		Key:       key,
-		Agent:     agentName,
-		Model:     model,
-		Mode:      agentMode,
-		Effort:    effort,
-		Content:   content,
-		ClientCtx: clientCtx,
+		RootID:      rootID,
+		Key:         key,
+		Agent:       agentName,
+		Model:       model,
+		Mode:        agentMode,
+		Effort:      effort,
+		FastService: fastService,
+		Content:     content,
+		ClientCtx:   clientCtx,
 		OnStart: func() {
-			streamHub.BroadcastSessionUserMessage(rootID, key, sessionType, sessionName, agentName, model, agentMode, effort, content, clientID)
+			streamHub.BroadcastSessionUserMessage(rootID, key, sessionType, sessionName, agentName, model, agentMode, effort, fastService, content, clientID)
 		},
 		OnUpdate: func(update agenttypes.Event) {
 			event := updateToEvent(update)
@@ -635,6 +642,40 @@ func getString(payload map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeFastServiceValue(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "on":
+		return "on"
+	case "off":
+		return "off"
+	default:
+		return ""
+	}
+}
+
+func getBool(payload map[string]any, key string) bool {
+	if payload == nil {
+		return false
+	}
+	value, ok := payload[key]
+	if !ok {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "1", "true", "yes", "on", "fast":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
 }
 
 func parseStringMap(raw any) map[string]string {
