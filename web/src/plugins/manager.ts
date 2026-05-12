@@ -33,6 +33,8 @@ export type PluginOutput = {
   tree: UITree;
 };
 
+export type PluginViewContext = unknown;
+
 export type ViewPlugin = {
   name: string;
   match: MatchRule;
@@ -54,6 +56,7 @@ export type ViewPlugin = {
     success: string;
   };
   process: (file: PluginInput) => PluginOutput;
+  viewContext?: (file: PluginInput) => PluginViewContext;
 };
 
 function splitCSV(value: string): string[] {
@@ -155,7 +158,8 @@ function isValidPlugin(value: unknown): value is ViewPlugin {
     !!plugin.match &&
     (plugin.fileLoadMode === "incremental" || plugin.fileLoadMode === "full") &&
     hasValidTheme &&
-    typeof plugin.process === "function"
+    typeof plugin.process === "function" &&
+    (plugin.viewContext === undefined || typeof plugin.viewContext === "function")
   );
 }
 
@@ -186,6 +190,11 @@ export class PluginManager {
 
   run(plugin: ViewPlugin, file: PluginInput): PluginOutput {
     return plugin.process(file);
+  }
+
+  viewContext(plugin: ViewPlugin, file: PluginInput): PluginViewContext {
+    if (typeof plugin.viewContext !== "function") return null;
+    return plugin.viewContext(file);
   }
 }
 

@@ -674,6 +674,25 @@ function buildMatchInputFromPath(
   };
 }
 
+function formatPluginViewContext(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (value == null) return "";
+  try {
+    return JSON.stringify(value, null, 2).trim();
+  } catch {
+    return String(value).trim();
+  }
+}
+
+function buildMessageWithViewContext(
+  message: string,
+  viewContext: unknown,
+): string {
+  const contextText = formatPluginViewContext(viewContext);
+  if (!contextText) return message;
+  return [contextText, "", message].join("\n");
+}
+
 function normalizePath(value: string): string {
   return String(value || "")
     .replace(/\\/g, "/")
@@ -843,6 +862,8 @@ export function App({ onGoHome }: AppProps) {
   const fileScrollPositionsRef = useRef<Record<string, number>>(
     loadPersistedFileScrollPositions(),
   );
+  const pluginContentRef = useRef<HTMLDivElement | null>(null);
+  const lastPluginChapterRef = useRef<string>("");
   const viewerSelectionRef = useRef<ViewerSelection | null>(null);
   const lastViewerSelectionRef = useRef<ViewerSelection | null>(null);
   const dismissedSelectionFileRef = useRef<string | null>(null);
@@ -3281,10 +3302,26 @@ export function App({ onGoHome }: AppProps) {
         pluginCatalog:
           effectiveMode === "plugin" ? getViewModeSystemPrompt() : undefined,
       });
+      let outgoingMessage = message;
+      const currentFile = fileRef.current;
+      if (currentFile && !pluginBypassRef.current) {
+        try {
+          const pluginInput = toPluginInput(currentFile, pluginQueryRef.current);
+          const plugin = pluginManagerRef.current.match(activeRoot, pluginInput);
+          if (plugin?.viewContext) {
+            outgoingMessage = buildMessageWithViewContext(
+              message,
+              pluginManagerRef.current.viewContext(plugin, pluginInput),
+            );
+          }
+        } catch (err) {
+          console.warn("[plugin/view-context] failed", err);
+        }
+      }
       const sent = await sessionService.sendMessage(
         activeRoot,
         sendSessionKey || undefined,
-        message,
+        outgoingMessage,
         effectiveMode,
         effectiveAgent,
         effectiveModel || undefined,
@@ -6040,6 +6077,59 @@ export function App({ onGoHome }: AppProps) {
     }
   }, [file, pluginBypass, matchedPlugin, pluginQuery]);
 
+  useEffect(() => {
+    if (!file || pluginBypass || !pluginRender?.output) {
+      return;
+    }
+    const handleSelectionChange = () => {
+      const root = pluginContentRef.current;
+      const selection = window.getSelection();
+      if (!root || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+        handleViewerSelectionChange(null);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const commonAncestor = range.commonAncestorContainer;
+      if (!root.contains(commonAncestor)) {
+        handleViewerSelectionChange(null);
+        return;
+      }
+      const text = selection.toString();
+      if (!text.trim()) {
+        handleViewerSelectionChange(null);
+        return;
+      }
+      handleViewerSelectionChange({
+        filePath: file.path,
+        text,
+      });
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+      handleViewerSelectionChange(null);
+    };
+  }, [file, pluginBypass, pluginRender?.output, handleViewerSelectionChange]);
+
+  useEffect(() => {
+    if (!file || pluginBypass || !pluginRender?.output) {
+      lastPluginChapterRef.current = "";
+      return;
+    }
+    const chapterKey = `${file.path}:${pluginQuery.chapter || "1"}`;
+    if (!lastPluginChapterRef.current) {
+      lastPluginChapterRef.current = chapterKey;
+      return;
+    }
+    if (lastPluginChapterRef.current === chapterKey) {
+      return;
+    }
+    lastPluginChapterRef.current = chapterKey;
+    requestAnimationFrame(() => {
+      pluginContentRef.current?.scrollTo({ top: 0, behavior: "auto" });
+    });
+  }, [file, pluginBypass, pluginRender?.output, pluginQuery.chapter]);
+
   const pluginRendererKey = `${currentRootId || ""}:${file?.path || ""}:${fileCursorRef.current}:${JSON.stringify(pluginQuery)}`;
   const pluginThemeVars = useMemo(() => {
     const theme = pluginRender?.plugin?.theme;
@@ -6481,6 +6571,7 @@ export function App({ onGoHome }: AppProps) {
             </button>
           </div>
           <div
+            ref={pluginContentRef}
             className="plugin-shadcn-sandbox"
             style={{
               ...pluginThemeVars,
