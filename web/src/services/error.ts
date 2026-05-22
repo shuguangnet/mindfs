@@ -14,6 +14,7 @@ export type ErrorCode =
   // Root/project errors
   | "root.create_failed"
   | "root.delete_failed"
+  | "root.rename_failed"
   | "git.checkout_failed"
   // Agent errors
   | "agent.unavailable"
@@ -157,6 +158,11 @@ class ErrorService {
       },
       "root.delete_failed": {
         message: "删除项目失败",
+        severity: "error",
+        recoverable: true,
+      },
+      "root.rename_failed": {
+        message: "重命名项目失败",
         severity: "error",
         recoverable: true,
       },

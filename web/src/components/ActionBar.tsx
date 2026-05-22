@@ -53,6 +53,7 @@ type ActionBarProps = {
   currentSession?: SessionInfo | null;
   attachedFileContext?: AttachedFileContext | null;
   canOpenSessionDrawer?: boolean;
+  sessionDrawerOpen?: boolean;
   detachedBoundSession?: boolean;
   mobileEnterKeySends?: boolean;
   onSendMessage?: (
@@ -145,6 +146,7 @@ export function ActionBar({
   currentSession,
   attachedFileContext,
   canOpenSessionDrawer = false,
+  sessionDrawerOpen = false,
   detachedBoundSession = false,
   onSendMessage,
   onCancelCurrentTurn,
@@ -820,7 +822,7 @@ export function ActionBar({
                     aria-hidden="true"
                   >
                     <path
-                      d="M3.25 7.25 6 4.5l2.75 2.75"
+                      d={sessionDrawerOpen ? "M3.25 4.75 6 7.5l2.75-2.75" : "M3.25 7.25 6 4.5l2.75 2.75"}
                       stroke="currentColor"
                       strokeWidth="1.8"
                       strokeLinecap="round"

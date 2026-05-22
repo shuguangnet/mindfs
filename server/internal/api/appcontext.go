@@ -243,6 +243,24 @@ func (s *AppContext) RemoveRoot(path string) (fs.RootInfo, error) {
 	return dir, nil
 }
 
+func (s *AppContext) RenameRoot(rootID, name, rootPath string) (fs.RootInfo, error) {
+	if s.Dirs == nil {
+		return fs.RootInfo{}, errors.New("registry not configured")
+	}
+	dir, err := s.Dirs.Rename(rootID, name, rootPath)
+	if err != nil {
+		return fs.RootInfo{}, err
+	}
+	s.mu.Lock()
+	rootCtx := s.roots[rootID]
+	delete(s.roots, rootID)
+	s.mu.Unlock()
+	if rootCtx != nil && rootCtx.Watcher != nil {
+		rootCtx.Watcher.Close()
+	}
+	return dir, nil
+}
+
 func (s *AppContext) ListRoots() []fs.RootInfo {
 	if s.Dirs == nil {
 		return []fs.RootInfo{}

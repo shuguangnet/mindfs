@@ -23,6 +23,7 @@ type DefaultListViewProps = {
   onPathClick?: (path: string) => void;
   onSortModeChange?: (mode: DirectorySortControlValue) => void;
   onUploadFiles?: (files: File[]) => void | Promise<void>;
+  onRenameRoot?: (nextName: string) => Promise<boolean> | boolean;
   onRemoveRoot?: () => void;
   isGitRepo?: boolean;
   isGitWorktree?: boolean;
@@ -117,7 +118,29 @@ function GitBranchMenuIcon({ marker }: { marker?: "plus" | "minus" | "switch" })
 }
 
 // 路径导航组件
-function Breadcrumbs({ root, path, onPathClick }: { root?: string; path: string; onPathClick?: (path: string) => void }) {
+function Breadcrumbs({
+  root,
+  path,
+  onPathClick,
+  editingRoot = false,
+  rootDraft = "",
+  rootRenaming = false,
+  inputRef,
+  onRootDraftChange,
+  onRootRenameSubmit,
+  onRootRenameCancel,
+}: {
+  root?: string;
+  path: string;
+  onPathClick?: (path: string) => void;
+  editingRoot?: boolean;
+  rootDraft?: string;
+  rootRenaming?: boolean;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
+  onRootDraftChange?: (value: string) => void;
+  onRootRenameSubmit?: () => void;
+  onRootRenameCancel?: () => void;
+}) {
   const normalizedPath = root && path.startsWith(root) ? path.slice(root.length).replace(/^\/+/, "") : path;
   const parts = normalizedPath.split('/').filter(Boolean);
   
@@ -139,17 +162,116 @@ function Breadcrumbs({ root, path, onPathClick }: { root?: string; path: string;
     }}>
       {root && (
         <>
-          <span
-            onClick={() => onPathClick?.(".")}
-            style={{
-              ...rootBadgeStyle,
-              cursor: "pointer",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
-          >
-            {root}
-          </span>
+          {editingRoot ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", minWidth: 0, maxWidth: "min(320px, 60vw)" }}>
+              <span
+                style={{
+                  display: "inline-block",
+                  position: "relative",
+                  minWidth: 0,
+                  maxWidth: "100%",
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    visibility: "hidden",
+                    display: "block",
+                    whiteSpace: "pre",
+                    height: "24px",
+                    border: "1px solid transparent",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    padding: "0 10px",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  {rootDraft || " "}
+                </span>
+                <input
+                  ref={inputRef}
+                  value={rootDraft}
+                  disabled={rootRenaming}
+                  onChange={(event) => {
+                    const input = event.currentTarget;
+                    onRootDraftChange?.(event.target.value);
+                    window.requestAnimationFrame(() => {
+                      if (input.scrollWidth <= input.clientWidth + 1) {
+                        input.scrollLeft = 0;
+                      }
+                    });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      onRootRenameCancel?.();
+                      return;
+                    }
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      onRootRenameSubmit?.();
+                    }
+                  }}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    minWidth: 0,
+                    width: "100%",
+                    maxWidth: "100%",
+                    height: "24px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--accent-color)",
+                    background: "var(--content-bg, #fff)",
+                    color: "var(--text-primary)",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    padding: "0 8px",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </span>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onRootRenameCancel}
+                disabled={rootRenaming}
+                aria-label="取消项目重命名"
+                style={{
+                  width: "22px",
+                  height: "22px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--text-secondary)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: rootRenaming ? "default" : "pointer",
+                  opacity: rootRenaming ? 0.6 : 1,
+                  padding: 0,
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </span>
+          ) : (
+            <span
+              onClick={() => onPathClick?.(".")}
+              style={{
+                ...rootBadgeStyle,
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
+            >
+              {root}
+            </span>
+          )}
           {parts.length > 0 && <span style={{ opacity: 0.4, fontSize: '10px', flexShrink: 0 }}>❯</span>}
         </>
       )}
@@ -192,6 +314,7 @@ export function DefaultListView({
   onPathClick,
   onSortModeChange,
   onUploadFiles,
+  onRenameRoot,
   onRemoveRoot,
   isGitRepo = false,
   isGitWorktree = false,
@@ -203,14 +326,32 @@ export function DefaultListView({
   menuOverlay = null,
 }: DefaultListViewProps) {
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const rootNameInputRef = React.useRef<HTMLInputElement>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const [editingRoot, setEditingRoot] = React.useState(false);
+  const [rootDraft, setRootDraft] = React.useState(root || "");
+  const [rootRenaming, setRootRenaming] = React.useState(false);
   const sortedEntries = React.useMemo(() => {
     const visibleEntries = showHiddenFiles ? entries : entries.filter((entry) => !entry.name.startsWith("."));
     return sortDirectoryEntries(visibleEntries, sortMode);
   }, [entries, showHiddenFiles, sortMode]);
   const showCompactMeta = sortMode === "mtime-desc" || sortMode === "mtime-asc" || sortMode === "size-desc" || sortMode === "size-asc";
   const isRootView = !!root && (!!path ? path === root : true);
+
+  React.useEffect(() => {
+    if (!editingRoot) {
+      setRootDraft(root || "");
+    }
+  }, [editingRoot, root]);
+
+  React.useEffect(() => {
+    if (!editingRoot) {
+      return;
+    }
+    rootNameInputRef.current?.focus();
+    rootNameInputRef.current?.select();
+  }, [editingRoot]);
 
   React.useEffect(() => {
     if (!isMenuOpen) {
@@ -224,6 +365,39 @@ export function DefaultListView({
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [isMenuOpen]);
+
+  const cancelRootRename = React.useCallback(() => {
+    setEditingRoot(false);
+    setRootRenaming(false);
+    setRootDraft(root || "");
+  }, [root]);
+
+  const submitRootRename = React.useCallback(async () => {
+    if (rootRenaming) {
+      return;
+    }
+    const trimmed = rootDraft.trim();
+    if (!trimmed || trimmed === String(root || "").trim()) {
+      cancelRootRename();
+      return;
+    }
+    if (!onRenameRoot) {
+      cancelRootRename();
+      return;
+    }
+    setRootRenaming(true);
+    try {
+      const ok = await onRenameRoot(trimmed);
+      if (ok === false) {
+        rootNameInputRef.current?.focus();
+        rootNameInputRef.current?.select();
+        return;
+      }
+      setEditingRoot(false);
+    } finally {
+      setRootRenaming(false);
+    }
+  }, [cancelRootRename, onRenameRoot, root, rootDraft, rootRenaming]);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: "transparent" }}>
@@ -241,7 +415,20 @@ export function DefaultListView({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", overflow: "hidden", flex: 1 }}>
-          <Breadcrumbs root={root} path={path || ""} onPathClick={onPathClick} />
+          <Breadcrumbs
+            root={root}
+            path={path || ""}
+            onPathClick={onPathClick}
+            editingRoot={editingRoot}
+            rootDraft={rootDraft}
+            rootRenaming={rootRenaming}
+            inputRef={rootNameInputRef}
+            onRootDraftChange={setRootDraft}
+            onRootRenameSubmit={() => {
+              void submitRootRename();
+            }}
+            onRootRenameCancel={cancelRootRename}
+          />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
           <div style={{ fontSize: "11px", color: "var(--text-secondary)", opacity: 0.6 }}>
@@ -457,6 +644,34 @@ export function DefaultListView({
                     {isGitRepo || isGitWorktree ? (
                       <div style={{ height: "1px", background: "var(--border-color)", margin: "6px 4px" }} />
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRootDraft(root || "");
+                        setEditingRoot(true);
+                        setIsMenuOpen(false);
+                      }}
+                      style={{
+                        width: "100%",
+                        border: "none",
+                        background: "transparent",
+                        color: "var(--text-primary)",
+                        borderRadius: "8px",
+                        padding: "8px 10px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                      </svg>
+                      <span>项目重命名</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => {

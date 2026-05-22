@@ -61,17 +61,21 @@ func (r *Registry) Load() error {
 		if name == "" {
 			name = filepath.Base(info.RootPath)
 		}
-		if name == "" || name == "." || name == string(filepath.Separator) {
+		id := info.ID
+		if id == "" {
+			id = name
+		}
+		if id == "" || id == "." || id == string(filepath.Separator) {
 			continue
 		}
-		if _, exists := seen[name]; exists {
+		if _, exists := seen[id]; exists {
 			continue
 		}
-		seen[name] = struct{}{}
+		seen[id] = struct{}{}
 		info.Name = name
-		info.ID = name
-		r.dirs[name] = info
-		r.order = append(r.order, name)
+		info.ID = id
+		r.dirs[id] = info
+		r.order = append(r.order, id)
 	}
 	return nil
 }
@@ -190,6 +194,54 @@ func (r *Registry) Remove(root string) (RootInfo, error) {
 	}
 	r.order = nextOrder
 	if err := r.saveLocked(); err != nil {
+		return RootInfo{}, err
+	}
+	return dir, nil
+}
+
+func (r *Registry) Rename(id, name, rootPath string) (RootInfo, error) {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	if id == "" {
+		return RootInfo{}, errors.New("root id required")
+	}
+	if name == "" {
+		return RootInfo{}, errors.New("root name required")
+	}
+	if rootPath == "" {
+		return RootInfo{}, errors.New("root required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dir, ok := r.dirs[id]
+	if !ok {
+		return RootInfo{}, errors.New("root not found")
+	}
+	if existing, exists := r.dirs[name]; exists && existing.ID != id {
+		return RootInfo{}, fmt.Errorf("%w: %q is already managed at %s", ErrRootNameConflict, name, existing.RootPath)
+	}
+
+	previousDirs := make(map[string]RootInfo, len(r.dirs))
+	for key, value := range r.dirs {
+		previousDirs[key] = value
+	}
+	previousOrder := append([]string(nil), r.order...)
+
+	dir.ID = name
+	dir.Name = name
+	dir.RootPath = filepath.Clean(rootPath)
+	dir.UpdatedAt = time.Now().UTC()
+	delete(r.dirs, id)
+	r.dirs[name] = dir
+	for i, item := range r.order {
+		if item == id {
+			r.order[i] = name
+			break
+		}
+	}
+	if err := r.saveLocked(); err != nil {
+		r.dirs = previousDirs
+		r.order = previousOrder
 		return RootInfo{}, err
 	}
 	return dir, nil

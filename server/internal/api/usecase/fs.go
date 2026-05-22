@@ -732,6 +732,80 @@ func (s *Service) RemoveManagedDir(_ context.Context, in RemoveManagedDirInput) 
 	return RemoveManagedDirOutput{Dir: dir}, nil
 }
 
+type RenameManagedDirInput struct {
+	RootID string
+	Name   string
+}
+
+type RenameManagedDirOutput struct {
+	OldRootID string
+	Dir       fs.RootInfo
+}
+
+func (s *Service) RenameManagedDir(_ context.Context, in RenameManagedDirInput) (RenameManagedDirOutput, error) {
+	if err := s.ensureRegistry(); err != nil {
+		return RenameManagedDirOutput{}, err
+	}
+	rootID := strings.TrimSpace(in.RootID)
+	nextName := strings.TrimSpace(in.Name)
+	if rootID == "" {
+		return RenameManagedDirOutput{}, errors.New("root id required")
+	}
+	if nextName == "" {
+		return RenameManagedDirOutput{}, errors.New("root name required")
+	}
+	if nextName == "." || nextName == ".." {
+		return RenameManagedDirOutput{}, errors.New("invalid root name")
+	}
+	if strings.Contains(nextName, "/") || strings.Contains(nextName, "\\") {
+		return RenameManagedDirOutput{}, errors.New("root name must not contain path separators")
+	}
+
+	root, err := s.Registry.GetRoot(rootID)
+	if err != nil {
+		return RenameManagedDirOutput{}, err
+	}
+	oldPath := filepath.Clean(root.RootPath)
+	if info, err := os.Stat(oldPath); err != nil || !info.IsDir() {
+		if err != nil {
+			return RenameManagedDirOutput{}, err
+		}
+		return RenameManagedDirOutput{}, errors.New("root path must be a directory")
+	}
+	newPath := filepath.Join(filepath.Dir(oldPath), nextName)
+	if sameManagedDirPath(oldPath, newPath) {
+		return RenameManagedDirOutput{OldRootID: rootID, Dir: root}, nil
+	}
+	for _, existing := range s.Registry.ListRoots() {
+		if existing.ID == rootID {
+			continue
+		}
+		if existing.ID == nextName {
+			return RenameManagedDirOutput{}, fmt.Errorf("%w: %q is already managed at %s", fs.ErrRootNameConflict, nextName, existing.RootPath)
+		}
+		if sameManagedDirPath(existing.RootPath, newPath) {
+			return RenameManagedDirOutput{}, errors.New("root path already exists")
+		}
+	}
+	if _, err := os.Stat(newPath); err == nil {
+		return RenameManagedDirOutput{}, errors.New("root path already exists")
+	} else if !os.IsNotExist(err) {
+		return RenameManagedDirOutput{}, err
+	}
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return RenameManagedDirOutput{}, err
+	}
+	dir, err := s.Registry.RenameRoot(rootID, nextName, newPath)
+	if err != nil {
+		if rollbackErr := os.Rename(newPath, oldPath); rollbackErr != nil {
+			return RenameManagedDirOutput{}, fmt.Errorf("registry rename failed: %w; rollback failed: %v", err, rollbackErr)
+		}
+		return RenameManagedDirOutput{}, err
+	}
+	return RenameManagedDirOutput{OldRootID: rootID, Dir: dir}, nil
+}
+
 func (s *Service) ensureFileWatcher(rootID, dir string) {
 	if strings.TrimSpace(rootID) == "" {
 		return

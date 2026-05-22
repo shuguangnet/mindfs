@@ -4484,6 +4484,140 @@ export function App({ onGoHome }: AppProps) {
     });
   }, [loadManagedRootPayloads, replaceURLState]);
 
+  const applyManagedRootRename = useCallback(
+    (oldRootID: string, rootPayload: ManagedRootPayload | null | undefined) => {
+      const oldID = String(oldRootID || "").trim();
+      const nextID = String(rootPayload?.id || "").trim();
+      if (!oldID || !nextID) {
+        return false;
+      }
+
+      const previousRoot =
+        managedRootByIdRef.current[oldID] ||
+        managedRootByIdRef.current[nextID] ||
+        ({} as ManagedRootPayload);
+      const nextRoot = {
+        ...previousRoot,
+        ...rootPayload,
+        id: nextID,
+      } as ManagedRootPayload;
+
+      const nextRootById = { ...managedRootByIdRef.current };
+      delete nextRootById[oldID];
+      nextRootById[nextID] = nextRoot;
+      managedRootByIdRef.current = nextRootById;
+
+      const moveRecordKey = <T,>(record: Record<string, T>) => {
+        if (oldID === nextID || !(oldID in record)) {
+          return;
+        }
+        record[nextID] = record[oldID];
+        delete record[oldID];
+      };
+      moveRecordKey(boundSessionByRootRef.current);
+      moveRecordKey(suppressedAutoBindSessionByRootRef.current);
+      moveRecordKey(drawerSessionByRootRef.current);
+      moveRecordKey(selectedSessionByRootRef.current);
+      moveRecordKey(mainViewPreferenceByRootRef.current);
+      moveRecordKey(drawerOpenByRootRef.current);
+      moveRecordKey(pluginsLoadedByRootRef.current);
+      moveRecordKey(pluginsLoadingByRootRef.current);
+
+      const moveStateRecord = <T,>(record: Record<string, T>) => {
+        if (oldID === nextID || !(oldID in record)) {
+          return record;
+        }
+        const next = { ...record, [nextID]: record[oldID] };
+        delete next[oldID];
+        return next;
+      };
+      setShowGitHistoryByRoot((prev) => moveStateRecord(prev));
+      setGitStatusExpandedByRoot((prev) => moveStateRecord(prev));
+      setGitHistoryExpandedByRoot((prev) => moveStateRecord(prev));
+
+      const moveCacheRecord = <T,>(record: Record<string, T>) => {
+        if (oldID === nextID) {
+          return;
+        }
+        const oldPrefix = `${oldID}::`;
+        for (const key of Object.keys(record)) {
+          if (!key.startsWith(oldPrefix)) {
+            continue;
+          }
+          const nextKey = `${nextID}::${key.slice(oldPrefix.length)}`;
+          record[nextKey] = record[key];
+          delete record[key];
+        }
+      };
+      moveCacheRecord(sessionCacheRef.current);
+      moveCacheRecord(loadedSessionRef.current);
+      if (oldID !== nextID) {
+        staleSessionKeysRef.current = new Set(
+          Array.from(staleSessionKeysRef.current).map((key) =>
+            key.startsWith(`${oldID}::`)
+              ? `${nextID}::${key.slice(`${oldID}::`.length)}`
+              : key,
+          ),
+        );
+      }
+
+      const moveTreeRecord = <T,>(record: Record<string, T>) => {
+        if (oldID === nextID) {
+          return record;
+        }
+        const next = { ...record };
+        const oldPrefix = `${oldID}:`;
+        for (const key of Object.keys(record)) {
+          if (!key.startsWith(oldPrefix)) {
+            continue;
+          }
+          const nextKey = `${nextID}:${key.slice(oldPrefix.length)}`;
+          next[nextKey] = record[key];
+          delete next[key];
+        }
+        return next;
+      };
+      entriesByPathRef.current = moveTreeRecord(entriesByPathRef.current);
+      setEntriesByPath((prev) => moveTreeRecord(prev));
+      if (oldID !== nextID) {
+        invalidTreeCacheKeysRef.current = new Set(
+          Array.from(invalidTreeCacheKeysRef.current).map((key) =>
+            key.startsWith(`${oldID}:`)
+              ? `${nextID}:${key.slice(`${oldID}:`.length)}`
+              : key,
+          ),
+        );
+      }
+
+      setManagedRootIds((prev) => {
+        const source = prev.length ? prev : Array.from(managedRootIdsRef.current);
+        let replaced = false;
+        const nextIds = source.map((id) => {
+          if (id !== oldID) {
+            return id;
+          }
+          replaced = true;
+          return nextID;
+        });
+        if (!replaced && !nextIds.includes(nextID)) {
+          nextIds.push(nextID);
+        }
+        const deduped = Array.from(new Set(nextIds.filter(Boolean)));
+        managedRootIdsRef.current = new Set(deduped);
+        setRootEntries(
+          mapManagedRootsToEntries(
+            deduped
+              .map((id) => managedRootByIdRef.current[id])
+              .filter((dir): dir is ManagedRootPayload => !!dir),
+          ),
+        );
+        return deduped;
+      });
+      return true;
+    },
+    [],
+  );
+
   const startRelayBinding = useCallback(async () => {
     return bootstrapService.startRelayBinding();
   }, []);
@@ -4881,6 +5015,46 @@ export function App({ onGoHome }: AppProps) {
     worktreeBranch,
     worktreeBranchMode,
   ]);
+
+  const handleRenameCurrentRoot = useCallback(
+    async (nextName: string) => {
+      const rootID = currentRootIdRef.current;
+      const trimmedName = String(nextName || "").trim();
+      if (!rootID || !trimmedName) {
+        return false;
+      }
+      if (trimmedName === rootID) {
+        return true;
+      }
+      try {
+        const renamed = await apiProtectedJSON<ManagedRootPayload>(
+          appPath(`/api/dirs/${encodeURIComponent(rootID)}/rename`),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: trimmedName }),
+          },
+        );
+        applyManagedRootRename(rootID, renamed);
+        if (renamed?.id) {
+          await actionHandlersRef.current.open_dir({
+            path: renamed.id,
+            root: renamed.id,
+            isRoot: true,
+            forceDirectory: true,
+          });
+        }
+        return true;
+      } catch (err) {
+        reportError(
+          "root.rename_failed",
+          managedDirAddErrorMessage(err, "项目重命名失败"),
+        );
+        return false;
+      }
+    },
+    [applyManagedRootRename],
+  );
 
   const handleLocalDirSelect = useCallback((path: string) => {
     setLocalDirState((prev) => {
@@ -5918,6 +6092,30 @@ export function App({ onGoHome }: AppProps) {
           void handleRelayWebSocketClosed();
           break;
         case "root.changed":
+          if (
+            payload?.action === "renamed" &&
+            typeof payload?.old_root_id === "string" &&
+            typeof payload?.root_id === "string"
+          ) {
+            const rootPayload =
+              payload?.root && typeof payload.root === "object"
+                ? ({ ...(payload.root as ManagedRootPayload), id: payload.root_id } as ManagedRootPayload)
+                : null;
+            if (!rootPayload) {
+              break;
+            }
+            applyManagedRootRename(payload.old_root_id, rootPayload);
+            if (currentRootIdRef.current === payload.old_root_id) {
+              void actionHandlersRef.current.open_dir({
+                path: payload.root_id,
+                root: payload.root_id,
+                isRoot: true,
+                forceDirectory: true,
+                preservePluginQuery: true,
+              });
+            }
+            break;
+          }
           void refreshManagedRoots();
           break;
         case "session.imported": {
@@ -7507,6 +7705,7 @@ export function App({ onGoHome }: AppProps) {
           });
         }}
         onUploadFiles={handleTreeUpload}
+        onRenameRoot={handleRenameCurrentRoot}
         onRemoveRoot={handleRemoveCurrentRoot}
         isGitRepo={managedRootByIdRef.current[currentRootId || ""]?.is_git_repo === true}
         isGitWorktree={managedRootByIdRef.current[currentRootId || ""]?.is_git_worktree === true}
@@ -8050,6 +8249,7 @@ export function App({ onGoHome }: AppProps) {
             currentSession={actionBarSession}
             attachedFileContext={attachedFileContext}
             canOpenSessionDrawer={canOpenSessionDrawer}
+            sessionDrawerOpen={isDrawerOpen}
             detachedBoundSession={detachedBoundSession}
             onSendMessage={handleSendMessage}
             onCancelCurrentTurn={handleCancelCurrentTurn}

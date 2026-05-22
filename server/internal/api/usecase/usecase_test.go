@@ -123,6 +123,68 @@ func TestFileCandidateProviderSearch(t *testing.T) {
 	}
 }
 
+func TestRenameManagedDirRenamesDirectoryAndRegistry(t *testing.T) {
+	parent := t.TempDir()
+	oldPath := filepath.Join(parent, "old-root")
+	if err := os.Mkdir(oldPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := rootfs.NewRootInfo("old-root", "old-root", oldPath)
+	registry := &renameManagedDirTestRegistry{root: root}
+	service := Service{Registry: registry}
+
+	out, err := service.RenameManagedDir(context.Background(), RenameManagedDirInput{
+		RootID: "old-root",
+		Name:   "new-root",
+	})
+	if err != nil {
+		t.Fatalf("RenameManagedDir returned error: %v", err)
+	}
+	if out.OldRootID != "old-root" {
+		t.Fatalf("OldRootID = %q, want old-root", out.OldRootID)
+	}
+	if out.Dir.ID != "new-root" {
+		t.Fatalf("renamed ID = %q, want new-root", out.Dir.ID)
+	}
+	if out.Dir.RootPath != filepath.Join(parent, "new-root") {
+		t.Fatalf("renamed path = %q", out.Dir.RootPath)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old path still exists or stat failed unexpectedly: %v", err)
+	}
+	if info, err := os.Stat(out.Dir.RootPath); err != nil || !info.IsDir() {
+		t.Fatalf("new path was not created as directory: %v", err)
+	}
+}
+
+func TestRenameManagedDirRollsBackDirectoryWhenRegistryFails(t *testing.T) {
+	parent := t.TempDir()
+	oldPath := filepath.Join(parent, "old-root")
+	if err := os.Mkdir(oldPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := rootfs.NewRootInfo("old-root", "old-root", oldPath)
+	registry := &renameManagedDirTestRegistry{
+		root:      root,
+		renameErr: errors.New("save failed"),
+	}
+	service := Service{Registry: registry}
+
+	_, err := service.RenameManagedDir(context.Background(), RenameManagedDirInput{
+		RootID: "old-root",
+		Name:   "new-root",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if info, statErr := os.Stat(oldPath); statErr != nil || !info.IsDir() {
+		t.Fatalf("old path was not restored: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(parent, "new-root")); !os.IsNotExist(statErr) {
+		t.Fatalf("new path still exists or stat failed unexpectedly: %v", statErr)
+	}
+}
+
 func TestSkillCandidateProviderSearch(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -536,6 +598,10 @@ func (uploadTestRegistry) RemoveRoot(string) (rootfs.RootInfo, error) {
 	return rootfs.RootInfo{}, nil
 }
 
+func (uploadTestRegistry) RenameRoot(string, string, string) (rootfs.RootInfo, error) {
+	return rootfs.RootInfo{}, nil
+}
+
 func (uploadTestRegistry) ListRoots() []rootfs.RootInfo {
 	return nil
 }
@@ -565,3 +631,73 @@ func (uploadTestRegistry) GetFileWatcher(string, *session.Manager) (*rootfs.Shar
 }
 
 func (uploadTestRegistry) ReleaseFileWatcher(string, string) {}
+
+type renameManagedDirTestRegistry struct {
+	root      rootfs.RootInfo
+	others    []rootfs.RootInfo
+	renameErr error
+}
+
+func (r *renameManagedDirTestRegistry) GetRoot(rootID string) (rootfs.RootInfo, error) {
+	if rootID != r.root.ID {
+		return rootfs.RootInfo{}, errors.New("root not found")
+	}
+	return r.root, nil
+}
+
+func (*renameManagedDirTestRegistry) GetSessionManager(string) (*session.Manager, error) {
+	return nil, nil
+}
+
+func (*renameManagedDirTestRegistry) UpsertRoot(string) (rootfs.RootInfo, error) {
+	return rootfs.RootInfo{}, nil
+}
+
+func (*renameManagedDirTestRegistry) RemoveRoot(string) (rootfs.RootInfo, error) {
+	return rootfs.RootInfo{}, nil
+}
+
+func (r *renameManagedDirTestRegistry) RenameRoot(rootID, name, rootPath string) (rootfs.RootInfo, error) {
+	if r.renameErr != nil {
+		return rootfs.RootInfo{}, r.renameErr
+	}
+	if rootID != r.root.ID {
+		return rootfs.RootInfo{}, errors.New("root not found")
+	}
+	r.root.ID = name
+	r.root.Name = name
+	r.root.RootPath = filepath.Clean(rootPath)
+	return r.root, nil
+}
+
+func (r *renameManagedDirTestRegistry) ListRoots() []rootfs.RootInfo {
+	roots := []rootfs.RootInfo{r.root}
+	roots = append(roots, r.others...)
+	return roots
+}
+
+func (*renameManagedDirTestRegistry) GetAgentPool() *agent.Pool {
+	return nil
+}
+
+func (*renameManagedDirTestRegistry) GetPreferences() *preferences.Store {
+	return nil
+}
+
+func (*renameManagedDirTestRegistry) GetExternalSessionImporter(string) (agenttypes.ExternalSessionImporter, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (*renameManagedDirTestRegistry) GetProber() *agent.Prober {
+	return nil
+}
+
+func (*renameManagedDirTestRegistry) GetCandidateRegistry() *CandidateRegistry {
+	return nil
+}
+
+func (*renameManagedDirTestRegistry) GetFileWatcher(string, *session.Manager) (*rootfs.SharedFileWatcher, error) {
+	return nil, nil
+}
+
+func (*renameManagedDirTestRegistry) ReleaseFileWatcher(string, string) {}

@@ -216,16 +216,22 @@ func isLocalCLIRequest(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func (h *HTTPHandler) broadcastRootChanged(action, rootID string) {
+func (h *HTTPHandler) broadcastRootChanged(action, rootID string, extra ...map[string]any) {
 	if h.AppContext == nil {
 		return
 	}
+	payload := map[string]any{
+		"action":  action,
+		"root_id": rootID,
+	}
+	for _, fields := range extra {
+		for key, value := range fields {
+			payload[key] = value
+		}
+	}
 	h.AppContext.GetSessionStreamHub().BroadcastAll(WSResponse{
-		Type: "root.changed",
-		Payload: map[string]any{
-			"action":  action,
-			"root_id": rootID,
-		},
+		Type:    "root.changed",
+		Payload: payload,
 	})
 }
 
@@ -262,6 +268,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Delete("/api/sessions/{key}", h.protectedEndpoint(h.handleSessionDelete))
 	r.Get("/api/dirs", h.protectedEndpoint(h.handleDirs))
 	r.Post("/api/dirs", h.protectedEndpoint(h.handleAddDir))
+	r.Post("/api/dirs/{id}/rename", h.protectedEndpoint(h.handleRenameDir))
 	r.Delete("/api/dirs", h.protectedEndpoint(h.handleRemoveDir))
 	r.Get("/api/local_dirs", h.protectedEndpoint(h.handleLocalDirs))
 	r.Get("/api/relay/status", h.handleRelayStatus)
@@ -1579,6 +1586,40 @@ func (h *HTTPHandler) handleAddDir(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.AppContext != nil {
 		h.broadcastRootChanged("added", out.Dir.ID)
+	}
+	respondJSON(w, http.StatusOK, managedDirResponse(out.Dir))
+}
+
+func (h *HTTPHandler) handleRenameDir(w http.ResponseWriter, r *http.Request) {
+	rootID := strings.TrimSpace(chi.URLParam(r, "id"))
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.RenameManagedDir(r.Context(), usecase.RenameManagedDirInput{
+		RootID: rootID,
+		Name:   req.Name,
+	})
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, fs.ErrRootNameConflict) || strings.Contains(err.Error(), "already exists") {
+			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "root not found") {
+			status = http.StatusNotFound
+		}
+		respondError(w, status, err)
+		return
+	}
+	if h.AppContext != nil {
+		rootPayload := managedDirResponse(out.Dir)
+		h.broadcastRootChanged("renamed", out.Dir.ID, map[string]any{
+			"old_root_id": out.OldRootID,
+			"root":        rootPayload,
+		})
 	}
 	respondJSON(w, http.StatusOK, managedDirResponse(out.Dir))
 }
