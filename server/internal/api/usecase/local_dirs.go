@@ -34,7 +34,11 @@ func (s *Service) ListLocalDirs(_ context.Context, in ListLocalDirsInput) (ListL
 	}
 	cleaned := strings.TrimSpace(in.Path)
 	if cleaned == "" {
-		return ListLocalDirsOutput{}, errors.New("path required")
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return ListLocalDirsOutput{}, err
+		}
+		cleaned = homeDir
 	}
 	absPath, err := filepath.Abs(filepath.Clean(cleaned))
 	if err != nil {

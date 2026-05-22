@@ -155,6 +155,32 @@ func TestSkillCandidateProviderSearch(t *testing.T) {
 	}
 }
 
+func TestListLocalDirsDefaultsEmptyPathToHome(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	mustWriteFile(t, filepath.Join(homeDir, "project-a", "README.md"), "a")
+	if err := os.MkdirAll(filepath.Join(homeDir, "project-b"), 0o755); err != nil {
+		t.Fatalf("mkdir project-b: %v", err)
+	}
+
+	service := Service{Registry: uploadTestRegistry{}}
+	out, err := service.ListLocalDirs(context.Background(), ListLocalDirsInput{})
+	if err != nil {
+		t.Fatalf("ListLocalDirs returned error: %v", err)
+	}
+	if out.Path != homeDir {
+		t.Fatalf("path = %q, want %q", out.Path, homeDir)
+	}
+	names := make([]string, 0, len(out.Items))
+	for _, item := range out.Items {
+		names = append(names, item.Name)
+	}
+	if strings.Join(names, ",") != "project-a,project-b" {
+		t.Fatalf("items = %q, want project-a,project-b", strings.Join(names, ","))
+	}
+}
+
 func TestCommandCandidatesFromStatus(t *testing.T) {
 	provider := NewSlashCommandCandidateProvider(func(agentName string) (agent.Status, bool) {
 		if agentName != "claude" {

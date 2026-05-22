@@ -4606,14 +4606,6 @@ export function App({ onGoHome }: AppProps) {
 
   const loadLocalDirs = useCallback(async (path: string) => {
     const trimmed = String(path || "").trim();
-    if (!trimmed) {
-      setLocalDirState((prev) => ({
-        ...prev,
-        loading: false,
-        error: "目录路径为空",
-      }));
-      return;
-    }
     setLocalDirState((prev) => ({
       ...prev,
       loading: true,
@@ -4622,8 +4614,9 @@ export function App({ onGoHome }: AppProps) {
       selectedPath: "",
     }));
     try {
+      const params = trimmed ? new URLSearchParams({ path: trimmed }) : undefined;
       const payload = await apiProtectedJSON<LocalDirsPayload>(
-        appURL("/api/local_dirs", new URLSearchParams({ path: trimmed })),
+        appURL("/api/local_dirs", params),
       );
       setLocalDirState({
         path: String(payload.path || trimmed),
@@ -4659,6 +4652,10 @@ export function App({ onGoHome }: AppProps) {
     const initialPath = rootPath ? inferParentPath(rootPath) : "";
     setProjectAddMode(nextMode);
     if (!initialPath || initialPath === ".") {
+      if (!rootPath) {
+        void loadLocalDirs("");
+        return;
+      }
       setLocalDirState((prev) => ({
         ...prev,
         path: rootPath,

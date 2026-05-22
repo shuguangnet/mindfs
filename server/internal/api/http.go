@@ -781,10 +781,6 @@ func (h *HTTPHandler) handleAppUpdatePost(w http.ResponseWriter, r *http.Request
 
 func (h *HTTPHandler) handleLocalDirs(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSpace(r.URL.Query().Get("path"))
-	if path == "" {
-		respondError(w, http.StatusBadRequest, errInvalidRequest("path required"))
-		return
-	}
 	out, err := h.service().ListLocalDirs(r.Context(), usecase.ListLocalDirsInput{
 		Path: path,
 	})
