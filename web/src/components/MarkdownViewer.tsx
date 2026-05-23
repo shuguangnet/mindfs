@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import Prism from "prismjs";
+import { copyText } from "../services/clipboard";
 import { fetchProofProtectedBlob } from "../services/file";
 import { openExternalURL } from "../services/platformNavigation";
 import "prismjs/themes/prism.css";
@@ -175,6 +176,188 @@ function renderDiffCode(rawContent: string) {
       </span>
     );
   });
+}
+
+function MarkdownCodeBlock({
+  className,
+  rawContent,
+  language,
+  sourceLineProps,
+}: {
+  className: string;
+  rawContent: string;
+  language: string;
+  sourceLineProps: Record<string, unknown>;
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const highlightedHtml = useMemo(() => {
+    if (!language || language === "diff") return "";
+    const grammar = Prism.languages[language] ?? Prism.languages.markup;
+    try {
+      return Prism.highlight(rawContent, grammar, language);
+    } catch {
+      return "";
+    }
+  }, [language, rawContent]);
+
+  const handleCopy = () => {
+    if (resetTimerRef.current) {
+      window.clearTimeout(resetTimerRef.current);
+    }
+    void copyText(rawContent)
+      .then(() => {
+        setCopyState("copied");
+      })
+      .catch(() => {
+        setCopyState("failed");
+      })
+      .finally(() => {
+        resetTimerRef.current = window.setTimeout(() => {
+          setCopyState("idle");
+          resetTimerRef.current = null;
+        }, 1200);
+      });
+  };
+
+  const isCopied = copyState === "copied";
+  const isFailed = copyState === "failed";
+
+  return (
+    <div
+      {...sourceLineProps}
+      style={{
+        position: "relative",
+        width: "100%",
+        boxSizing: "border-box",
+        margin: "1.5em 0",
+      }}
+    >
+      <button
+        type="button"
+        onClick={handleCopy}
+        aria-label={isCopied ? "已复制代码" : "复制代码"}
+        title={isCopied ? "已复制" : isFailed ? "复制失败" : "复制代码"}
+        style={{
+          position: "absolute",
+          top: "4px",
+          right: "4px",
+          zIndex: 1,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "24px",
+          height: "24px",
+          borderRadius: "6px",
+          border: "none",
+          background: "transparent",
+          color: isFailed ? "#b91c1c" : "#2563eb",
+          cursor: "pointer",
+          opacity: isFailed ? 1 : 0.5,
+          padding: 0,
+        }}
+      >
+        {isCopied ? (
+          <span
+            aria-hidden="true"
+            style={{
+              fontSize: "13px",
+              fontWeight: 800,
+              lineHeight: 1,
+            }}
+          >
+            ✓
+          </span>
+        ) : (
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+          >
+            <path
+              fill="currentColor"
+              d="M20 2H10c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2m0 12H10V4h10z"
+            />
+            <path
+              fill="currentColor"
+              d="M14 20H4V10h2V8H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-2h-2z"
+            />
+          </svg>
+        )}
+      </button>
+      <pre
+        className={className}
+        style={{
+          width: "100%",
+          boxSizing: "border-box",
+          background: "rgba(0,0,0,0.04)",
+          padding: "16px",
+          borderRadius: "10px",
+          overflow: "auto",
+          border: "1px solid var(--border-color)",
+          fontFamily: monoFontFamily,
+          fontSize: "13px",
+          margin: 0,
+          lineHeight: "1.6",
+          whiteSpace: "pre",
+          tabSize: 2 as any,
+          fontVariantLigatures: "none",
+          boxShadow: "none",
+        }}
+      >
+        {language === "diff" ? (
+          <code
+            className={className}
+            style={{
+              display: "block",
+              textShadow: "none",
+              fontFamily: monoFontFamily,
+              tabSize: 2 as any,
+              fontVariantLigatures: "none",
+              whiteSpace: "pre",
+              border: "none",
+              background: "transparent",
+            }}
+          >
+            {renderDiffCode(rawContent)}
+          </code>
+        ) : highlightedHtml ? (
+          <code
+            className={className}
+            dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+            style={{ display: "block", textShadow: "none", fontFamily: monoFontFamily, border: "none", background: "transparent" }}
+          />
+        ) : (
+          <code
+            className={className}
+            style={{
+              display: "block",
+              textShadow: "none",
+              fontFamily: monoFontFamily,
+              tabSize: 2 as any,
+              fontVariantLigatures: "none",
+              whiteSpace: "pre",
+              border: "none",
+              background: "transparent",
+            }}
+          >
+            {rawContent}
+          </code>
+        )}
+      </pre>
+    </div>
+  );
 }
 
 function normalizePosixPath(input: string): string {
@@ -561,77 +744,13 @@ function MarkdownViewerInner({
               );
             }
 
-            let html = "";
-            if (language && language !== "diff") {
-              const grammar = Prism.languages[language] ?? Prism.languages.markup;
-              try {
-                html = Prism.highlight(rawContent, grammar, language);
-              } catch {
-                html = "";
-              }
-            }
             return (
-              <pre
+              <MarkdownCodeBlock
                 className={className}
-                {...getSourceLineProps(node)}
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  background: "rgba(0,0,0,0.04)",
-                  padding: "16px",
-                  borderRadius: "10px",
-                  overflow: "auto",
-                  border: "1px solid var(--border-color)",
-                  fontFamily: monoFontFamily,
-                  fontSize: "13px",
-                  margin: "1.5em 0",
-                  lineHeight: "1.6",
-                  whiteSpace: "pre",
-                  tabSize: 2 as any,
-                  fontVariantLigatures: "none",
-                  boxShadow: "none",
-                }}
-              >
-                {language === "diff" ? (
-                  <code
-                    className={className}
-                    style={{
-                      display: "block",
-                      textShadow: "none",
-                      fontFamily: monoFontFamily,
-                      tabSize: 2 as any,
-                      fontVariantLigatures: "none",
-                      whiteSpace: "pre",
-                      border: "none",
-                      background: "transparent",
-                    }}
-                  >
-                    {renderDiffCode(rawContent)}
-                  </code>
-                ) : html ? (
-                  <code
-                    className={className}
-                    dangerouslySetInnerHTML={{ __html: html }}
-                    style={{ display: "block", textShadow: "none", fontFamily: monoFontFamily, border: "none", background: "transparent" }}
-                  />
-                ) : (
-                  <code
-                    className={className}
-                    style={{
-                      display: "block",
-                      textShadow: "none",
-                      fontFamily: monoFontFamily,
-                      tabSize: 2 as any,
-                      fontVariantLigatures: "none",
-                      whiteSpace: "pre",
-                      border: "none",
-                      background: "transparent",
-                    }}
-                  >
-                    {rawContent}
-                  </code>
-                )}
-              </pre>
+                rawContent={rawContent}
+                language={language}
+                sourceLineProps={getSourceLineProps(node)}
+              />
             );
           },
         }}
