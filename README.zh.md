@@ -175,6 +175,7 @@ mindfs /path/to/project
 mindfs -addr :9000 /path/to/project
 mindfs -foreground /path/to/project
 mindfs -status
+mindfs -version
 mindfs -stop
 mindfs -restart
 mindfs -remove /path/to/project
@@ -187,6 +188,7 @@ mindfs -remove /path/to/project
 | `-addr string` | `127.0.0.1:7331` | 监听地址。使用 `:7331` 或 `0.0.0.0:7331` 可允许局域网访问。 |
 | `-foreground` | `false` | 前台运行服务，不启动后台进程。适合开发、调试或配合进程管理器使用。 |
 | `-status` | `false` | 查看后台服务状态、PID、访问地址和日志文件路径。 |
+| `-version` | `false` | 查看当前 MindFS 版本。 |
 | `-stop` | `false` | 停止所选监听地址对应的后台服务。 |
 | `-restart` | `false` | 如后台服务已存在则先停止，再重新启动。 |
 | `-remove` | `false` | 从托管目录列表中移除 `root`。服务运行中时通过本地 API 移除；服务未运行时从本地注册表移除。 |

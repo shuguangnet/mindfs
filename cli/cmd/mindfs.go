@@ -53,6 +53,7 @@ func main() {
 		fmt.Fprintf(out, "  mindfs /path/to/project\n")
 		fmt.Fprintf(out, "  mindfs --foreground\n")
 		fmt.Fprintf(out, "  mindfs --status\n")
+		fmt.Fprintf(out, "  mindfs --version\n")
 		fmt.Fprintf(out, "  mindfs --stop\n")
 		fmt.Fprintf(out, "  mindfs -addr :9000 /path/to/project\n")
 		fmt.Fprintf(out, "  mindfs -remove /path/to/project\n")
@@ -65,12 +66,17 @@ func main() {
 	stop := flag.Bool("stop", false, "stop the background mindfs service")
 	restart := flag.Bool("restart", false, "restart the background mindfs service")
 	statusFlag := flag.Bool("status", false, "show background service status")
+	versionFlag := flag.Bool("version", false, "show version")
 	bindRelay := flag.Bool("bind-relay", false, "start relay binding and print the relayer bind URL")
 	remove := flag.Bool("remove", false, "remove the managed directory")
 	tlsFlag := flag.Bool("tls", false, "enable HTTPS (auto-generates self-signed cert if -cert/-key not provided)")
 	certFlag := flag.String("cert", "", "TLS certificate file (PEM); auto-generated if empty with -tls")
 	keyFlag := flag.String("key", "", "TLS private key file (PEM); auto-generated if empty with -tls")
 	flag.Parse()
+	if *versionFlag {
+		printVersion()
+		return
+	}
 	internalRestart := os.Getenv(internalRestartEnvKey) == "1"
 	daemonMode := os.Getenv(daemonEnvKey) == "1"
 	if internalRestart {
@@ -482,11 +488,16 @@ func stopService(addr string, useTLS bool, pidPath string) error {
 	return fmt.Errorf("timed out stopping process %d", pid)
 }
 
+func printVersion() {
+	fmt.Fprintf(os.Stdout, "mindfs version: %s\n", version)
+}
+
 func printServiceStatus(addr string, useTLS bool, pidPath, logPath string) error {
 	pid, err := resolveServicePID(addr, useTLS, pidPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintln(os.Stdout, "mindfs status: stopped")
+			fmt.Fprintf(os.Stdout, "version: %s\n", version)
 			return nil
 		}
 		return err
@@ -495,6 +506,7 @@ func printServiceStatus(addr string, useTLS bool, pidPath, logPath string) error
 	fmt.Fprintf(os.Stdout, "pid: %d\n", pid)
 	fmt.Fprintf(os.Stdout, "addr: %s\n", addrToURL(addr, "", useTLS))
 	fmt.Fprintf(os.Stdout, "log file: %s\n", logPath)
+	fmt.Fprintf(os.Stdout, "version: %s\n", version)
 	return nil
 }
 

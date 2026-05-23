@@ -175,6 +175,7 @@ mindfs /path/to/project
 mindfs -addr :9000 /path/to/project
 mindfs -foreground /path/to/project
 mindfs -status
+mindfs -version
 mindfs -stop
 mindfs -restart
 mindfs -remove /path/to/project
@@ -187,6 +188,7 @@ mindfs -remove /path/to/project
 | `-addr string` | `127.0.0.1:7331` | Listen address. Use `:7331` or `0.0.0.0:7331` to allow LAN access. |
 | `-foreground` | `false` | Run the server in the foreground instead of starting a background service. |
 | `-status` | `false` | Show background service status, PID, URL, and log file path. |
+| `-version` | `false` | Show the current MindFS version. |
 | `-stop` | `false` | Stop the background service for the selected address. |
 | `-restart` | `false` | Stop the background service if present, then start it again. |
 | `-remove` | `false` | Remove `root` from the managed directory list. If the server is running, it is removed through the local API; otherwise it is removed from the local registry. |
