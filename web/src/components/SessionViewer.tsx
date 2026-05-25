@@ -66,6 +66,7 @@ type SessionViewerProps = {
     toolUseId: string;
     answers: Record<string, string>;
   }) => void | Promise<void>;
+  targetSeqRequestKey?: string | number;
 };
 
 type AskUserQuestionOption = {
@@ -778,6 +779,7 @@ function SessionViewerInner({
   rootPath,
   interactionMode = "main",
   targetSeq = 0,
+  targetSeqRequestKey = "",
   gitFileStatsByPath = {},
   onFileClick,
   onRootClick,
@@ -815,7 +817,19 @@ function SessionViewerInner({
   const isAwaiting = !!(session as any)?.pending;
   const shouldStickToBottomRef = useRef(true);
   const lastSessionKeyRef = useRef<string | null>(null);
+  const targetSeqScrollKeyRef = useRef("");
+  const targetSeqFrameRef = useRef<number | null>(null);
+  const targetSeqTimerRefs = useRef<number[]>([]);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+
+  const cancelTargetSeqScroll = () => {
+    if (targetSeqFrameRef.current !== null) {
+      window.cancelAnimationFrame(targetSeqFrameRef.current);
+      targetSeqFrameRef.current = null;
+    }
+    targetSeqTimerRefs.current.forEach((timer) => window.clearTimeout(timer));
+    targetSeqTimerRefs.current = [];
+  };
 
   useEffect(() => {
     onFileClickRef.current = onFileClick;
@@ -852,6 +866,12 @@ function SessionViewerInner({
         window.clearTimeout(timer),
       );
       copyResetTimersRef.current = {};
+      if (targetSeqFrameRef.current !== null) {
+        window.cancelAnimationFrame(targetSeqFrameRef.current);
+        targetSeqFrameRef.current = null;
+      }
+      targetSeqTimerRefs.current.forEach((timer) => window.clearTimeout(timer));
+      targetSeqTimerRefs.current = [];
     };
   }, []);
 
@@ -910,6 +930,11 @@ if (useInnerScrollContainer && !container) {
 
   useEffect(() => {
     if (!targetSeq) {
+      targetSeqScrollKeyRef.current = "";
+      return;
+    }
+    const scrollKey = `${sessionKey || ""}:${targetSeq}:${targetSeqRequestKey}`;
+    if (targetSeqScrollKeyRef.current === scrollKey) {
       return;
     }
     const container = scrollRef.current;
@@ -922,10 +947,45 @@ if (useInnerScrollContainer && !container) {
     if (!node) {
       return;
     }
-    window.requestAnimationFrame(() => {
-      node.scrollIntoView({ block: "center", behavior: "smooth" });
+    targetSeqScrollKeyRef.current = scrollKey;
+    shouldStickToBottomRef.current = false;
+    cancelTargetSeqScroll();
+    const scrollToNode = () => {
+      const latestContainer = scrollRef.current;
+      const latestNode = latestContainer?.querySelector<HTMLElement>(
+        `[data-session-seq="${targetSeq}"]`,
+      );
+      if (!latestContainer || !latestNode) {
+        return;
+      }
+      shouldStickToBottomRef.current = false;
+      const nextTop = Math.max(
+        0,
+        latestNode.offsetTop -
+          latestContainer.clientHeight / 2 +
+          latestNode.offsetHeight / 2,
+      );
+      latestContainer.scrollTo({ top: nextTop, behavior: "auto" });
+    };
+    targetSeqFrameRef.current = window.requestAnimationFrame(() => {
+      targetSeqFrameRef.current = window.requestAnimationFrame(() => {
+        targetSeqFrameRef.current = null;
+        scrollToNode();
+      });
     });
-  }, [targetSeq, timeline]);
+    [80, 220, 480].forEach((delay) => {
+      const timer = window.setTimeout(() => {
+        targetSeqTimerRefs.current = targetSeqTimerRefs.current.filter(
+          (item) => item !== timer,
+        );
+        if (targetSeqScrollKeyRef.current !== scrollKey) {
+          return;
+        }
+        scrollToNode();
+      }, delay);
+      targetSeqTimerRefs.current.push(timer);
+    });
+  }, [sessionKey, targetSeq, targetSeqRequestKey, timeline]);
 
   const rawRelated = session?.related_files || (session as any)?.outputs || [];
   const relatedFiles = (Array.isArray(rawRelated) ? rawRelated : [])
@@ -1025,7 +1085,9 @@ if (useInnerScrollContainer && !container) {
     flexShrink: 0,
   };
 
-  const makePromptKey = (item: TimelineItem): string =>
+  const makePromptKey = (
+    item: Extract<TimelineItem, { type: "user_text" | "assistant_text" }>,
+  ): string =>
     `${item.id}\n${item.timestamp || ""}\n${item.content || ""}`;
 
   const renderTimelineItem = (
@@ -1901,6 +1963,10 @@ if (useInnerScrollContainer && !container) {
           <button
             type="button"
             onClick={() => {
+              cancelTargetSeqScroll();
+              if (targetSeq) {
+                targetSeqScrollKeyRef.current = `${sessionKey || ""}:${targetSeq}:${targetSeqRequestKey}`;
+              }
               shouldStickToBottomRef.current = true;
               setShowJumpToLatest(false);
               scrollEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -1974,6 +2040,8 @@ export const SessionViewer = memo(
     prev.rootId === next.rootId &&
     prev.rootPath === next.rootPath &&
     prev.interactionMode === next.interactionMode &&
+    prev.targetSeq === next.targetSeq &&
+    prev.targetSeqRequestKey === next.targetSeqRequestKey &&
     prev.gitFileStatsByPath === next.gitFileStatsByPath &&
     prev.onRootClick === next.onRootClick,
 );

@@ -133,6 +133,7 @@ export type SessionItem = {
     modelContextWindow: number;
   };
   search_seq?: number;
+  search_target_id?: string;
   search_snippet?: string;
   search_match_type?: "name" | "user" | "reply";
   related_files?: RelatedFile[];
@@ -227,6 +228,10 @@ function toSessionItem(
         : undefined,
     search_seq:
       typeof session?.search_seq === "number" ? session.search_seq : undefined,
+    search_target_id:
+      typeof session?.search_target_id === "string"
+        ? session.search_target_id
+        : undefined,
     search_snippet:
       typeof session?.search_snippet === "string"
         ? session.search_snippet
@@ -969,6 +974,7 @@ export function App({ onGoHome }: AppProps) {
   const selectedDirRef = useRef<string | null>(null);
   const fileRef = useRef<FilePayload | null>(null);
   const selectedSessionRef = useRef<SessionItem | null>(null);
+  const sessionSearchTargetCounterRef = useRef(0);
   const currentSessionRef = useRef<SessionItem | null>(null);
   const interactionModeRef = useRef<"main" | "drawer">("main");
   const pendingDraftRef = useRef<PendingSend | null>(null);
@@ -1728,6 +1734,10 @@ export function App({ onGoHome }: AppProps) {
         ...(cached as any),
         ...(drawerSession?.key === key ? (drawerSession as any) : null),
         key,
+        search_seq: (session as any).search_seq,
+        search_target_id: (session as any).search_target_id,
+        search_snippet: (session as any).search_snippet,
+        search_match_type: (session as any).search_match_type,
         exchanges,
         pending,
       } as any;
@@ -3032,6 +3042,10 @@ export function App({ onGoHome }: AppProps) {
         currentDrawer?.key === key
           ? !!(currentDrawer as any)?.pending
           : !!(session as any)?.pending;
+      const searchTargetId =
+        typeof session?.search_seq === "number"
+          ? `${key}:${session.search_seq}:${++sessionSearchTargetCounterRef.current}`
+          : undefined;
       replaceURLState({
         root: targetRoot,
         file: "",
@@ -3051,6 +3065,7 @@ export function App({ onGoHome }: AppProps) {
         toSessionItem(targetRoot, {
           ...(session as any),
           pending: preservePending,
+          search_target_id: searchTargetId || session?.search_target_id,
         }),
       );
       setInteractionMode("main");
@@ -7228,6 +7243,7 @@ export function App({ onGoHome }: AppProps) {
     <SessionViewer
       session={selectedSessionSnapshot}
       targetSeq={selectedSession?.search_seq}
+      targetSeqRequestKey={selectedSession?.search_target_id}
       loading={selectedSessionLoading}
       rootId={selectedSession?.root_id || currentRootId}
       rootPath={
@@ -8340,6 +8356,7 @@ export function App({ onGoHome }: AppProps) {
               <SessionViewer
                 session={drawerSessionSnapshot}
                 targetSeq={currentSession?.search_seq}
+                targetSeqRequestKey={currentSession?.search_target_id}
                 loading={false}
                 rootId={currentRootId}
                 rootPath={
