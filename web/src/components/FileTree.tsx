@@ -1,7 +1,7 @@
 import React from "react";
 import { rootBadgeStyle } from "./rootBadgeStyle";
 import { openExternalURL } from "../services/platformNavigation";
-import { isCapacitorRuntime, shouldEnablePWAInstall } from "../services/runtime";
+import { isNativeShellRuntime, shouldEnablePWAInstall } from "../services/runtime";
 import {
   DIRECTORY_SORT_OPTIONS,
   type DirectorySortMode,
@@ -741,14 +741,26 @@ export function FileTree({
     return isAndroid && isChrome && !isExcluded;
   }, []);
 
-  const isAndroidApp = React.useMemo(() => {
-    if (!isCapacitorRuntime() || typeof window === "undefined") {
-      return false;
+  const [isNativeApp, setIsNativeApp] = React.useState(() => isNativeShellRuntime());
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
     }
-    const platform = (window as Window & {
-      Capacitor?: { getPlatform?: () => string };
-    }).Capacitor?.getPlatform?.();
-    return platform === "android";
+    const refreshNativeRuntime = () => {
+      setIsNativeApp(isNativeShellRuntime());
+    };
+    refreshNativeRuntime();
+    const timers = [250, 1000, 2000].map((delay) => window.setTimeout(refreshNativeRuntime, delay));
+    window.addEventListener("mindfs:native-bridge-ready", refreshNativeRuntime);
+    window.addEventListener("pageshow", refreshNativeRuntime);
+    window.addEventListener("focus", refreshNativeRuntime);
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      window.removeEventListener("mindfs:native-bridge-ready", refreshNativeRuntime);
+      window.removeEventListener("pageshow", refreshNativeRuntime);
+      window.removeEventListener("focus", refreshNativeRuntime);
+    };
   }, []);
 
   const isDesktopChromium = React.useMemo(() => {
@@ -876,8 +888,8 @@ export function FileTree({
         ? "安装后可从桌面独立启动"
         : "当前浏览器未提供安装弹窗";
 
-  const shouldShowInstallButton = !isAndroidApp && !isKnownInstalled && !(isAndroidChrome && !deferredInstallPrompt);
-  const shouldShowInstallHelp = !isAndroidApp && (!!installHelp) && (isKnownInstalled || isIOS || isMacSafari || isDesktopChromium || deferredInstallPrompt !== null || (isAndroidChrome && !deferredInstallPrompt));
+  const shouldShowInstallButton = !isNativeApp && !isKnownInstalled && !(isAndroidChrome && !deferredInstallPrompt);
+  const shouldShowInstallHelp = !isNativeApp && (!!installHelp) && (isKnownInstalled || isIOS || isMacSafari || isDesktopChromium || deferredInstallPrompt !== null || (isAndroidChrome && !deferredInstallPrompt));
   const visibleRelayTips = React.useMemo(
     () => relayTips.filter((tip) => tip.id && tip.title && !dismissedRelayTipIds.includes(tip.id)),
     [dismissedRelayTipIds, relayTips],
@@ -893,7 +905,7 @@ export function FileTree({
     !!relayActionLabel ||
     !!relayActionHelp ||
     shouldShowRelayTip ||
-    (isAndroidApp && !!onGoHome) ||
+    (isNativeApp && !!onGoHome) ||
     shouldShowInstallButton ||
     shouldShowInstallHelp;
 
@@ -1689,6 +1701,7 @@ export function FileTree({
         )}
       </div>
       <div
+        data-mindfs-filetree-footer="1"
         style={{
           padding: hasFooterContent ? "10px 12px 12px" : "0",
           borderTop: hasFooterContent ? "1px solid var(--border-color)" : "none",
@@ -2009,7 +2022,7 @@ export function FileTree({
             {relayActionHelp}
           </div>
         ) : null}
-        {isAndroidApp && onGoHome ? (
+        {isNativeApp && onGoHome ? (
           <button
             type="button"
             onClick={() => onGoHome()}

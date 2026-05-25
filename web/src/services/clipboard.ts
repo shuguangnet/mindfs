@@ -1,4 +1,5 @@
-import { isCapacitorRuntime } from "./runtime";
+import { getNativeBridge } from "./nativeBridge";
+import { isCapacitorRuntime, isNativeShellRuntime } from "./runtime";
 
 async function writeTextWithExecCommand(text: string): Promise<void> {
   if (typeof document === "undefined") {
@@ -50,9 +51,28 @@ async function writeTextWithCapacitor(text: string): Promise<boolean> {
   }
 }
 
+async function writeTextWithNativeBridge(text: string): Promise<boolean> {
+  if (!isNativeShellRuntime()) {
+    return false;
+  }
+  try {
+    const native = getNativeBridge();
+    if (typeof native?.writeClipboardText !== "function") {
+      return false;
+    }
+    const result = await native.writeClipboardText(text);
+    return result !== false;
+  } catch {
+    return false;
+  }
+}
+
 export async function copyText(text: string): Promise<void> {
   if (!text) {
     throw new Error("复制内容为空");
+  }
+  if (await writeTextWithNativeBridge(text)) {
+    return;
   }
   if (await writeTextWithCapacitor(text)) {
     return;

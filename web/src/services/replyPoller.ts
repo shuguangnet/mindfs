@@ -1,7 +1,8 @@
 import { registerPlugin } from "@capacitor/core";
 import { appURL } from "./base";
 import { e2eeService } from "./e2ee";
-import { isCapacitorRuntime } from "./runtime";
+import { getNativeBridge } from "./nativeBridge";
+import { isHarmonyRuntime, isNativeShellRuntime } from "./runtime";
 
 type ReplyPollerPlugin = {
   configure(options: {
@@ -18,10 +19,26 @@ type NativeReplyPollerBridge = {
   configure?: (payload: string) => void;
 };
 
+type NativeReplyPollerSyncWindow = Window & {
+  MindFSReplyPoller?: NativeReplyPollerBridge;
+  __mindfsLatestReplyPollerConfig?: ReplyPollerConfigPayload;
+};
+
 const ReplyPoller = registerPlugin<ReplyPollerPlugin>("ReplyPoller");
 
+type ReplyPollerConfigPayload = {
+  apiBaseUrl: string;
+  e2eeRequired?: boolean;
+  e2eeNodeId?: string;
+  e2eeClientId?: string;
+  e2eeTransportKey?: string;
+};
+
 export async function syncNativeReplyPollerE2EE(): Promise<void> {
-  if (!isCapacitorRuntime()) {
+  const native = getNativeBridge();
+  const bridge = (window as NativeReplyPollerSyncWindow).MindFSReplyPoller;
+  const hasHarmonyBridge = typeof native?.configureReplyPoller === "function" || typeof bridge?.configure === "function";
+  if (!isNativeShellRuntime() && !hasHarmonyBridge) {
     return;
   }
   const apiBaseUrl = nativeReplyPollerBaseURL();
@@ -36,12 +53,23 @@ export async function syncNativeReplyPollerE2EE(): Promise<void> {
     e2eeClientId: e2ee.clientId,
     e2eeTransportKey: e2ee.transportKey,
   };
-  const bridge = (window as Window & { MindFSReplyPoller?: NativeReplyPollerBridge }).MindFSReplyPoller;
+  rememberLatestReplyPollerConfig(payload);
+  if (typeof native?.configureReplyPoller === "function") {
+    await native.configureReplyPoller(JSON.stringify(payload));
+    return;
+  }
   if (typeof bridge?.configure === "function") {
     bridge.configure(JSON.stringify(payload));
     return;
   }
   await ReplyPoller.configure(payload);
+}
+
+function rememberLatestReplyPollerConfig(payload: ReplyPollerConfigPayload): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  (window as NativeReplyPollerSyncWindow).__mindfsLatestReplyPollerConfig = payload;
 }
 
 function nativeReplyPollerBaseURL(): string {
@@ -70,6 +98,9 @@ function nativeReplyPollerBaseURL(): string {
 function isLocalShellURL(value: string): boolean {
   try {
     const url = new URL(value);
+    if (isHarmonyRuntime()) {
+      return url.hostname === "mindfs.local";
+    }
     return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]");
   } catch {
     return false;

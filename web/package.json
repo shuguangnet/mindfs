@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:android": "rimraf ../android/app/src/main/assets/public && VITE_APP_SHELL=1 vite build --outDir ../android/app/src/main/assets/public --emptyOutDir",
+    "build:harmony": "rimraf ../harmony/entry/src/main/resources/rawfile/public && VITE_APP_SHELL=1 VITE_NATIVE_PLATFORM=harmony vite build --outDir ../harmony/entry/src/main/resources/rawfile/public --emptyOutDir",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "preview": "vite preview"
   },

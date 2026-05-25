@@ -75,6 +75,8 @@ import {
   cancelScheduledWebViewCacheClear,
   scheduleWebViewCacheClearOnNextLaunch,
 } from "./services/nativeCacheControl";
+import { storeRelayNodes } from "./services/launcherNodeSync";
+import { isNativeShellRuntime } from "./services/runtime";
 // 直接导入标准组件
 import { AppShell } from "./layout/AppShell";
 import { FileTree } from "./components/FileTree";
@@ -493,6 +495,44 @@ function isRelayPWAContext(): boolean {
       window.location.pathname === "/nodes" ||
       window.location.pathname === "/login")
   );
+}
+
+function isRelayNodesPage(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return (window.location.pathname.replace(/\/+$/, "") || "/") === "/nodes";
+}
+
+function relayNodeURL(rootID: string): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const trimmed = String(rootID || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  return new URL(`/n/${encodeURIComponent(trimmed)}/`, window.location.origin).toString();
+}
+
+function syncRelayNodesToNative(dirs: ManagedRootPayload[]): void {
+  if ((!isNativeShellRuntime() && !isRelayPWAContext()) || !isRelayNodesPage()) {
+    return;
+  }
+  const nodes = dirs
+    .map((dir) => {
+      const id = String(dir.id || "").trim();
+      const url = relayNodeURL(id);
+      const name = String(
+        dir.display_name || dir.root_path?.split("/").filter(Boolean).pop() || id,
+      ).trim();
+      if (!id || !url || !name) {
+        return null;
+      }
+      return { name, url };
+    })
+    .filter((node): node is { name: string; url: string } => node !== null);
+  void storeRelayNodes(nodes);
 }
 
 function extractHTTPStatusFromErrorMessage(message: string): number | null {
@@ -4430,6 +4470,7 @@ export function App({ onGoHome }: AppProps) {
       return;
     }
     const nextDirs = Array.isArray(dirs) ? dirs : [];
+    syncRelayNodesToNative(nextDirs);
     const nextRootIds = nextDirs.map((dir) => dir.id).filter(Boolean);
     managedRootByIdRef.current = Object.fromEntries(
       nextDirs.filter((dir) => !!dir.id).map((dir) => [dir.id, dir]),
@@ -6589,6 +6630,7 @@ export function App({ onGoHome }: AppProps) {
           return;
         }
         const nextDirs = dirs as ManagedRootPayload[];
+        syncRelayNodesToNative(nextDirs);
         const ids = nextDirs.map((d) => d.id);
         managedRootByIdRef.current = Object.fromEntries(
           nextDirs.filter((dir) => !!dir.id).map((dir) => [dir.id, dir]),

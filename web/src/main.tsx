@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./App";
 import { registerServiceWorker } from "./registerServiceWorker";
-import { isCapacitorRuntime } from "./services/runtime";
+import { isHarmonyRuntime, isNativeShellRuntime } from "./services/runtime";
 import { Login } from "./components/Login";
 
 function readableAssetPath(raw: string): string {
@@ -130,12 +130,29 @@ function dynamicImportFailureURL(reason: unknown): string {
   return mindFSAssetPath(match[0]);
 }
 
-function isLocalCapacitorShell(): boolean {
-  if (!isCapacitorRuntime() || typeof window === "undefined") {
+function isNativeLauncherOrigin(): boolean {
+  if (!isNativeShellRuntime() || typeof window === "undefined") {
     return false;
   }
   const hostname = window.location.hostname.toLowerCase();
-  return hostname === "localhost" || hostname === "127.0.0.1";
+  if (isHarmonyRuntime()) {
+    return hostname === "mindfs.local";
+  }
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "mindfs.local";
+}
+
+function nativeLauncherURL(): string {
+  if (typeof window === "undefined") {
+    return "http://localhost";
+  }
+  if (isHarmonyRuntime()) {
+    return "https://mindfs.local/index.html";
+  }
+  const hostname = window.location.hostname.toLowerCase();
+  if (hostname === "mindfs.local") {
+    return "https://mindfs.local/index.html";
+  }
+  return "http://localhost";
 }
 
 function normalizeSystemBarColor(input: string, fallback: string): string {
@@ -243,7 +260,7 @@ function isIOSWebKit(): boolean {
   );
 }
 
-let largestCapacitorViewportHeight = 0;
+let largestNativeViewportHeight = 0;
 
 function readRootPixelVar(name: string): number {
   if (typeof document === "undefined") {
@@ -260,7 +277,7 @@ function syncViewportHeight(): void {
   }
 
   const visualViewport = window.visualViewport;
-  const isNativeShell = isCapacitorRuntime();
+  const isNativeShell = isNativeShellRuntime();
   const rawViewportHeight = isNativeShell || !visualViewport
     ? window.innerHeight
     : visualViewport.height;
@@ -268,11 +285,11 @@ function syncViewportHeight(): void {
   if (isNativeShell) {
     const imeBottom = readRootPixelVar("--mindfs-ime-bottom");
     if (imeBottom > 0) {
-      largestCapacitorViewportHeight ||= rawViewportHeight;
+      largestNativeViewportHeight ||= rawViewportHeight;
     } else {
-      largestCapacitorViewportHeight = rawViewportHeight;
+      largestNativeViewportHeight = rawViewportHeight;
     }
-    const resizedBy = Math.max(0, largestCapacitorViewportHeight - rawViewportHeight);
+    const resizedBy = Math.max(0, largestNativeViewportHeight - rawViewportHeight);
     const remainingImeOverlay = Math.max(0, imeBottom - resizedBy);
     viewportHeight = Math.max(320, rawViewportHeight - remainingImeOverlay);
   }
@@ -354,13 +371,13 @@ function installIOSKeyboardPanLock(): () => void {
 }
 
 function AppRoot() {
-  const [ready] = useState(() => !isLocalCapacitorShell());
+  const [ready] = useState(() => !isNativeLauncherOrigin());
 
   const goToLauncher = () => {
     if (typeof window === "undefined") {
       return;
     }
-    window.location.assign("http://localhost");
+    window.location.assign(nativeLauncherURL());
   };
 
   useEffect(() => {
@@ -378,7 +395,7 @@ function AppRoot() {
     window.visualViewport?.addEventListener("scroll", syncViewportHeight);
     const uninstallIOSKeyboardPanLock = installIOSKeyboardPanLock();
 
-    if (!isCapacitorRuntime()) {
+    if (!isNativeShellRuntime()) {
       return () => {
         window.removeEventListener("resize", syncViewportHeight);
         window.removeEventListener("orientationchange", syncViewportHeight);

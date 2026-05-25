@@ -10,11 +10,12 @@ import {
   setNativeLauncherNodes,
 } from "../services/launcherNodeSync";
 import {
-  fetchAndroidUpdateState,
-  isAndroidRuntime,
-  normalizeAndroidUpdateState,
-  type AndroidUpdateState,
-} from "../services/androidUpdate";
+  appPackageLabel,
+  fetchAppUpdateState,
+  isUpdatableNativeRuntime,
+  normalizeAppUpdateState,
+  type AppUpdateState,
+} from "../services/appUpdate";
 import { downloadURL } from "../services/download";
 
 type LoginProps = {
@@ -98,7 +99,7 @@ function mergeLauncherNodes(...groups: LauncherNode[][]): LauncherNode[] {
   return sortNodes(merged);
 }
 
-function shouldShowAndroidUpdate(state: AndroidUpdateState): boolean {
+function shouldShowAppUpdate(state: AppUpdateState): boolean {
   const status = (state.status || "idle").toLowerCase();
   return (
     state.has_update === true ||
@@ -108,13 +109,13 @@ function shouldShowAndroidUpdate(state: AndroidUpdateState): boolean {
   );
 }
 
-function androidUpdateSummary(state: AndroidUpdateState): string {
+function appUpdateSummary(state: AppUpdateState): string {
   const notes = String(state.notes || "").trim();
   if (notes) {
     return notes;
   }
   if (state.latest_version) {
-    return `发现 Android ${state.latest_version} 新版本`;
+    return `发现 ${appPackageLabel(state.platform)} ${state.latest_version} 新版本`;
   }
   return "";
 }
@@ -127,10 +128,10 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
   const [formError, setFormError] = useState("");
   const [editingNodeID, setEditingNodeID] = useState("");
   const [editingNodeName, setEditingNodeName] = useState("");
-  const [androidUpdateState, setAndroidUpdateState] =
-    useState<AndroidUpdateState>(() => normalizeAndroidUpdateState(null));
-  const [androidUpdateNotesOpen, setAndroidUpdateNotesOpen] = useState(false);
-  const [androidUpdateBusy, setAndroidUpdateBusy] = useState(false);
+  const [appUpdateState, setAppUpdateState] =
+    useState<AppUpdateState>(() => normalizeAppUpdateState(null));
+  const [appUpdateNotesOpen, setAppUpdateNotesOpen] = useState(false);
+  const [appUpdateBusy, setAppUpdateBusy] = useState(false);
 
   function persistNodes(nextNodes: LauncherNode[]): void {
     const sorted = sortNodes(nextNodes);
@@ -210,26 +211,26 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
     setNodeURL("");
     setFormError("");
     setComposerOpen(false);
-    onOpenNode(nextNode.url);
   }
 
-  async function handleDownloadAndroidUpdate(): Promise<void> {
-    const next = normalizeAndroidUpdateState(androidUpdateState);
-    if (!next.download_url || androidUpdateBusy) {
+  async function handleDownloadAppUpdate(): Promise<void> {
+    const next = normalizeAppUpdateState(appUpdateState);
+    const packageLabel = appPackageLabel(next.platform);
+    if (!next.download_url || appUpdateBusy) {
       return;
     }
-    setAndroidUpdateBusy(true);
-    setAndroidUpdateState((prev) =>
-      normalizeAndroidUpdateState({
+    setAppUpdateBusy(true);
+    setAppUpdateState((prev) =>
+      normalizeAppUpdateState({
         ...prev,
         status: "downloading",
-        message: "正在下载 Android 更新包",
+        message: `正在下载 ${packageLabel} 更新包`,
       }),
     );
     try {
-      await downloadURL(next.download_url, next.filename || "mindfs-android.apk");
-      setAndroidUpdateState((prev) =>
-        normalizeAndroidUpdateState({
+      await downloadURL(next.download_url, next.filename || "");
+      setAppUpdateState((prev) =>
+        normalizeAppUpdateState({
           ...prev,
           status: "downloaded",
           message: "更新包已开始下载，请在系统通知或下载目录中打开安装",
@@ -237,22 +238,24 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
       );
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Android 更新下载失败";
-      setAndroidUpdateState((prev) =>
-        normalizeAndroidUpdateState({
+        error instanceof Error ? error.message : `${packageLabel} 更新下载失败`;
+      setAppUpdateState((prev) =>
+        normalizeAppUpdateState({
           ...prev,
           status: "failed",
           message,
         }),
       );
     } finally {
-      setAndroidUpdateBusy(false);
+      setAppUpdateBusy(false);
     }
   }
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
+    const timers: number[] = [];
+
+    const syncLauncherNodes = async (): Promise<void> => {
       const [nativeNodes, pendingNodes] = await Promise.all([
         getNativeLauncherNodes(),
         consumePendingRelayNodes(),
@@ -285,11 +288,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
       }
 
       const nextNodes = mergeLauncherNodes(importedNodes, restoredNodes);
-      if (
-        nextNodes.length === existingNodes.length &&
-        nextNodes.length === nativeNodes.length &&
-        importedNodes.length === 0
-      ) {
+      if (nextNodes.length === existingNodes.length && importedNodes.length === 0) {
         return;
       }
 
@@ -298,55 +297,66 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
       if (!cancelled) {
         setNodes(nextNodes);
       }
-    })();
+    };
+
+    const handleLauncherNodesUpdated = (): void => {
+      void syncLauncherNodes();
+    };
+
+    void syncLauncherNodes();
+    timers.push(window.setTimeout(() => void syncLauncherNodes(), 1200));
+    timers.push(window.setTimeout(() => void syncLauncherNodes(), 3200));
+    window.addEventListener("mindfs:launcher-nodes-updated", handleLauncherNodesUpdated);
 
     return () => {
       cancelled = true;
+      window.removeEventListener("mindfs:launcher-nodes-updated", handleLauncherNodesUpdated);
+      timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, []);
 
   useEffect(() => {
-    if (!isAndroidRuntime()) {
-      setAndroidUpdateState(normalizeAndroidUpdateState(null));
+    if (!isUpdatableNativeRuntime() || nodes.length === 0) {
+      setAppUpdateState(normalizeAppUpdateState(null));
       return;
     }
 
     let cancelled = false;
-    void fetchAndroidUpdateState()
+    void fetchAppUpdateState()
       .then((state) => {
         if (!cancelled) {
-          setAndroidUpdateState(state);
+          setAppUpdateState(state);
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          console.warn("[android-update] launcher check failed", error);
-          setAndroidUpdateState(normalizeAndroidUpdateState(null));
+          console.warn("[app-update] launcher check failed", error);
+          setAppUpdateState(normalizeAppUpdateState(null));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [nodes.length]);
 
-  const showAndroidUpdate = shouldShowAndroidUpdate(androidUpdateState);
-  const androidUpdateStatus = (androidUpdateState.status || "idle").toLowerCase();
-  const androidUpdateDisabled =
-    androidUpdateBusy ||
-    androidUpdateStatus === "downloading" ||
-    androidUpdateStatus === "downloaded";
-  const androidUpdateText =
-    androidUpdateStatus === "downloading"
+  const showAppUpdate = shouldShowAppUpdate(appUpdateState);
+  const appUpdateStatus = (appUpdateState.status || "idle").toLowerCase();
+  const appUpdateDisabled =
+    appUpdateBusy ||
+    appUpdateStatus === "downloading" ||
+    appUpdateStatus === "downloaded";
+  const appUpdateText =
+    appUpdateStatus === "downloading"
       ? "下载中..."
-      : androidUpdateStatus === "downloaded"
+      : appUpdateStatus === "downloaded"
         ? "已开始下载"
         : "更新APP";
-  const androidUpdateHelp =
-    androidUpdateState.message ||
-    (androidUpdateState.latest_version
-      ? `当前 ${androidUpdateState.current_version || "未知"}，最新 ${androidUpdateState.latest_version}`
+  const appUpdateHelp =
+    appUpdateState.message ||
+    (appUpdateState.latest_version
+      ? `当前 ${appUpdateState.current_version || "未知"}，最新 ${appUpdateState.latest_version}`
       : "");
-  const androidUpdateNotes = androidUpdateSummary(androidUpdateState);
+  const appUpdateNotes = appUpdateSummary(appUpdateState);
 
   return (
     <div
@@ -582,7 +592,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
           </div>
         ))}
 
-        {showAndroidUpdate ? (
+        {showAppUpdate ? (
           <div
             style={{
               border: `1px solid ${BORDER}`,
@@ -615,7 +625,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                 >
                   新版本
                 </div>
-                {androidUpdateHelp ? (
+                {appUpdateHelp ? (
                   <div
                     style={{
                       fontSize: "12px",
@@ -624,33 +634,33 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                       wordBreak: "break-word",
                     }}
                   >
-                    {androidUpdateHelp}
+                    {appUpdateHelp}
                   </div>
                 ) : null}
               </div>
               <button
                 type="button"
-                disabled={androidUpdateDisabled}
+                disabled={appUpdateDisabled}
                 onClick={() => {
-                  void handleDownloadAndroidUpdate();
+                  void handleDownloadAppUpdate();
                 }}
                 style={{
                   border: "none",
                   borderRadius: "14px",
-                  background: androidUpdateDisabled ? "rgba(148, 163, 184, 0.35)" : ACCENT,
-                  color: androidUpdateDisabled ? MUTED : "#fff8f2",
+                  background: appUpdateDisabled ? "rgba(148, 163, 184, 0.35)" : ACCENT,
+                  color: appUpdateDisabled ? MUTED : "#fff8f2",
                   padding: "10px 14px",
                   fontSize: "13px",
                   fontWeight: 600,
-                  cursor: androidUpdateDisabled ? "not-allowed" : "pointer",
+                  cursor: appUpdateDisabled ? "not-allowed" : "pointer",
                   flexShrink: 0,
                   minWidth: "86px",
                 }}
               >
-                {androidUpdateText}
+                {appUpdateText}
               </button>
             </div>
-            {androidUpdateNotes ? (
+            {appUpdateNotes ? (
               <>
                 <div
                   style={{
@@ -662,7 +672,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                 >
                   <button
                     type="button"
-                    onClick={() => setAndroidUpdateNotesOpen((open) => !open)}
+                    onClick={() => setAppUpdateNotesOpen((open) => !open)}
                     style={{
                       border: "none",
                       background: "transparent",
@@ -674,7 +684,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                       cursor: "pointer",
                     }}
                   >
-                    {androidUpdateNotesOpen ? "收起更新说明" : "查看更新说明"}
+                    {appUpdateNotesOpen ? "收起更新说明" : "查看更新说明"}
                   </button>
                   <span
                     style={{
@@ -687,7 +697,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                     请先将 mindfs 后端升级到最新版本
                   </span>
                 </div>
-                {androidUpdateNotesOpen ? (
+                {appUpdateNotesOpen ? (
                   <div
                     style={{
                       borderTop: `1px solid ${BORDER}`,
@@ -701,7 +711,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                       overflow: "auto",
                     }}
                   >
-                    {androidUpdateNotes}
+                    {appUpdateNotes}
                   </div>
                 ) : null}
               </>
@@ -728,7 +738,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
             cursor: "pointer",
             boxShadow: SHADOW,
             backdropFilter: "blur(20px)",
-            marginTop: showAndroidUpdate ? 0 : "auto",
+            marginTop: showAppUpdate ? 0 : "auto",
           }}
         >
           +

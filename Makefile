@@ -1,9 +1,10 @@
-.PHONY: help dev dev-backend dev-web build-web build build-android install uninstall build-all start start-server test dist-clean publish-release-notes release tag
+.PHONY: help dev dev-backend dev-web build-web build build-android build-harmony install uninstall build-all start start-server test dist-clean publish-release-notes release tag
 
 GO ?= go
 NPM ?= npm
 WEB_DIR ?= web
 ANDROID_DIR ?= android
+HARMONY_DIR ?= harmony
 ADDR ?= :7331
 ROOT ?= .
 PREFIX ?= $(HOME)/.local
@@ -17,6 +18,7 @@ help:
 		"  make build-web    # build web assets into web/dist" \
 		"  make build        # build web assets and CLI binary" \
 		"  make build-android # build Android release APK into dist/" \
+		"  make build-harmony # build Harmony HAP into dist/" \
 		"  make install      # install binary and built static assets into $(PREFIX)" \
 		"  make uninstall    # remove installed binary and static assets from $(PREFIX)" \
 		"  make build-all    # cross-compile for all platforms into dist/" \
@@ -72,6 +74,14 @@ RELEASE_NOTES_FILE ?= release-notes.md
 RELEASE_NOTES_LATEST_FILE ?= $(DIST_DIR)/release-notes-$(TAG).md
 ANDROID_RELEASE_APK ?= $(ANDROID_DIR)/app/build/outputs/apk/release/app-release.apk
 ANDROID_DIST_APK ?= $(DIST_DIR)/mindfs_$(VERSION)_android.apk
+HARMONY_BUILD_MODE ?= release
+HARMONY_SDK_HOME ?= $(HOME)/Library/OpenHarmony/Sdk
+DEVECO_HOME ?= /Applications/DevEco-Studio.app/Contents
+DEVECO_JAVA_HOME ?= $(DEVECO_HOME)/jbr/Contents/Home
+DEVECO_NODE ?= $(DEVECO_HOME)/tools/node/bin/node
+HARMONY_HVIGORW ?= $(DEVECO_HOME)/tools/hvigor/bin/hvigorw.js
+HARMONY_HAP ?= $(HARMONY_DIR)/entry/build/default/outputs/default/entry-default-signed.hap
+HARMONY_DIST_HAP ?= $(DIST_DIR)/mindfs_$(VERSION)_harmony_$(HARMONY_BUILD_MODE).hap
 RELEASE_ANDROID ?= 0
 RELEASE_UPLOAD_JOBS ?= 4
 ANDROID_JAVA_HOME ?= $(shell if command -v /usr/libexec/java_home >/dev/null 2>&1; then /usr/libexec/java_home -v 21 2>/dev/null; fi)
@@ -102,6 +112,18 @@ build-android:
 	cd $(ANDROID_DIR) && $(ANDROID_GRADLE_ENV) ./gradlew assembleRelease -PmindfsVersion="$(VERSION)"
 	mkdir -p "$(DIST_DIR)"
 	cp "$(ANDROID_RELEASE_APK)" "$(ANDROID_DIST_APK)"
+
+build-harmony:
+	cd $(WEB_DIR) && $(NPM) run build:harmony
+	cd $(HARMONY_DIR) && \
+		JAVA_HOME="$(DEVECO_JAVA_HOME)" \
+		PATH="$(DEVECO_JAVA_HOME)/bin:$$PATH" \
+		OHOS_BASE_SDK_HOME="$(HARMONY_SDK_HOME)" \
+		"$(DEVECO_NODE)" "$(HARMONY_HVIGORW)" \
+			--mode module -p module=entry@default -p product=default -p buildMode="$(HARMONY_BUILD_MODE)" \
+			assembleHap --analyze=normal --parallel --incremental --no-daemon
+	mkdir -p "$(DIST_DIR)"
+	cp "$(HARMONY_HAP)" "$(HARMONY_DIST_HAP)"
 
 dist-clean:
 	rm -rf $(DIST_DIR)
