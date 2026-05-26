@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"mindfs/server/internal/agent"
 	rootfs "mindfs/server/internal/fs"
@@ -208,7 +209,7 @@ func (p *SkillCandidateProvider) Search(ctx context.Context, root rootfs.RootInf
 	for _, dir := range skillScanDirs(root, agent) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if isMissingSkillScanDir(err) {
 				continue
 			}
 			return nil, err
@@ -245,6 +246,10 @@ func (p *SkillCandidateProvider) Search(ctx context.Context, root rootfs.RootInf
 	}
 	sortCandidateItems(items, query)
 	return limitCandidateItems(items), nil
+}
+
+func isMissingSkillScanDir(err error) bool {
+	return os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR)
 }
 
 func isSkillDirectoryEntry(parent string, entry os.DirEntry) bool {
