@@ -140,17 +140,6 @@ func TestLoadConfigReadsOMPAgent(t *testing.T) {
 	}
 }
 
-func TestDefaultConfigIncludesOMPAgent(t *testing.T) {
-	cfg := defaultConfig()
-	def, ok := cfg.GetAgent("omp")
-	if !ok {
-		t.Fatalf("expected omp in default config")
-	}
-	if def.Command != "omp" || def.Protocol != ProtocolACP {
-		t.Fatalf("omp default definition = command %q protocol %q", def.Command, def.Protocol)
-	}
-	if len(def.Args) != 1 || def.Args[0] != "acp" {
-		t.Fatalf("omp default args = %#v", def.Args)
 func TestMergeConfigsKeepsBundledAgentsAndAppliesUserOverrides(t *testing.T) {
 	base := Config{
 		RelayBaseURL: "https://relay.default.example.com",

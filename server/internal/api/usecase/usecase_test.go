@@ -217,6 +217,38 @@ func TestSkillCandidateProviderSearch(t *testing.T) {
 	}
 }
 
+func TestSkillCandidateProviderSearchFollowsSymlinkedSkillDir(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	rootDir := t.TempDir()
+	ssotDir := t.TempDir()
+	targetDir := filepath.Join(ssotDir, "linked")
+	mustWriteFile(t, filepath.Join(targetDir, "SKILL.md"), "---\nname: linked\ndescription: Linked skill\n---\n")
+	skillsDir := filepath.Join(homeDir, ".codex", "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatalf("mkdir skills dir: %v", err)
+	}
+	if err := os.Symlink(targetDir, filepath.Join(skillsDir, "linked")); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+
+	provider := NewSkillCandidateProvider()
+	items, err := provider.Search(context.Background(), root, "codex", "linked")
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 linked skill, got %d: %#v", len(items), items)
+	}
+	if items[0].Name != "linked" {
+		t.Fatalf("skill name = %q, want linked", items[0].Name)
+	}
+	if items[0].Description != "Linked skill" {
+		t.Fatalf("skill description = %q, want Linked skill", items[0].Description)
+	}
+}
+
 func TestListLocalDirsDefaultsEmptyPathToHome(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

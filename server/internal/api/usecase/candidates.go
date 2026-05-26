@@ -219,7 +219,7 @@ func (p *SkillCandidateProvider) Search(ctx context.Context, root rootfs.RootInf
 				return nil, ctx.Err()
 			default:
 			}
-			if !entry.IsDir() {
+			if !isSkillDirectoryEntry(dir, entry) {
 				continue
 			}
 			name := entry.Name()
@@ -245,6 +245,20 @@ func (p *SkillCandidateProvider) Search(ctx context.Context, root rootfs.RootInf
 	}
 	sortCandidateItems(items, query)
 	return limitCandidateItems(items), nil
+}
+
+func isSkillDirectoryEntry(parent string, entry os.DirEntry) bool {
+	if entry.IsDir() {
+		return true
+	}
+	if entry.Type()&fs.ModeSymlink == 0 {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(parent, entry.Name()))
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
 
 type SlashCommandCandidateProvider struct {
