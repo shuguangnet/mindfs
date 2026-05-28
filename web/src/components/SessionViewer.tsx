@@ -1137,6 +1137,7 @@ if (useInnerScrollContainer && !container) {
               content={tc.content}
               result={formatToolCallFallbackResult(tc)}
               locations={tc.locations}
+              meta={tc.meta}
               rootPath={rootPath || undefined}
               defaultExpanded={false}
             />

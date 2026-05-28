@@ -1,5 +1,11 @@
 {
   "relayBaseURL": "https://relay.example.com",
+  "shells": [
+    {"command": "zsh", "args": ["-ic"], "os": ["darwin", "linux"]},
+    {"command": "bash", "args": ["-ic"], "os": ["darwin", "linux"]},
+    {"command": "sh", "args": ["-lc"], "os": ["darwin", "linux"]},
+    {"command": "pwsh", "args": ["-NoLogo", "-NoProfile", "-Command"], "commandPrefix": "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [Console]::OutputEncoding; $OutputEncoding = [Console]::OutputEncoding;", "os": "windows"}
+  ],
   "agents": [
     {
       "name": "gemini",

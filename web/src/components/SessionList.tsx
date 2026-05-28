@@ -1,13 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AgentIcon } from "./AgentIcon";
+import { ModeIcon } from "./ModeIcon";
 
-export type SessionType = "chat" | "plugin";
+export type SessionType = "chat" | "plugin" | "command";
 
 export type SessionItem = {
   key: string;
   session_key: string;
   type?: SessionType;
   agent?: string;
+  shell?: string;
   name?: string;
   created_at?: string;
   updated_at?: string;
@@ -42,10 +44,15 @@ type SessionListProps = {
   hasMore?: boolean;
 };
 
-const typeIcons: Record<SessionType, string> = {
-  chat: "💬",
-  plugin: "🧩",
-};
+function shellBadgeLabel(shell?: string): string {
+  const normalized = String(shell || "").trim().replace(/\\/g, "/");
+  const base = (normalized.split("/").filter(Boolean).pop() || normalized || "sh").toLowerCase();
+  if (base === "powershell.exe") return "ps";
+  if (base === "pwsh.exe") return "pwsh";
+  if (base === "cmd.exe") return "cmd";
+  if (base.endsWith(".exe")) return base.slice(0, -4);
+  return base;
+}
 
 export function SessionList({
   sessions,
@@ -471,30 +478,59 @@ function SessionCard({
               justifyContent: "center",
             }}
           >
-            <span style={{ fontSize: "14px", lineHeight: 1 }}>
-              {typeIcons[session.type || "chat"]}
-            </span>
-            <span
-              style={{
-                position: "absolute",
-                right: "-2px",
-                bottom: "-2px",
-                width: "10px",
-                height: "10px",
-                borderRadius: "999px",
-                background: "var(--content-bg, #fff)",
-                border: "1px solid rgba(255,255,255,0.9)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
-              }}
-            >
-              <AgentIcon
-                agentName={session.agent || ""}
-                style={{ width: "10px", height: "10px", display: "block" }}
-              />
-            </span>
+            <ModeIcon type={session.type || "chat"} size={16} />
+            {session.type === "command" ? (
+              <span
+                title={session.shell || "shell"}
+                style={{
+                  position: "absolute",
+                  right: "-8px",
+                  bottom: "-4px",
+                  minWidth: "16px",
+                  maxWidth: "26px",
+                  height: "10px",
+                  padding: "0 2px",
+                  borderRadius: "4px",
+                  background: "var(--accent-color)",
+                  border: "none",
+                  color: "#fff",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  fontSize: "7px",
+                  fontWeight: 700,
+                  lineHeight: 1,
+                  letterSpacing: 0,
+                }}
+              >
+                {shellBadgeLabel(session.shell)}
+              </span>
+            ) : (
+              <span
+                style={{
+                  position: "absolute",
+                  right: "-2px",
+                  bottom: "-2px",
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "999px",
+                  background: "var(--content-bg, #fff)",
+                  border: "1px solid rgba(255,255,255,0.9)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  overflow: "hidden",
+                }}
+              >
+                <AgentIcon
+                  agentName={session.agent || ""}
+                  style={{ width: "10px", height: "10px", display: "block" }}
+                />
+              </span>
+            )}
           </span>
         ) : null}
 

@@ -25,8 +25,8 @@ import {
 } from "lexical";
 
 type TokenType = "file" | "skill";
-type CandidateType = TokenType | "slash_command" | "prompt";
-type ActiveTokenType = "file" | "slash" | "prompt";
+type CandidateType = TokenType | "slash_command" | "prompt" | "command";
+type ActiveTokenType = "file" | "slash" | "prompt" | "command";
 
 type ActiveToken = {
   type: ActiveTokenType;
@@ -38,6 +38,7 @@ export type TokenEditorHandle = {
   blur: () => void;
   getHeight: () => number;
   clear: () => void;
+  setText: (value: string) => void;
   insertCandidate: (type: CandidateType, value: string) => void;
 };
 
@@ -268,6 +269,9 @@ function parseActiveToken(displayText: string, cursorPos: number): ActiveToken |
 }
 
 function expectedActiveTokenType(candidateType: CandidateType): ActiveTokenType {
+  if (candidateType === "command") {
+    return "command";
+  }
   if (candidateType === "file") {
     return "file";
   }
@@ -374,6 +378,16 @@ function $insertPlainTextAtSelection(text: string): boolean {
     }
   }
   return true;
+}
+
+function $replaceWithPlainText(text: string): void {
+  const root = $getRoot();
+  root.clear();
+  root.selectEnd();
+  if (text !== "") {
+    $insertPlainTextAtSelection(text);
+  }
+  $getRoot().selectEnd();
 }
 
 function EditorBridge({
@@ -572,12 +586,25 @@ const TokenEditor = forwardRef<TokenEditorHandle, TokenEditorProps>(function Tok
     },
     clear() {
       editorRef.current?.update(() => {
-        $getRoot().clear();
+        $replaceWithPlainText("");
       });
+    },
+    setText(value: string) {
+      editorRef.current?.update(() => {
+        $replaceWithPlainText(value);
+      });
+      rootRef.current?.focus({ preventScroll: true });
     },
     insertCandidate(type: CandidateType, value: string) {
       const editor = editorRef.current;
       if (!editor) return;
+      if (type === "command") {
+        editor.update(() => {
+          $replaceWithPlainText(value);
+        });
+        rootRef.current?.focus({ preventScroll: true });
+        return;
+      }
       editor.update(() => {
         const selection = $getSelection();
         if (!$isRangeSelection(selection) || !selection.isCollapsed()) {

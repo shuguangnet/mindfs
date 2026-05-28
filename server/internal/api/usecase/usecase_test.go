@@ -66,6 +66,171 @@ func TestSaveUploadedFilesDefaultsToAttachmentDirAndRenamesConflicts(t *testing.
 	assertFileContent(t, filepath.Join(rootDir, filepath.FromSlash(wantSecond)), "second file")
 }
 
+func TestSendCommandMessagePersistsFinalToolCallAndSuggestion(t *testing.T) {
+	rootDir := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	manager := session.NewManager(root)
+	registry := &commandTestRegistry{root: root, manager: manager}
+	service := Service{Registry: registry}
+
+	created, err := manager.Create(context.Background(), session.CreateInput{
+		Type: session.TypeCommand,
+		Name: "Command",
+	})
+	if err != nil {
+		t.Fatalf("create command session: %v", err)
+	}
+
+	var sawStart, sawFinal, sawDone bool
+	err = service.SendMessage(context.Background(), SendMessageInput{
+		RootID:  root.ID,
+		Key:     created.Key,
+		Content: "printf mindfs-command",
+		OnUpdate: func(event agenttypes.Event) {
+			if event.Type == agenttypes.EventTypeMessageDone {
+				sawDone = true
+				return
+			}
+			toolCall, ok := event.Data.(agenttypes.ToolCall)
+			if !ok {
+				return
+			}
+			if toolCall.Meta["source"] != "userShell" {
+				return
+			}
+			switch toolCall.Meta["phase"] {
+			case "start":
+				sawStart = true
+			case "final":
+				sawFinal = true
+				if toolCall.Status != "success" {
+					t.Fatalf("final status = %q meta=%#v content=%#v, want success", toolCall.Status, toolCall.Meta, toolCall.Content)
+				}
+				if len(toolCall.Content) == 0 || !strings.Contains(toolCall.Content[0].Text, "mindfs-command") {
+					t.Fatalf("final content = %#v, want command output", toolCall.Content)
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage command returned error: %v", err)
+	}
+	if !sawStart || !sawFinal || !sawDone {
+		t.Fatalf("events sawStart=%v sawFinal=%v sawDone=%v", sawStart, sawFinal, sawDone)
+	}
+
+	current, err := manager.Get(context.Background(), created.Key, 0)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if len(current.Exchanges) != 2 {
+		t.Fatalf("exchange count = %d, want 2", len(current.Exchanges))
+	}
+	aux, err := manager.GetExchangeAux(context.Background(), created.Key, 0)
+	if err != nil {
+		t.Fatalf("get aux: %v", err)
+	}
+	if len(aux[2]) != 1 || aux[2][0].ToolCall == nil {
+		t.Fatalf("aux[2] = %#v, want final command toolcall", aux[2])
+	}
+
+	candidates, err := SearchCommandSuggestions(context.Background(), manager, root.ID, "printf", 10)
+	if err != nil {
+		t.Fatalf("SearchCommandSuggestions: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Name != "printf mindfs-command" {
+		t.Fatalf("candidates = %#v", candidates)
+	}
+}
+
+func TestSendCommandMessagePersistsCancelledSuggestion(t *testing.T) {
+	rootDir := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	manager := session.NewManager(root)
+	registry := &commandTestRegistry{root: root, manager: manager}
+	service := Service{Registry: registry}
+
+	created, err := manager.Create(context.Background(), session.CreateInput{
+		Type: session.TypeCommand,
+		Name: "Command",
+	})
+	if err != nil {
+		t.Fatalf("create command session: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var sawStart, sawCancelled bool
+	err = service.SendMessage(ctx, SendMessageInput{
+		RootID:  root.ID,
+		Key:     created.Key,
+		Content: "sleep 10",
+		OnUpdate: func(event agenttypes.Event) {
+			toolCall, ok := event.Data.(agenttypes.ToolCall)
+			if !ok || toolCall.Meta["source"] != "userShell" {
+				return
+			}
+			switch toolCall.Meta["phase"] {
+			case "start":
+				if !sawStart {
+					sawStart = true
+					cancel()
+				}
+			case "final":
+				if toolCall.Status == "cancelled" {
+					sawCancelled = true
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage command returned error: %v", err)
+	}
+	if !sawStart || !sawCancelled {
+		t.Fatalf("events sawStart=%v sawCancelled=%v", sawStart, sawCancelled)
+	}
+
+	candidates, err := SearchCommandSuggestions(context.Background(), manager, root.ID, "sleep", 10)
+	if err != nil {
+		t.Fatalf("SearchCommandSuggestions: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Name != "sleep 10" {
+		t.Fatalf("candidates = %#v", candidates)
+	}
+}
+
+func TestSearchCommandCandidatesMergesMindFSAndShellHistory(t *testing.T) {
+	rootDir := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	manager := session.NewManager(root)
+	if err := UpsertCommandSuggestion(manager, CommandSuggestion{
+		Command:      "git status",
+		Cwd:          ".",
+		Shell:        "zsh",
+		RootID:       root.ID,
+		LastExitCode: 0,
+		LastUsedAt:   time.Now(),
+	}); err != nil {
+		t.Fatalf("UpsertCommandSuggestion: %v", err)
+	}
+
+	historyFile := filepath.Join(rootDir, "zsh_history")
+	if err := os.WriteFile(historyFile, []byte(": 1710000000:0;git status\n: 1710000001:0;git stash\n"), 0o644); err != nil {
+		t.Fatalf("write zsh history: %v", err)
+	}
+	t.Setenv("HISTFILE", historyFile)
+
+	candidates, err := SearchCommandCandidates(context.Background(), manager, root.ID, "git st", 10, ShellHistorySpec{Command: "zsh"})
+	if err != nil {
+		t.Fatalf("SearchCommandCandidates: %v", err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %#v, want 2", candidates)
+	}
+	if candidates[0].Name != "git status" || candidates[1].Name != "git stash" {
+		t.Fatalf("candidates = %#v", candidates)
+	}
+}
+
 func TestSaveUploadedFilesUsesExplicitDir(t *testing.T) {
 	rootDir := t.TempDir()
 	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
@@ -684,6 +849,64 @@ func (uploadTestRegistry) GetFileWatcher(string, *session.Manager) (*rootfs.Shar
 }
 
 func (uploadTestRegistry) ReleaseFileWatcher(string, string) {}
+
+type commandTestRegistry struct {
+	root    rootfs.RootInfo
+	manager *session.Manager
+}
+
+func (r *commandTestRegistry) GetRoot(rootID string) (rootfs.RootInfo, error) {
+	if rootID != r.root.ID {
+		return rootfs.RootInfo{}, errors.New("root not found")
+	}
+	return r.root, nil
+}
+
+func (r *commandTestRegistry) GetSessionManager(string) (*session.Manager, error) {
+	return r.manager, nil
+}
+
+func (r *commandTestRegistry) UpsertRoot(string) (rootfs.RootInfo, error) {
+	return rootfs.RootInfo{}, nil
+}
+
+func (r *commandTestRegistry) RemoveRoot(string) (rootfs.RootInfo, error) {
+	return rootfs.RootInfo{}, nil
+}
+
+func (r *commandTestRegistry) RenameRoot(string, string, string) (rootfs.RootInfo, error) {
+	return rootfs.RootInfo{}, nil
+}
+
+func (r *commandTestRegistry) ListRoots() []rootfs.RootInfo {
+	return []rootfs.RootInfo{r.root}
+}
+
+func (r *commandTestRegistry) GetAgentPool() *agent.Pool {
+	return nil
+}
+
+func (r *commandTestRegistry) GetPreferences() *preferences.Store {
+	return nil
+}
+
+func (r *commandTestRegistry) GetExternalSessionImporter(string) (agenttypes.ExternalSessionImporter, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *commandTestRegistry) GetProber() *agent.Prober {
+	return nil
+}
+
+func (r *commandTestRegistry) GetCandidateRegistry() *CandidateRegistry {
+	return NewCandidateRegistry()
+}
+
+func (r *commandTestRegistry) GetFileWatcher(string, *session.Manager) (*rootfs.SharedFileWatcher, error) {
+	return nil, nil
+}
+
+func (r *commandTestRegistry) ReleaseFileWatcher(string, string) {}
 
 type renameManagedDirTestRegistry struct {
 	root      rootfs.RootInfo

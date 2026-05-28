@@ -28,7 +28,7 @@ const (
 	exchangeFileTpl  = "sessions/%s.jsonl"
 	auxFileTpl       = "sessions/%s.aux.jsonl"
 	selectSessionSQL = `
-SELECT key, type, model, name, related_files_json, created_at, updated_at, closed_at
+SELECT key, type, model, shell, name, related_files_json, created_at, updated_at, closed_at
 FROM sessions`
 	deleteSessionSQL = `
 DELETE FROM sessions
@@ -38,11 +38,12 @@ DELETE FROM session_agent_bindings
 WHERE session_key = ?`
 	upsertSessionMetaSQL = `
 INSERT INTO sessions (
-	key, type, model, name, related_files_json, created_at, updated_at, closed_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	key, type, model, shell, name, related_files_json, created_at, updated_at, closed_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(key) DO UPDATE SET
 	type = excluded.type,
 	model = excluded.model,
+	shell = excluded.shell,
 	name = excluded.name,
 	related_files_json = excluded.related_files_json,
 	created_at = excluded.created_at,
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	key TEXT PRIMARY KEY,
 	type TEXT NOT NULL,
 	model TEXT NOT NULL DEFAULT '',
+	shell TEXT NOT NULL DEFAULT '',
 	name TEXT NOT NULL,
 	related_files_json TEXT NOT NULL,
 	created_at TEXT NOT NULL,
@@ -107,6 +109,7 @@ type CreateInput struct {
 	Type  string
 	Agent string
 	Model string
+	Shell string
 	Name  string
 }
 
@@ -187,6 +190,7 @@ func (m *Manager) Create(_ context.Context, input CreateInput) (*Session, error)
 		Type:         input.Type,
 		AgentCtxSeq:  agentCtxSeq,
 		Model:        strings.TrimSpace(input.Model),
+		Shell:        strings.TrimSpace(input.Shell),
 		Name:         name,
 		Exchanges:    []Exchange{},
 		RelatedFiles: []RelatedFile{},
@@ -622,6 +626,27 @@ func (m *Manager) UpdateModel(_ context.Context, session *Session, model string)
 	}
 	current.Model = model
 	current.UpdatedAt = m.now().UTC()
+	return m.upsertSessionMetaUnsafe(current)
+}
+
+func (m *Manager) UpdateShell(_ context.Context, session *Session, shell string) error {
+	if session == nil || strings.TrimSpace(session.Key) == "" {
+		return errors.New("session required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, err := m.getSessionUnsafe(session.Key, 0)
+	if err != nil {
+		return err
+	}
+	shell = strings.TrimSpace(shell)
+	if current.Shell == shell {
+		return nil
+	}
+	current.Shell = shell
+	current.UpdatedAt = m.now().UTC()
+	session.Shell = shell
+	session.UpdatedAt = current.UpdatedAt
 	return m.upsertSessionMetaUnsafe(current)
 }
 
@@ -1136,6 +1161,10 @@ func (m *Manager) ensureSessionMetaDBUnsafe() (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN shell TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		db.Close()
+		return nil, err
+	}
 	m.db = db
 	return m.db, nil
 }
@@ -1156,6 +1185,7 @@ func sessionMetaUpsertArgs(session *Session) ([]any, error) {
 		session.Key,
 		session.Type,
 		session.Model,
+		session.Shell,
 		session.Name,
 		string(relatedFilesJSON),
 		session.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -1173,6 +1203,7 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		key              string
 		typ              string
 		model            string
+		shell            string
 		name             string
 		relatedFilesJSON string
 		createdAtRaw     string
@@ -1183,6 +1214,7 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		&key,
 		&typ,
 		&model,
+		&shell,
 		&name,
 		&relatedFilesJSON,
 		&createdAtRaw,
@@ -1195,6 +1227,7 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		Key:          key,
 		Type:         typ,
 		Model:        model,
+		Shell:        shell,
 		Name:         name,
 		Exchanges:    []Exchange{},
 		RelatedFiles: []RelatedFile{},
@@ -1273,6 +1306,7 @@ func buildSearchHit(s *Session, matchType string, score, seq int, snippet string
 		Type:       s.Type,
 		Agent:      InferAgentFromSession(s),
 		Model:      s.Model,
+		Shell:      s.Shell,
 		Name:       s.Name,
 		CreatedAt:  s.CreatedAt,
 		UpdatedAt:  s.UpdatedAt,

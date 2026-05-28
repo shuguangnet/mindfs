@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	configpkg "mindfs/server/internal/config"
@@ -15,7 +16,42 @@ const configPathEnvKey = "MINDFS_AGENTS_CONFIG"
 // Config holds all agent configurations.
 type Config struct {
 	Agents       []Definition `json:"agents"`
+	Shells       []Shell      `json:"shells,omitempty"`
 	RelayBaseURL string       `json:"relayBaseURL,omitempty"`
+}
+
+type Shell struct {
+	Name          string   `json:"name,omitempty"`
+	Command       string   `json:"command"`
+	Args          []string `json:"args,omitempty"`
+	CommandPrefix string   `json:"commandPrefix,omitempty"`
+	OS            []string `json:"os,omitempty"`
+}
+
+func (s *Shell) UnmarshalJSON(payload []byte) error {
+	var rawString string
+	if err := json.Unmarshal(payload, &rawString); err == nil {
+		s.Command = rawString
+		s.Args = nil
+		s.OS = nil
+		return nil
+	}
+	var raw struct {
+		Name          string      `json:"name"`
+		Command       string      `json:"command"`
+		Args          []string    `json:"args"`
+		CommandPrefix string      `json:"commandPrefix"`
+		OS            interface{} `json:"os"`
+	}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return err
+	}
+	s.Name = raw.Name
+	s.Command = raw.Command
+	s.Args = raw.Args
+	s.CommandPrefix = raw.CommandPrefix
+	s.OS = parseShellOS(raw.OS)
+	return nil
 }
 
 // Definition defines how to spawn and communicate with an agent.
@@ -105,6 +141,20 @@ func loadInstalledDefaultConfig() (Config, string, error) {
 
 func normalizeConfig(cfg Config) (Config, error) {
 	cfg.RelayBaseURL = strings.TrimSpace(cfg.RelayBaseURL)
+	shells := make([]Shell, 0, len(cfg.Shells))
+	for _, shell := range cfg.Shells {
+		if trimmed := strings.TrimSpace(shell.Command); trimmed != "" {
+			shell.Name = strings.TrimSpace(shell.Name)
+			shell.Command = trimmed
+			shell.CommandPrefix = strings.TrimSpace(shell.CommandPrefix)
+			shell.OS = normalizeShellOS(shell.OS)
+			if !shellMatchesCurrentOS(shell) {
+				continue
+			}
+			shells = append(shells, shell)
+		}
+	}
+	cfg.Shells = shells
 	for i := range cfg.Agents {
 		name := strings.TrimSpace(cfg.Agents[i].Name)
 		if name == "" {
@@ -121,7 +171,11 @@ func normalizeConfig(cfg Config) (Config, error) {
 func mergeConfigs(base Config, override Config) Config {
 	merged := Config{
 		Agents:       append([]Definition(nil), base.Agents...),
+		Shells:       append([]Shell(nil), base.Shells...),
 		RelayBaseURL: base.RelayBaseURL,
+	}
+	if len(override.Shells) > 0 {
+		merged.Shells = append([]Shell(nil), override.Shells...)
 	}
 	if override.RelayBaseURL != "" {
 		merged.RelayBaseURL = override.RelayBaseURL
@@ -140,6 +194,48 @@ func mergeConfigs(base Config, override Config) Config {
 		merged.Agents = append(merged.Agents, agent)
 	}
 	return merged
+}
+
+func parseShellOS(raw interface{}) []string {
+	switch value := raw.(type) {
+	case nil:
+		return nil
+	case string:
+		return []string{value}
+	case []interface{}:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			if text, ok := item.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func normalizeShellOS(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.ToLower(strings.TrimSpace(value))
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func shellMatchesCurrentOS(shell Shell) bool {
+	if len(shell.OS) == 0 {
+		return true
+	}
+	for _, value := range shell.OS {
+		if value == runtime.GOOS {
+			return true
+		}
+	}
+	return false
 }
 
 func samePath(a, b string) bool {
@@ -198,7 +294,22 @@ func installedDefaultConfigPath() (string, error) {
 
 // defaultConfig returns built-in agent definitions.
 func defaultConfig() Config {
+	shells := []Shell{
+		{Command: "zsh", Args: []string{"-ic"}},
+		{Command: "bash", Args: []string{"-ic"}},
+		{Command: "sh", Args: []string{"-lc"}},
+	}
+	if runtime.GOOS == "windows" {
+		shells = []Shell{
+			{Command: "pwsh", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, CommandPrefix: windowsPowerShellCommandPrefix()},
+			{Name: "ps", Command: "powershell.exe", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, CommandPrefix: windowsPowerShellCommandPrefix()},
+			{Command: "bash.exe", Args: []string{"-lc"}},
+			{Command: "wsl.exe", Args: []string{"--exec", "bash", "-lc"}},
+			{Command: "cmd.exe", Args: []string{"/D", "/S", "/C"}, CommandPrefix: "chcp 65001 >NUL &"},
+		}
+	}
 	return Config{
+		Shells: shells,
 		Agents: []Definition{
 			{
 				Name:     "claude",
@@ -218,6 +329,10 @@ func defaultConfig() Config {
 			},
 		},
 	}
+}
+
+func windowsPowerShellCommandPrefix() string {
+	return "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [Console]::OutputEncoding; $OutputEncoding = [Console]::OutputEncoding;"
 }
 
 // GetAgent returns an agent definition by name.

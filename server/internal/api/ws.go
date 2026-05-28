@@ -368,7 +368,8 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 	agentMode := getString(req.Payload, "agent_mode")
 	effort := getString(req.Payload, "effort")
 	fastService := normalizeFastServiceValue(getString(req.Payload, "fast_service"))
-	if content == "" || sessionType == "" || agentName == "" {
+	shell := getString(req.Payload, "shell")
+	if content == "" || sessionType == "" || (agentName == "" && sessionType != session.TypeCommand) {
 		h.sendWSError(conn, clientID, req.ID, "invalid_request", "content, type and agent required")
 		return
 	}
@@ -390,6 +391,7 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 				Type:  sessionType,
 				Agent: agentName,
 				Model: model,
+				Shell: shell,
 				Name:  sessionName,
 			},
 		})
@@ -399,26 +401,28 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		}
 		key = created.Key
 		h.broadcastSessionMetaUpdated(rootID, created)
-		go func(rootID, sessionKey, agentName, firstMessage string) {
-			updated, err := uc.SuggestSessionName(context.Background(), usecase.SuggestSessionNameInput{
-				RootID:       rootID,
-				SessionKey:   sessionKey,
-				Agent:        agentName,
-				FirstMessage: firstMessage,
-			})
-			if err != nil {
-				log.Printf("[session-name] async.error root=%s session=%s agent=%s err=%v", rootID, sessionKey, agentName, err)
-				return
-			}
-			if updated == nil {
-				return
-			}
-			if h.AppContext == nil {
-				return
-			}
-			log.Printf("[session-name] async.broadcast root=%s session=%s name=%q", rootID, sessionKey, updated.Name)
-			h.broadcastSessionMetaUpdated(rootID, updated)
-		}(rootID, key, agentName, content)
+		if sessionType != session.TypeCommand {
+			go func(rootID, sessionKey, agentName, firstMessage string) {
+				updated, err := uc.SuggestSessionName(context.Background(), usecase.SuggestSessionNameInput{
+					RootID:       rootID,
+					SessionKey:   sessionKey,
+					Agent:        agentName,
+					FirstMessage: firstMessage,
+				})
+				if err != nil {
+					log.Printf("[session-name] async.error root=%s session=%s agent=%s err=%v", rootID, sessionKey, agentName, err)
+					return
+				}
+				if updated == nil {
+					return
+				}
+				if h.AppContext == nil {
+					return
+				}
+				log.Printf("[session-name] async.broadcast root=%s session=%s name=%q", rootID, sessionKey, updated.Name)
+				h.broadcastSessionMetaUpdated(rootID, updated)
+			}(rootID, key, agentName, content)
+		}
 	} else if current, err := uc.GetSession(ctx, usecase.GetSessionInput{RootID: rootID, Key: key}); err == nil && current != nil {
 		sessionName = current.Name
 	}
@@ -440,6 +444,7 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		Mode:        agentMode,
 		Effort:      effort,
 		FastService: fastService,
+		Shell:       shell,
 		Content:     content,
 		ClientCtx:   clientCtx,
 		OnStart: func() {

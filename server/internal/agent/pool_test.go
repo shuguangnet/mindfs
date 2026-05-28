@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -126,6 +127,51 @@ func TestLoadConfigReadsRelayBaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsShells(t *testing.T) {
+	cfg := loadPoolTestConfig(t)
+	var want []Shell
+	if runtime.GOOS == "windows" {
+		want = []Shell{{Command: "pwsh", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, CommandPrefix: windowsPowerShellCommandPrefix(), OS: []string{"windows"}}}
+	} else {
+		want = []Shell{
+			{Command: "zsh", Args: []string{"-ic"}, OS: []string{"darwin", "linux"}},
+			{Command: "bash", Args: []string{"-ic"}, OS: []string{"darwin", "linux"}},
+			{Command: "sh", Args: []string{"-lc"}, OS: []string{"darwin", "linux"}},
+		}
+	}
+	if got := cfg.Shells; !reflect.DeepEqual(got, want) {
+		t.Fatalf("shells = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizeConfigFiltersShellsByOS(t *testing.T) {
+	cfg, err := normalizeConfig(Config{
+		Shells: []Shell{
+			{Command: "zsh", Args: []string{"-ic"}, OS: []string{"darwin", "linux"}},
+			{Command: "pwsh", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, OS: []string{"windows"}},
+			{Command: "portable", Args: []string{"-c"}},
+		},
+		Agents: []Definition{{Name: "codex", Command: "codex"}},
+	})
+	if err != nil {
+		t.Fatalf("normalizeConfig: %v", err)
+	}
+	for _, shell := range cfg.Shells {
+		if len(shell.OS) == 0 {
+			continue
+		}
+		matched := false
+		for _, value := range shell.OS {
+			if value == runtime.GOOS {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Fatalf("shell %q with os %#v should have been filtered on %s", shell.Command, shell.OS, runtime.GOOS)
+		}
+	}
+}
+
 func TestLoadConfigReadsOMPAgent(t *testing.T) {
 	cfg := loadPoolTestConfig(t)
 	def, ok := cfg.GetAgent("omp")
@@ -143,6 +189,7 @@ func TestLoadConfigReadsOMPAgent(t *testing.T) {
 func TestMergeConfigsKeepsBundledAgentsAndAppliesUserOverrides(t *testing.T) {
 	base := Config{
 		RelayBaseURL: "https://relay.default.example.com",
+		Shells:       []Shell{{Command: "zsh", Args: []string{"-ic"}}, {Command: "bash", Args: []string{"-ic"}}},
 		Agents: []Definition{
 			{Name: "codex", Command: "codex", Protocol: ProtocolCodexSDK},
 			{Name: "new-agent", Command: "new-agent", Protocol: ProtocolACP},
@@ -150,6 +197,7 @@ func TestMergeConfigsKeepsBundledAgentsAndAppliesUserOverrides(t *testing.T) {
 	}
 	override := Config{
 		RelayBaseURL: "https://relay.user.example.com",
+		Shells:       []Shell{{Command: "fish", Args: []string{"-i", "-c"}}, {Command: "zsh", Args: []string{"-ic"}}},
 		Agents: []Definition{
 			{Name: "codex", Command: "custom-codex", Protocol: ProtocolCodexSDK, Args: []string{"--profile", "work"}},
 			{Name: "local-agent", Command: "local-agent", Protocol: ProtocolACP},
@@ -159,6 +207,9 @@ func TestMergeConfigsKeepsBundledAgentsAndAppliesUserOverrides(t *testing.T) {
 	cfg := mergeConfigs(base, override)
 	if cfg.RelayBaseURL != override.RelayBaseURL {
 		t.Fatalf("relay base url = %q", cfg.RelayBaseURL)
+	}
+	if !reflect.DeepEqual(cfg.Shells, override.Shells) {
+		t.Fatalf("shells = %#v, want %#v", cfg.Shells, override.Shells)
 	}
 	if len(cfg.Agents) != 3 {
 		t.Fatalf("agents length = %d, want 3", len(cfg.Agents))

@@ -1,4 +1,50 @@
 {
+  "shells": [
+    {
+      "command": "zsh",
+      "args": ["-ic"],
+      "os": ["darwin", "linux"]
+    },
+    {
+      "command": "bash",
+      "args": ["-ic"],
+      "os": ["darwin", "linux"]
+    },
+    {
+      "command": "sh",
+      "args": ["-lc"],
+      "os": ["darwin", "linux"]
+    },
+    {
+      "command": "pwsh",
+      "args": ["-NoLogo", "-NoProfile", "-Command"],
+      "commandPrefix": "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [Console]::OutputEncoding; $OutputEncoding = [Console]::OutputEncoding;",
+      "os": "windows"
+    },
+    {
+      "name": "ps",
+      "command": "powershell.exe",
+      "args": ["-NoLogo", "-NoProfile", "-Command"],
+      "commandPrefix": "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [Console]::OutputEncoding; $OutputEncoding = [Console]::OutputEncoding;",
+      "os": "windows"
+    },
+    {
+      "command": "bash.exe",
+      "args": ["-lc"],
+      "os": "windows"
+    },
+    {
+      "command": "wsl.exe",
+      "args": ["--exec", "bash", "-lc"],
+      "os": "windows"
+    },
+    {
+      "command": "cmd.exe",
+      "args": ["/D", "/S", "/C"],
+      "commandPrefix": "chcp 65001 >NUL &",
+      "os": "windows"
+    }
+  ],
   "agents": [
     {
       "name": "gemini",
