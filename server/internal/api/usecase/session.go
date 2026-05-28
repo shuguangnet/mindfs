@@ -269,6 +269,7 @@ func (s *Service) DeleteSession(ctx context.Context, in DeleteSessionInput) erro
 	if err := root.RemoveSessionFileMeta(in.Key); err != nil {
 		return err
 	}
+	commandexec.CloseSession(in.RootID, in.Key)
 	s.Registry.ReleaseFileWatcher(in.RootID, in.Key)
 	return nil
 }
@@ -1336,7 +1337,14 @@ func (s *Service) sendCommandMessage(ctx context.Context, in SendMessageInput, m
 		in.OnUpdate(agenttypes.Event{Type: agenttypes.EventTypeToolCall, Data: startTool})
 	}
 
-	proc, err := commandexec.Start(ctx, commandexec.Options{Command: in.Content, Cwd: rootAbs, Shells: configuredShells(s.Registry), Shell: in.Shell})
+	proc, err := commandexec.StartInSession(ctx, commandexec.Options{
+		Command: in.Content,
+		Cwd:     rootAbs,
+		Shells:  configuredShells(s.Registry),
+		Shell:   in.Shell,
+		RootID:  in.RootID,
+		Session: current.Key,
+	})
 	if err != nil {
 		log.Printf("[command] start.error root=%s session=%s command=%q err=%v", in.RootID, current.Key, in.Content, err)
 		final := startTool
@@ -1517,6 +1525,7 @@ func configuredShells(registry Registry) []commandexec.ShellSpec {
 		shells = append(shells, commandexec.ShellSpec{
 			Command:       shell.Command,
 			Args:          append([]string(nil), shell.Args...),
+			LongShellArgs: append([]string(nil), shell.LongShellArgs...),
 			CommandPrefix: shell.CommandPrefix,
 		})
 	}

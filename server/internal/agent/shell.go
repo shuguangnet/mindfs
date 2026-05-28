@@ -14,6 +14,7 @@ type ShellStatus struct {
 	Command         string   `json:"command"`
 	ResolvedCommand string   `json:"resolved_command,omitempty"`
 	Args            []string `json:"args,omitempty"`
+	LongShellArgs   []string `json:"longShellArgs,omitempty"`
 	Default         bool     `json:"default,omitempty"`
 }
 
@@ -35,6 +36,7 @@ func (p *Pool) AvailableShells() []ShellStatus {
 			Command:         shell.Command,
 			ResolvedCommand: resolved,
 			Args:            append([]string(nil), shell.Args...),
+			LongShellArgs:   append([]string(nil), shell.LongShellArgs...),
 		}
 		if len(out) == 0 {
 			status.Default = true

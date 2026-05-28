@@ -50,6 +50,10 @@ func startPlatformProcess(_ context.Context, cmd *exec.Cmd, shell string) (Proce
 	return p, nil
 }
 
+func startLongShellPlatformProcess(ctx context.Context, cmd *exec.Cmd, shell string) (Process, error) {
+	return startPlatformProcess(ctx, cmd, shell)
+}
+
 func pipeFallbackArgs(shell string, args []string) []string {
 	out := append([]string(nil), args...)
 	base := filepath.Base(shell)

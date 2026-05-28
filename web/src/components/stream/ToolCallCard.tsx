@@ -144,6 +144,8 @@ const terminalFontSize = 12;
 const terminalLineHeight = 1.45;
 const terminalLinePx = Math.ceil(terminalFontSize * terminalLineHeight);
 const terminalViewportPadding = 6;
+const terminalFontFamily =
+  '"Cascadia Mono", "Cascadia Code", Consolas, "Microsoft YaHei Mono", "Microsoft YaHei", "Noto Sans Mono CJK SC", monospace';
 
 function measureTerminalCharWidth(container: HTMLElement): number {
   const probe = document.createElement("span");
@@ -152,7 +154,7 @@ function measureTerminalCharWidth(container: HTMLElement): number {
   probe.style.visibility = "hidden";
   probe.style.pointerEvents = "none";
   probe.style.whiteSpace = "pre";
-  probe.style.fontFamily = "monospace";
+  probe.style.fontFamily = terminalFontFamily;
   probe.style.fontSize = `${terminalFontSize}px`;
   container.appendChild(probe);
   const width = probe.getBoundingClientRect().width / 10;
@@ -193,6 +195,7 @@ function XtermOutput({ text }: { text: string }) {
       cursorBlink: false,
       disableStdin: true,
       scrollback: 5000,
+      fontFamily: terminalFontFamily,
       fontSize: terminalFontSize,
       lineHeight: terminalLineHeight,
       theme: {

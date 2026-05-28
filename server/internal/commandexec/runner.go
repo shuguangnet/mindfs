@@ -17,11 +17,14 @@ type Options struct {
 	Env     []string
 	Shells  []ShellSpec
 	Shell   string
+	RootID  string
+	Session string
 }
 
 type ShellSpec struct {
 	Command       string
 	Args          []string
+	LongShellArgs []string
 	CommandPrefix string
 }
 

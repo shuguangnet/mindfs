@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -196,6 +197,73 @@ func TestSendCommandMessagePersistsCancelledSuggestion(t *testing.T) {
 	if len(candidates) != 1 || candidates[0].Name != "sleep 10" {
 		t.Fatalf("candidates = %#v", candidates)
 	}
+}
+
+func TestSendCommandMessageUsesLongShellPerSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows long-shell behavior is covered by cross-compile checks")
+	}
+	rootDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(rootDir, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	manager := session.NewManager(root)
+	registry := &commandTestRegistry{root: root, manager: manager}
+	service := Service{Registry: registry}
+
+	first, err := manager.Create(context.Background(), session.CreateInput{
+		Type: session.TypeCommand,
+		Name: "Command A",
+	})
+	if err != nil {
+		t.Fatalf("create first command session: %v", err)
+	}
+	second, err := manager.Create(context.Background(), session.CreateInput{
+		Type: session.TypeCommand,
+		Name: "Command B",
+	})
+	if err != nil {
+		t.Fatalf("create second command session: %v", err)
+	}
+
+	if _, err := sendCommandAndFinal(t, service, root.ID, first.Key, "cd nested"); err != nil {
+		t.Fatalf("cd nested: %v", err)
+	}
+	firstPWD, err := sendCommandAndFinal(t, service, root.ID, first.Key, "pwd")
+	if err != nil {
+		t.Fatalf("first pwd: %v", err)
+	}
+	if !strings.Contains(firstPWD, "nested") {
+		t.Fatalf("first session pwd = %q, want nested", firstPWD)
+	}
+	secondPWD, err := sendCommandAndFinal(t, service, root.ID, second.Key, "pwd")
+	if err != nil {
+		t.Fatalf("second pwd: %v", err)
+	}
+	if strings.Contains(secondPWD, "nested") {
+		t.Fatalf("second session pwd = %q, should not inherit first session cwd", secondPWD)
+	}
+}
+
+func sendCommandAndFinal(t *testing.T, service Service, rootID, sessionKey, command string) (string, error) {
+	t.Helper()
+	var final string
+	err := service.SendMessage(context.Background(), SendMessageInput{
+		RootID:  rootID,
+		Key:     sessionKey,
+		Content: command,
+		OnUpdate: func(event agenttypes.Event) {
+			toolCall, ok := event.Data.(agenttypes.ToolCall)
+			if !ok || toolCall.Meta["source"] != "userShell" || toolCall.Meta["phase"] != "final" {
+				return
+			}
+			if len(toolCall.Content) > 0 {
+				final = toolCall.Content[0].Text
+			}
+		},
+	})
+	return final, err
 }
 
 func TestSearchCommandCandidatesMergesMindFSAndShellHistory(t *testing.T) {

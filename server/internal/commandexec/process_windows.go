@@ -32,7 +32,7 @@ type platformProcess struct {
 	pi        windows.ProcessInformation
 	console   windows.Handle
 	attr      *windows.ProcThreadAttributeListContainer
-	input     *os.File
+	input     io.WriteCloser
 	output    *os.File
 	out       chan []byte
 	done      chan Result
@@ -234,9 +234,85 @@ func startWindowsPipeProcess(ctx context.Context, cmd *exec.Cmd, shell string) (
 	return p, nil
 }
 
+func startLongShellPlatformProcess(ctx context.Context, cmd *exec.Cmd, shell string) (Process, error) {
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_DEFAULT_ERROR_MODE | windows.CREATE_NO_WINDOW,
+	}
+	startedAt := time.Now().UTC()
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	p := &platformProcess{
+		cmd:       cmd,
+		input:     stdin,
+		out:       make(chan []byte, 32),
+		done:      make(chan Result, 1),
+		exited:    make(chan struct{}),
+		shell:     shell,
+		startedAt: startedAt,
+	}
+	if cmd.Process != nil {
+		p.pi.ProcessId = uint32(cmd.Process.Pid)
+	}
+	var readers sync.WaitGroup
+	read := func(r io.Reader, decode bool) {
+		defer readers.Done()
+		if decode {
+			r = transform.NewReader(r, simplifiedchinese.GB18030.NewDecoder())
+		}
+		buf := make([]byte, 16*1024)
+		for {
+			n, err := r.Read(buf)
+			if n > 0 {
+				chunk := append([]byte(nil), buf[:n]...)
+				p.out <- chunk
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+	readers.Add(2)
+	go read(stdout, shouldDecodeWindowsLongShellStdout(shell))
+	go read(stderr, false)
+	go func() {
+		readers.Wait()
+		close(p.out)
+	}()
+	go p.waitPipeLoop()
+	if ctx != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = p.KillTree()
+			case <-p.exited:
+			}
+		}()
+	}
+	return p, nil
+}
+
 func shouldDecodeWindowsPipeOutput(shell string) bool {
 	base := strings.ToLower(filepathBase(shell))
-	return base == "cmd.exe" || base == "cmd"
+	return base == "powershell.exe" || base == "powershell"
+}
+
+func shouldDecodeWindowsLongShellStdout(shell string) bool {
+	base := strings.ToLower(filepathBase(shell))
+	return base == "powershell.exe" || base == "powershell"
 }
 
 func (p *platformProcess) Output() <-chan []byte {

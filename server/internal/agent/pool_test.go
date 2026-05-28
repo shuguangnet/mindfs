@@ -131,12 +131,12 @@ func TestLoadConfigReadsShells(t *testing.T) {
 	cfg := loadPoolTestConfig(t)
 	var want []Shell
 	if runtime.GOOS == "windows" {
-		want = []Shell{{Command: "pwsh", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, CommandPrefix: windowsPowerShellCommandPrefix(), OS: []string{"windows"}}}
+		want = []Shell{{Command: "pwsh", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, LongShellArgs: []string{"-NoLogo", "-NoProfile"}, CommandPrefix: windowsPowerShellCommandPrefix(), OS: []string{"windows"}}}
 	} else {
 		want = []Shell{
-			{Command: "zsh", Args: []string{"-ic"}, OS: []string{"darwin", "linux"}},
-			{Command: "bash", Args: []string{"-ic"}, OS: []string{"darwin", "linux"}},
-			{Command: "sh", Args: []string{"-lc"}, OS: []string{"darwin", "linux"}},
+			{Command: "zsh", Args: []string{"-ic"}, LongShellArgs: []string{}, OS: []string{"darwin", "linux"}},
+			{Command: "bash", Args: []string{"-ic"}, LongShellArgs: []string{}, OS: []string{"darwin", "linux"}},
+			{Command: "sh", Args: []string{"-lc"}, LongShellArgs: []string{}, OS: []string{"darwin", "linux"}},
 		}
 	}
 	if got := cfg.Shells; !reflect.DeepEqual(got, want) {

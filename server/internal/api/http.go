@@ -794,6 +794,7 @@ func (h *HTTPHandler) configuredShells() []commandexec.ShellSpec {
 		shells = append(shells, commandexec.ShellSpec{
 			Command:       shell.Command,
 			Args:          append([]string(nil), shell.Args...),
+			LongShellArgs: append([]string(nil), shell.LongShellArgs...),
 			CommandPrefix: shell.CommandPrefix,
 		})
 	}

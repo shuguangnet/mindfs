@@ -24,6 +24,7 @@ type Shell struct {
 	Name          string   `json:"name,omitempty"`
 	Command       string   `json:"command"`
 	Args          []string `json:"args,omitempty"`
+	LongShellArgs []string `json:"longShellArgs,omitempty"`
 	CommandPrefix string   `json:"commandPrefix,omitempty"`
 	OS            []string `json:"os,omitempty"`
 }
@@ -40,6 +41,7 @@ func (s *Shell) UnmarshalJSON(payload []byte) error {
 		Name          string      `json:"name"`
 		Command       string      `json:"command"`
 		Args          []string    `json:"args"`
+		LongShellArgs []string    `json:"longShellArgs"`
 		CommandPrefix string      `json:"commandPrefix"`
 		OS            interface{} `json:"os"`
 	}
@@ -49,6 +51,7 @@ func (s *Shell) UnmarshalJSON(payload []byte) error {
 	s.Name = raw.Name
 	s.Command = raw.Command
 	s.Args = raw.Args
+	s.LongShellArgs = raw.LongShellArgs
 	s.CommandPrefix = raw.CommandPrefix
 	s.OS = parseShellOS(raw.OS)
 	return nil
@@ -295,17 +298,17 @@ func installedDefaultConfigPath() (string, error) {
 // defaultConfig returns built-in agent definitions.
 func defaultConfig() Config {
 	shells := []Shell{
-		{Command: "zsh", Args: []string{"-ic"}},
-		{Command: "bash", Args: []string{"-ic"}},
-		{Command: "sh", Args: []string{"-lc"}},
+		{Command: "zsh", Args: []string{"-ic"}, LongShellArgs: []string{}},
+		{Command: "bash", Args: []string{"-ic"}, LongShellArgs: []string{}},
+		{Command: "sh", Args: []string{"-lc"}, LongShellArgs: []string{}},
 	}
 	if runtime.GOOS == "windows" {
 		shells = []Shell{
-			{Command: "pwsh", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, CommandPrefix: windowsPowerShellCommandPrefix()},
-			{Name: "ps", Command: "powershell.exe", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, CommandPrefix: windowsPowerShellCommandPrefix()},
-			{Command: "bash.exe", Args: []string{"-lc"}},
-			{Command: "wsl.exe", Args: []string{"--exec", "bash", "-lc"}},
-			{Command: "cmd.exe", Args: []string{"/D", "/S", "/C"}, CommandPrefix: "chcp 65001 >NUL &"},
+			{Command: "pwsh", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, LongShellArgs: []string{"-NoLogo", "-NoProfile"}, CommandPrefix: windowsPowerShellCommandPrefix()},
+			{Name: "ps", Command: "powershell.exe", Args: []string{"-NoLogo", "-NoProfile", "-Command"}, LongShellArgs: []string{"-NoLogo", "-NoProfile"}, CommandPrefix: windowsPowerShellCommandPrefix()},
+			{Command: "bash.exe", Args: []string{"-lc"}, LongShellArgs: []string{}},
+			{Command: "wsl.exe", Args: []string{"--exec", "bash", "-lc"}, LongShellArgs: []string{"--exec", "bash"}},
+			{Command: "cmd.exe", Args: []string{"/D", "/S", "/C"}, LongShellArgs: []string{"/Q", "/K"}, CommandPrefix: "chcp 65001 >NUL &"},
 		}
 	}
 	return Config{
