@@ -12,13 +12,14 @@ import (
 )
 
 type Options struct {
-	Command string
-	Cwd     string
-	Env     []string
-	Shells  []ShellSpec
-	Shell   string
-	RootID  string
-	Session string
+	Command      string
+	Cwd          string
+	Env          []string
+	Shells       []ShellSpec
+	Shell        string
+	RootID       string
+	Session      string
+	TerminalCols int
 }
 
 type ShellSpec struct {
@@ -37,9 +38,43 @@ type Result struct {
 	Err        error
 }
 
+const (
+	defaultTerminalCols = 120
+	defaultTerminalRows = 24
+	minTerminalCols     = 40
+	maxTerminalCols     = 500
+)
+
+func terminalColsOrDefault(cols int) uint16 {
+	if cols <= 0 {
+		return defaultTerminalCols
+	}
+	if cols < minTerminalCols {
+		cols = minTerminalCols
+	}
+	if cols > maxTerminalCols {
+		cols = maxTerminalCols
+	}
+	return uint16(cols)
+}
+
+func terminalRowsOrDefault(rows int) uint16 {
+	if rows <= 0 {
+		rows = defaultTerminalRows
+	}
+	if rows < 4 {
+		rows = 4
+	}
+	if rows > 60 {
+		rows = 60
+	}
+	return uint16(rows)
+}
+
 type Process interface {
 	Output() <-chan []byte
 	WriteInput([]byte) (int, error)
+	Resize(cols, rows int) error
 	Interrupt() error
 	Terminate() error
 	KillTree() error
@@ -78,7 +113,7 @@ func Start(ctx context.Context, opts Options) (Process, error) {
 		cmd := exec.CommandContext(ctx, shell, args...)
 		cmd.Dir = absCwd
 		cmd.Env = commandEnv(opts.Env)
-		return startPlatformProcess(ctx, cmd, shell)
+		return startPlatformProcess(ctx, cmd, shell, opts.TerminalCols)
 	}
 	shell, args := interactiveShellCommand(spec)
 	if shell == "" {
@@ -92,7 +127,7 @@ func Start(ctx context.Context, opts Options) (Process, error) {
 		cmd := exec.CommandContext(ctx, shell, args...)
 		cmd.Dir = absCwd
 		cmd.Env = commandEnv(opts.Env)
-		return startPlatformProcess(ctx, cmd, shell)
+		return startPlatformProcess(ctx, cmd, shell, opts.TerminalCols)
 	}
 	script := interactiveShellScript(spec, command)
 	if strings.TrimSpace(script) == "" {
@@ -101,7 +136,7 @@ func Start(ctx context.Context, opts Options) (Process, error) {
 	cmd := exec.CommandContext(ctx, shell, args...)
 	cmd.Dir = absCwd
 	cmd.Env = commandEnv(opts.Env)
-	proc, err := startPlatformProcess(ctx, cmd, shell)
+	proc, err := startPlatformProcess(ctx, cmd, shell, opts.TerminalCols)
 	if err != nil {
 		shell, args, shellErr := shellCommand(command, opts.Shells, opts.Shell)
 		if shellErr != nil {
@@ -110,7 +145,7 @@ func Start(ctx context.Context, opts Options) (Process, error) {
 		cmd := exec.CommandContext(ctx, shell, args...)
 		cmd.Dir = absCwd
 		cmd.Env = commandEnv(opts.Env)
-		return startPlatformProcess(ctx, cmd, shell)
+		return startPlatformProcess(ctx, cmd, shell, opts.TerminalCols)
 	}
 	go func() {
 		_, _ = proc.WriteInput([]byte(script))

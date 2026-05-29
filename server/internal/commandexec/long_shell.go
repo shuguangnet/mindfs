@@ -108,6 +108,9 @@ func (m *longShellManager) getOrCreate(ctx context.Context, key string, opts Opt
 	m.mu.Lock()
 	if existing := m.sessions[key]; existing != nil && !existing.isClosed() {
 		m.mu.Unlock()
+		if err := existing.resize(opts.TerminalCols); err == nil && opts.TerminalCols > 0 {
+			time.Sleep(25 * time.Millisecond)
+		}
 		return existing, nil
 	}
 	delete(m.sessions, key)
@@ -121,6 +124,9 @@ func (m *longShellManager) getOrCreate(ctx context.Context, key string, opts Opt
 	if existing := m.sessions[key]; existing != nil && !existing.isClosed() {
 		m.mu.Unlock()
 		_ = sess.killShell()
+		if err := existing.resize(opts.TerminalCols); err == nil && opts.TerminalCols > 0 {
+			time.Sleep(25 * time.Millisecond)
+		}
 		return existing, nil
 	}
 	m.sessions[key] = sess
@@ -155,7 +161,7 @@ func newLongShellSession(_ context.Context, key string, opts Options) (*longShel
 	cmd := exec.CommandContext(context.Background(), shell, args...)
 	cmd.Dir = absCwd
 	cmd.Env = commandEnv(opts.Env)
-	proc, err := startLongShellPlatformProcess(context.Background(), cmd, shell)
+	proc, err := startLongShellPlatformProcess(context.Background(), cmd, shell, opts.TerminalCols)
 	if err != nil {
 		return nil, err
 	}
@@ -201,6 +207,13 @@ func (s *longShellSession) isClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closed
+}
+
+func (s *longShellSession) resize(cols int) error {
+	if s == nil || s.proc == nil {
+		return nil
+	}
+	return s.proc.Resize(cols, defaultTerminalRows)
 }
 
 func (s *longShellSession) markClosed() {
@@ -332,6 +345,13 @@ func (r *longShellCommand) WriteInput(input []byte) (int, error) {
 		return 0, nil
 	}
 	return r.session.proc.WriteInput(input)
+}
+
+func (r *longShellCommand) Resize(cols, rows int) error {
+	if r == nil || r.session == nil || r.session.proc == nil {
+		return nil
+	}
+	return r.session.proc.Resize(cols, rows)
 }
 
 func (r *longShellCommand) Interrupt() error {
@@ -506,7 +526,13 @@ func (r *longShellCommand) stripShellControlEchoLocked(value string) string {
 			}
 			continue
 		}
-		if isShellControlEcho(line) {
+		if idx := shellControlEchoIndex(line); idx >= 0 {
+			if idx > 0 {
+				prefix := line[:idx]
+				if !looksLikeShellPromptPrefix(prefix) {
+					kept = append(kept, prefix)
+				}
+			}
 			if !hasLineBreak {
 				r.suppressEcho = true
 			}
@@ -515,6 +541,11 @@ func (r *longShellCommand) stripShellControlEchoLocked(value string) string {
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "")
+}
+
+func looksLikeShellPromptPrefix(prefix string) bool {
+	trimmed := strings.TrimSpace(prefix)
+	return strings.HasSuffix(trimmed, ">") || strings.HasSuffix(trimmed, "$") || strings.HasSuffix(trimmed, "%")
 }
 
 func splitLinesKeepingBreaks(value string) []string {
@@ -534,20 +565,29 @@ func splitLinesKeepingBreaks(value string) []string {
 }
 
 func isShellControlEcho(line string) bool {
+	return shellControlEchoIndex(line) >= 0
+}
+
+func shellControlEchoIndex(line string) int {
 	text := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
 	if text == "" {
-		return false
+		return -1
 	}
-	if strings.Contains(text, "__MINDFS_CMD_START_") || strings.Contains(text, "__MINDFS_CMD_END_") {
-		return true
+	tokens := []string{
+		"__MINDFS_CMD_START_",
+		"__MINDFS_CMD_END_",
+		"__mindfs_status",
+		"$global:LASTEXITCODE",
+		"[Console]::OutputEncoding",
+		"[Console]::InputEncoding",
 	}
-	if strings.Contains(text, "__mindfs_status") || strings.Contains(text, "$global:LASTEXITCODE") {
-		return true
+	best := -1
+	for _, token := range tokens {
+		if idx := strings.Index(line, token); idx >= 0 && (best < 0 || idx < best) {
+			best = idx
+		}
 	}
-	if strings.Contains(text, "[Console]::OutputEncoding") || strings.Contains(text, "[Console]::InputEncoding") {
-		return true
-	}
-	return false
+	return best
 }
 
 func takeExitCode(value string) (string, bool) {

@@ -372,6 +372,7 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 	effort := getString(req.Payload, "effort")
 	fastService := normalizeFastServiceValue(getString(req.Payload, "fast_service"))
 	shell := getString(req.Payload, "shell")
+	terminalCols := getInt(req.Payload, "terminal_cols")
 	if content == "" || sessionType == "" || (agentName == "" && sessionType != session.TypeCommand) {
 		h.sendWSError(conn, clientID, req.ID, "invalid_request", "content, type and agent required")
 		return
@@ -440,16 +441,17 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 	defer cancel()
 
 	err := uc.SendMessage(msgCtx, usecase.SendMessageInput{
-		RootID:      rootID,
-		Key:         key,
-		Agent:       agentName,
-		Model:       model,
-		Mode:        agentMode,
-		Effort:      effort,
-		FastService: fastService,
-		Shell:       shell,
-		Content:     content,
-		ClientCtx:   clientCtx,
+		RootID:       rootID,
+		Key:          key,
+		Agent:        agentName,
+		Model:        model,
+		Mode:         agentMode,
+		Effort:       effort,
+		FastService:  fastService,
+		Shell:        shell,
+		TerminalCols: terminalCols,
+		Content:      content,
+		ClientCtx:    clientCtx,
 		OnStart: func() {
 			streamHub.BroadcastSessionUserMessage(rootID, key, sessionType, sessionName, agentName, model, agentMode, effort, fastService, content, clientID)
 		},
@@ -667,6 +669,33 @@ func getString(payload map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+func getInt(payload map[string]any, key string) int {
+	if payload == nil {
+		return 0
+	}
+	value, ok := payload[key]
+	if !ok {
+		return 0
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case float64:
+		return int(typed)
+	case string:
+		parsed := 0
+		for _, ch := range strings.TrimSpace(typed) {
+			if ch < '0' || ch > '9' {
+				return 0
+			}
+			parsed = parsed*10 + int(ch-'0')
+		}
+		return parsed
+	default:
+		return 0
+	}
 }
 
 func normalizeFastServiceValue(value string) string {

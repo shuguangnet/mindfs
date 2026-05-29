@@ -1664,7 +1664,7 @@ if (useInnerScrollContainer && !container) {
             padding: "24px 16px",
             boxSizing: "border-box",
             overflowX: "hidden",
-          }}>
+          }} data-mindfs-session-content-width="1">
           <div style={{ width: "100%", minWidth: 0, margin: "0", display: "flex", flexDirection: "column" }}>
             {loading && !hasVisibleTimeline ? (
               <div

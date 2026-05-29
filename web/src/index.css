@@ -220,6 +220,48 @@ body {
   background-color: var(--bg-gradient-start);
 }
 
+.mindfs-xterm-output .xterm,
+.mindfs-xterm-output .xterm-viewport,
+.mindfs-xterm-output .xterm-screen {
+  touch-action: none;
+  overscroll-behavior: auto;
+  pointer-events: none;
+}
+
+.mindfs-xterm-output .xterm-viewport {
+  overflow: hidden !important;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+}
+
+.mindfs-xterm-output .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.mindfs-xterm-scroll {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.mindfs-xterm-scroll::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.mindfs-xterm-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mindfs-xterm-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+}
+
+.mindfs-xterm-output-expanded .xterm-viewport {
+  overflow: hidden !important;
+}
+
 @media (max-width: 767px) {
   html,
   body {

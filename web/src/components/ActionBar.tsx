@@ -885,6 +885,7 @@ export function ActionBar({
           ) : null}
 
           <div
+            data-mindfs-command-input-width="1"
             style={{
               background: "var(--panel-bg)",
               border: isFocused

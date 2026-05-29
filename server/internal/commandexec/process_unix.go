@@ -25,10 +25,10 @@ type platformProcess struct {
 	startedAt time.Time
 }
 
-func startPlatformProcess(_ context.Context, cmd *exec.Cmd, shell string) (Process, error) {
+func startPlatformProcess(_ context.Context, cmd *exec.Cmd, shell string, terminalCols int) (Process, error) {
 	startedAt := time.Now().UTC()
 	cmd.SysProcAttr = nil
-	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 120})
+	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: defaultTerminalRows, Cols: terminalColsOrDefault(terminalCols)})
 	if err != nil {
 		log.Printf("[commandexec] pty.start.error shell=%q err=%v fallback=pipe", shell, err)
 		fallback := exec.Command(cmd.Path, pipeFallbackArgs(shell, cmd.Args[1:])...)
@@ -50,8 +50,8 @@ func startPlatformProcess(_ context.Context, cmd *exec.Cmd, shell string) (Proce
 	return p, nil
 }
 
-func startLongShellPlatformProcess(ctx context.Context, cmd *exec.Cmd, shell string) (Process, error) {
-	return startPlatformProcess(ctx, cmd, shell)
+func startLongShellPlatformProcess(ctx context.Context, cmd *exec.Cmd, shell string, terminalCols int) (Process, error) {
+	return startPlatformProcess(ctx, cmd, shell, terminalCols)
 }
 
 func pipeFallbackArgs(shell string, args []string) []string {
@@ -127,6 +127,13 @@ func (p *platformProcess) WriteInput(input []byte) (int, error) {
 		return 0, nil
 	}
 	return p.pty.Write(input)
+}
+
+func (p *platformProcess) Resize(cols, rows int) error {
+	if p == nil || p.pty == nil {
+		return nil
+	}
+	return pty.Setsize(p.pty, &pty.Winsize{Rows: terminalRowsOrDefault(rows), Cols: terminalColsOrDefault(cols)})
 }
 
 func (p *platformProcess) Interrupt() error {

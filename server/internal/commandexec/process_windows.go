@@ -22,11 +22,6 @@ import (
 	"golang.org/x/text/transform"
 )
 
-const (
-	conptyCols = 120
-	conptyRows = 30
-)
-
 type platformProcess struct {
 	cmd       *exec.Cmd
 	pi        windows.ProcessInformation
@@ -44,7 +39,7 @@ type platformProcess struct {
 	exitOnce  sync.Once
 }
 
-func startPlatformProcess(ctx context.Context, cmd *exec.Cmd, shell string) (Process, error) {
+func startPlatformProcess(ctx context.Context, cmd *exec.Cmd, shell string, terminalCols int) (Process, error) {
 	if shouldUseWindowsPipe(shell) {
 		return startWindowsPipeProcess(ctx, cmd, shell)
 	}
@@ -60,7 +55,7 @@ func startPlatformProcess(ctx context.Context, cmd *exec.Cmd, shell string) (Pro
 	}
 
 	var console windows.Handle
-	if err := windows.CreatePseudoConsole(windows.Coord{X: conptyCols, Y: conptyRows}, inRead, outWrite, 0, &console); err != nil {
+	if err := windows.CreatePseudoConsole(windows.Coord{X: int16(terminalColsOrDefault(terminalCols)), Y: int16(defaultTerminalRows)}, inRead, outWrite, 0, &console); err != nil {
 		closeHandles(inRead, inWrite, outRead, outWrite)
 		return nil, err
 	}
@@ -234,7 +229,7 @@ func startWindowsPipeProcess(ctx context.Context, cmd *exec.Cmd, shell string) (
 	return p, nil
 }
 
-func startLongShellPlatformProcess(ctx context.Context, cmd *exec.Cmd, shell string) (Process, error) {
+func startLongShellPlatformProcess(ctx context.Context, cmd *exec.Cmd, shell string, _ int) (Process, error) {
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -324,6 +319,13 @@ func (p *platformProcess) WriteInput(input []byte) (int, error) {
 		return 0, nil
 	}
 	return p.input.Write(input)
+}
+
+func (p *platformProcess) Resize(cols, rows int) error {
+	if p == nil || p.console == 0 {
+		return nil
+	}
+	return windows.ResizePseudoConsole(p.console, windows.Coord{X: int16(terminalColsOrDefault(cols)), Y: int16(terminalRowsOrDefault(rows))})
 }
 
 func (p *platformProcess) Interrupt() error {

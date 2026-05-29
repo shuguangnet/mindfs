@@ -114,20 +114,80 @@ function renderToolIcon(kind: string): React.ReactNode {
 }
 
 function stripAnsi(text: string): string {
-  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  return text
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[ -/]*[@-~]/g, "");
 }
 
 function normalizeTerminalText(text: string): string {
   return (text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n+$/g, "");
 }
 
-function outputMetrics(text: string, cols: number): { cols: number; rows: number } {
-  const normalized = stripAnsi(normalizeTerminalText(text));
+function trimTerminalLineEnd(line: string): string {
+  return line.replace(/\s+((?:\x1b\[[0-?]*[ -/]*[@-~])*)$/g, "$1");
+}
+
+function normalizeDisplayTerminalText(text: string): string {
+  return normalizeTerminalText(text)
+    .split("\n")
+    .map(trimTerminalLineEnd)
+    .join("\n");
+}
+
+function terminalCharWidth(char: string): number {
+  const codePoint = char.codePointAt(0) || 0;
+  if (codePoint === 0) return 0;
+  if (codePoint < 32 || (codePoint >= 0x7f && codePoint < 0xa0)) return 0;
+  if (
+    codePoint >= 0x1100 &&
+    (codePoint <= 0x115f ||
+      codePoint === 0x2329 ||
+      codePoint === 0x232a ||
+      (codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f) ||
+      (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+      (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+      (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+      (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+      (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+      (codePoint >= 0xffe0 && codePoint <= 0xffe6))
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+function visibleTerminalWidth(text: string): number {
+  const visible = stripAnsi(text);
+  let width = 0;
+  for (let index = 0; index < visible.length; ) {
+    const codePoint = visible.codePointAt(index);
+    if (codePoint === undefined) break;
+    const char = String.fromCodePoint(codePoint);
+    width += terminalCharWidth(char);
+    index += char.length;
+  }
+  return width;
+}
+
+function maxTerminalLineWidth(text: string): number {
+  return stripAnsi(normalizeDisplayTerminalText(text))
+    .split("\n")
+    .reduce((max, line) => Math.max(max, visibleTerminalWidth(line)), 0);
+}
+
+function outputMetrics(text: string, cols: number, maxVisibleRows: number, expandRows: boolean): { cols: number; rows: number } {
+  const normalized = stripAnsi(normalizeDisplayTerminalText(text));
   const lines = normalized.split("\n");
-  const visualRows = lines.reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / cols)), 0);
+  const physicalRows = lines.length || 1;
+  const visualRows = lines.reduce(
+    (sum, line) => sum + Math.max(1, Math.ceil(visibleTerminalWidth(line) / Math.max(1, cols))),
+    0,
+  );
+  const rows = Math.max(physicalRows, visualRows || 1);
   return {
     cols,
-    rows: Math.max(1, Math.min(24, visualRows || 1)),
+    rows: Math.max(1, expandRows ? Math.min(500, rows) : Math.min(maxVisibleRows, rows)),
   };
 }
 
@@ -141,9 +201,9 @@ const statusColors: Record<string, string> = {
 };
 
 const terminalFontSize = 12;
-const terminalLineHeight = 1.45;
+const terminalLineHeight = 1.6;
 const terminalLinePx = Math.ceil(terminalFontSize * terminalLineHeight);
-const terminalViewportPadding = 6;
+const terminalViewportPadding = 24;
 const terminalFontFamily =
   '"Cascadia Mono", "Cascadia Code", Consolas, "Microsoft YaHei Mono", "Microsoft YaHei", "Noto Sans Mono CJK SC", monospace';
 
@@ -163,27 +223,41 @@ function measureTerminalCharWidth(container: HTMLElement): number {
 }
 
 function XtermOutput({ text }: { text: string }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const [cols, setCols] = useState(120);
-  const displayText = useMemo(() => normalizeTerminalText(text), [text]);
-  const metrics = useMemo(() => outputMetrics(displayText, cols), [displayText, cols]);
+  const [charWidth, setCharWidth] = useState(7.25);
+  const [maxVisibleRows, setMaxVisibleRows] = useState(10);
+  const [expandRows, setExpandRows] = useState(false);
+  const displayText = useMemo(() => normalizeDisplayTerminalText(text), [text]);
+  const metrics = useMemo(() => outputMetrics(displayText, cols, maxVisibleRows, expandRows), [displayText, cols, maxVisibleRows, expandRows]);
   const terminalHeight = Math.max(terminalLinePx, metrics.rows * terminalLinePx + terminalViewportPadding);
+  const terminalWidth = Math.max(1, Math.ceil(metrics.cols * charWidth) + 2);
 
   useEffect(() => {
-    const container = containerRef.current;
+    const container = scrollRef.current;
     if (!container) return;
     const updateCols = () => {
       const width = container.clientWidth || 0;
       if (width <= 0) return;
       const charWidth = measureTerminalCharWidth(container);
-      setCols(Math.max(20, Math.floor(width / charWidth) - 1));
+      const viewportWidth = window.visualViewport?.width || window.innerWidth || width;
+      const viewportHeight = window.visualViewport?.height || window.innerHeight || 720;
+      const mobile = viewportWidth < 768;
+      const rowLimit = Math.max(4, Math.min(14, Math.floor(viewportHeight * 0.48 / terminalLinePx)));
+      const viewportCols = Math.max(20, Math.floor(width / charWidth) - 1);
+      const contentCols = Math.min(320, Math.max(1, maxTerminalLineWidth(displayText)));
+      setCharWidth(charWidth);
+      setMaxVisibleRows(rowLimit);
+      setExpandRows(mobile);
+      setCols(Math.max(viewportCols, contentCols));
     };
     updateCols();
     const observer = new ResizeObserver(updateCols);
     observer.observe(container);
     return () => observer.disconnect();
-  }, []);
+  }, [displayText]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -217,10 +291,12 @@ function XtermOutput({ text }: { text: string }) {
     terminal.reset();
     terminal.resize(metrics.cols, metrics.rows);
     terminal.write(displayText || "");
+    terminal.scrollToTop();
   }, [displayText, metrics.cols, metrics.rows]);
 
   return (
     <div
+      className={`mindfs-xterm-output${expandRows ? " mindfs-xterm-output-expanded" : ""}`}
       style={{
         marginTop: "10px",
         padding: "8px",
@@ -231,9 +307,33 @@ function XtermOutput({ text }: { text: string }) {
         width: "100%",
         boxSizing: "border-box",
         height: `${terminalHeight + 16}px`,
+        overscrollBehavior: "auto",
+        touchAction: "auto",
       }}
     >
-      <div ref={containerRef} style={{ width: "100%", height: `${terminalHeight}px`, overflow: "hidden" }} />
+      <div
+        ref={scrollRef}
+        className="mindfs-xterm-scroll"
+        style={{
+          width: "100%",
+          height: `${terminalHeight}px`,
+          overflowX: "auto",
+          overflowY: "hidden",
+          overscrollBehaviorX: "contain",
+          overscrollBehaviorY: "auto",
+          touchAction: "auto",
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        <div
+          ref={containerRef}
+          style={{
+            width: `${terminalWidth}px`,
+            height: `${terminalHeight}px`,
+            pointerEvents: "none",
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -414,8 +514,10 @@ export const ToolCallCard = memo(function ToolCallCard({
           style={{
             padding: "0 10px 10px",
             borderTop: "1px solid var(--border-color)",
-            maxHeight: "min(60vh, 720px)",
+            maxHeight: isUserShell ? "min(56vh, 520px)" : "min(60vh, 720px)",
             overflowY: "auto",
+            WebkitOverflowScrolling: "touch",
+            overscrollBehavior: isUserShell ? "auto" : undefined,
           }}
         >
           {isUserShell ? (

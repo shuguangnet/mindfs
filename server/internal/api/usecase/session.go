@@ -412,6 +412,7 @@ type SendMessageInput struct {
 	Effort              string
 	FastService         string
 	Shell               string
+	TerminalCols        int
 	Content             string
 	ClientCtx           ClientContext
 	OnStart             func()
@@ -1612,10 +1613,11 @@ func (s *Service) sendCommandMessage(ctx context.Context, in SendMessageInput, m
 		Kind:    agenttypes.ToolKindExecute,
 		RawType: "commandExecution",
 		Meta: map[string]any{
-			"source":  "userShell",
-			"phase":   "start",
-			"command": in.Content,
-			"cwd":     ".",
+			"source":       "userShell",
+			"phase":        "start",
+			"command":      in.Content,
+			"cwd":          ".",
+			"terminalCols": in.TerminalCols,
 		},
 	}
 	if in.OnUpdate != nil {
@@ -1623,12 +1625,13 @@ func (s *Service) sendCommandMessage(ctx context.Context, in SendMessageInput, m
 	}
 
 	proc, err := commandexec.StartInSession(ctx, commandexec.Options{
-		Command: in.Content,
-		Cwd:     rootAbs,
-		Shells:  configuredShells(s.Registry),
-		Shell:   in.Shell,
-		RootID:  in.RootID,
-		Session: current.Key,
+		Command:      in.Content,
+		Cwd:          rootAbs,
+		Shells:       configuredShells(s.Registry),
+		Shell:        in.Shell,
+		RootID:       in.RootID,
+		Session:      current.Key,
+		TerminalCols: in.TerminalCols,
 	})
 	if err != nil {
 		log.Printf("[command] start.error root=%s session=%s command=%q err=%v", in.RootID, current.Key, in.Content, err)
@@ -1715,6 +1718,7 @@ func (s *Service) sendCommandMessage(ctx context.Context, in SendMessageInput, m
 		"persistedBytes": persistedBytes,
 		"truncated":      outputBytes > persistedBytes,
 		"truncation":     "tail",
+		"terminalCols":   in.TerminalCols,
 	}
 	if cancelStarted || ctx.Err() != nil {
 		final.Meta["cancelled"] = true
