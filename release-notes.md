@@ -1,3 +1,17 @@
+# MindFS v0.3.0
+
+## 新功能
+- 增加 shell【命令执行】交互模式
+- 支持 codex subagent
+
+## 优化和修复
+- 修复 skill 目录不存在错误
+- 修复 claude code ask user 回答无效
+- 修复语言输入后，键盘输入错误
+- 修复 /goal 权限审批卡主问题
+- 修复Windows 上项目重命名错误
+
+
 # MindFS v0.2.9
 
 ## 优化和修复
