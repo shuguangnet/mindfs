@@ -177,6 +177,9 @@ func autoAddExternalProjectRoots(registry *fs.Registry) {
 		if hasMindFSMetadataDir(projectPath) {
 			continue
 		}
+		if agent.IsTemporaryWorkDir(projectPath) {
+			continue
+		}
 		if _, err := registry.Upsert(projectPath); err != nil {
 			log.Printf("[startup/projects] auto add skipped path=%s err=%v", projectPath, err)
 			continue
