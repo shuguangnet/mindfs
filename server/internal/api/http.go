@@ -283,6 +283,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 
 	// Agent status API
 	r.Get("/api/agents", h.protectedEndpoint(h.handleAgentsList))
+	r.Post("/api/agents/restart", h.protectedEndpoint(h.handleAgentRestart))
 	r.Get("/api/agent-config/defaults", h.protectedEndpoint(h.handleAgentConfigDefaults))
 	r.Get("/api/agent-config/backups", h.protectedEndpoint(h.handleAgentConfigBackupsList))
 	r.Post("/api/agent-config/backups", h.protectedEndpoint(h.handleAgentConfigBackupCreate))

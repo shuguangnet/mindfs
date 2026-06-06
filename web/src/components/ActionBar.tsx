@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { type SessionMode } from "./ModeSelector";
 import { ModeSelector } from "./ModeSelector";
 import { AgentSelector } from "./AgentSelector";
-import { fetchAgents, fetchShells, type AgentStatus, type ShellStatus } from "../services/agents";
+import { fetchAgents, fetchShells, restartAgent, type AgentStatus, type ShellStatus } from "../services/agents";
 import { fetchCandidates, type CandidateItem } from "../services/candidates";
 import { reportError } from "../services/error";
 import { uploadFiles } from "../services/upload";
@@ -1211,6 +1211,11 @@ export function ActionBar({
                   onEffortChange={(nextEffort) => setEffort(nextEffort || "")}
                   fastService={fastService}
                   onFastServiceChange={(nextFastService) => setFastService(nextFastService || "")}
+                  onAgentRestart={async (targetAgent) => {
+                    await restartAgent(targetAgent);
+                    const items = await fetchAgents(true);
+                    setAgents(items);
+                  }}
                   compact={true}
                   warnUnavailable={isSelectedAgentUnavailable}
                 />
