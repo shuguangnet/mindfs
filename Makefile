@@ -1,4 +1,4 @@
-.PHONY: help dev dev-backend dev-web build-web build build-android build-harmony install uninstall build-all start start-server test dist-clean publish-release-notes release tag
+.PHONY: help dev dev-backend dev-web build-web build build-android build-harmony install uninstall build-all start start-server test dist-clean publish-release-notes verify-release release tag
 
 GO ?= go
 NPM ?= npm
@@ -28,6 +28,7 @@ help:
 		"  make test         # run Go tests" \
 		"  make tag TAG=v1.2.3  # create and push a git tag" \
 		"  make publish-release-notes TAG=v1.2.3  # commit and push release-notes.md if changed" \
+		"  make verify-release TAG=v1.2.3  # verify signed release manifest and artifacts in $(DIST_DIR)" \
 		"  make release TAG=v1.2.3  # publish notes, build-all, then create GitHub release" \
 		"  make release TAG=v1.2.3 RELEASE_ANDROID=1  # include Android APK"
 
@@ -151,6 +152,12 @@ publish-release-notes:
 		git push origin main; \
 	fi
 
+# Usage: make verify-release TAG=v1.2.3
+verify-release:
+	@test -n "$(TAG)" || (echo "Usage: make verify-release TAG=v1.2.3" >&2; exit 1)
+	@test -n "$(MINDFS_RELEASE_PUBLIC_KEY)" || (echo "Error: MINDFS_RELEASE_PUBLIC_KEY is required to verify release manifests." >&2; exit 1)
+	@$(GO) run scripts/sign-release-manifest.go -verify -version "$(TAG)" -dist "$(DIST_DIR)" -repo "a9gent/mindfs" -public-key "$(MINDFS_RELEASE_PUBLIC_KEY)"
+
 # Usage: make release TAG=v1.2.3 [RELEASE_ANDROID=1]
 # Builds desktop/server platforms and creates a GitHub release.
 release:
@@ -174,6 +181,7 @@ release:
 		echo "Skipping Android release. Use RELEASE_ANDROID=1 to include the APK."; \
 	fi
 	@$(GO) run scripts/sign-release-manifest.go -version "$(TAG)" -dist "$(DIST_DIR)" -repo "a9gent/mindfs"
+	$(MAKE) verify-release TAG="$(TAG)" MINDFS_RELEASE_PUBLIC_KEY="$(MINDFS_RELEASE_PUBLIC_KEY)"
 	@echo "Creating draft GitHub release $(TAG)"
 	gh release create $(TAG) \
 		--draft \
