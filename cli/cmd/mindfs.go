@@ -52,6 +52,7 @@ func main() {
 		fmt.Fprintf(out, "  mindfs --foreground\n")
 		fmt.Fprintf(out, "  mindfs --status\n")
 		fmt.Fprintf(out, "  mindfs --version\n")
+		fmt.Fprintf(out, "  mindfs --update\n")
 		fmt.Fprintf(out, "  mindfs --stop\n")
 		fmt.Fprintf(out, "  mindfs -addr :9000 /path/to/project\n")
 		fmt.Fprintf(out, "  mindfs -remove /path/to/project\n")
@@ -65,6 +66,7 @@ func main() {
 	restart := flag.Bool("restart", false, "restart the background mindfs service")
 	statusFlag := flag.Bool("status", false, "show background service status")
 	versionFlag := flag.Bool("version", false, "show version")
+	updateFlag := flag.Bool("update", false, "check for and install the latest MindFS release")
 	bindRelay := flag.Bool("bind-relay", false, "start relay binding and print the relayer bind URL")
 	remove := flag.Bool("remove", false, "remove the managed directory")
 	tlsFlag := flag.Bool("tls", false, "enable HTTPS (auto-generates self-signed cert if -cert/-key not provided)")
@@ -96,6 +98,14 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
+	}
+
+	if *updateFlag {
+		if err := handleUpdateCommand(context.Background(), *addr, *tlsFlag); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		return
 	}
 
 	if *statusFlag {
@@ -444,6 +454,35 @@ func stopService(addr string, useTLS bool, pidPath string) error {
 
 func printVersion() {
 	fmt.Fprintf(os.Stdout, "mindfs version: %s\n", version)
+}
+
+func handleUpdateCommand(ctx context.Context, addr string, useTLS bool) error {
+	if runtime.GOOS == "windows" && serverRunning(addr, useTLS) {
+		return errors.New("mindfs service is running. Stop it before updating:\n  mindfs -stop\n  mindfs -update\n  mindfs")
+	}
+	fmt.Fprintln(os.Stdout, "Checking for updates...")
+	result, err := app.UpdateNow(ctx, app.UpdateOptions{
+		Version:  version,
+		Progress: os.Stdout,
+	})
+	if strings.TrimSpace(result.CurrentVersion) != "" {
+		fmt.Fprintf(os.Stdout, "current version: %s\n", result.CurrentVersion)
+	}
+	if strings.TrimSpace(result.LatestVersion) != "" {
+		fmt.Fprintf(os.Stdout, "latest version: %s\n", result.LatestVersion)
+	}
+	if err != nil {
+		return err
+	}
+	if !result.HasUpdate {
+		fmt.Fprintln(os.Stdout, "mindfs is already up to date")
+		return nil
+	}
+	if result.Installed {
+		fmt.Fprintln(os.Stdout, "Restart MindFS to use the new version:")
+		fmt.Fprintln(os.Stdout, "  mindfs -restart")
+	}
+	return nil
 }
 
 func printServiceStatus(addr string, useTLS bool, pidPath, logPath string) error {

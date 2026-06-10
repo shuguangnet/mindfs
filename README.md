@@ -33,6 +33,7 @@ Access your personal AI agents and workstation data anywhere, anytime through Mi
 - **Multi-device sync**: Access the same instance from multiple devices simultaneously with live session sync.
 - **Configuration backup and switching**: Agent configurations can be backed up and switched with one click, making it easier to move between multiple accounts or API keys.
 - **Subagents**: Codex subagents are automatically discovered and displayed.
+- **Scheduled tasks**: Trigger agents to run tasks at specified times.
 
 ### File Access
 
@@ -125,6 +126,22 @@ irm https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.ps1 | i
 
 The install script auto-detects your OS and architecture, reads the latest version from the first line of [`release-notes.md`](https://raw.githubusercontent.com/a9gent/mindfs/main/release-notes.md), then downloads the matching binary from [GitHub Releases](https://github.com/a9gent/mindfs/releases). `release-notes.md` keeps release history with the newest entry at the top; `make release TAG=v1.2.3` commits and pushes it when changed, then uses only the top entry as the GitHub release notes.
 
+### Uninstall
+
+The uninstall command removes the installed binary, bundled web assets, bundled default `agents.json`, and the PATH entry added by the installer. User config and project `.mindfs/` data are kept by default.
+
+**macOS / Linux**
+```bash
+curl -fsSL https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.sh | bash -s -- --uninstall
+```
+
+**Windows (PowerShell)**
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.ps1))) -Uninstall
+```
+
+To also remove user-level MindFS config and logs, add `--purge` on macOS/Linux or `-Purge` on Windows. Project `.mindfs/` directories are never removed automatically.
+
 **Build from source** (requires Go 1.22+, Node.js 20+)
 ```bash
 git clone https://github.com/a9gent/mindfs.git
@@ -186,6 +203,7 @@ mindfs -addr :9000 /path/to/project
 mindfs -foreground /path/to/project
 mindfs -status
 mindfs -version
+mindfs -update
 mindfs -stop
 mindfs -restart
 mindfs -remove /path/to/project
@@ -199,6 +217,7 @@ mindfs -remove /path/to/project
 | `-foreground` | `false` | Run the server in the foreground instead of starting a background service. |
 | `-status` | `false` | Show background service status, PID, URL, and log file path. |
 | `-version` | `false` | Show the current MindFS version. |
+| `-update` | `false` | Check for and install the latest MindFS release. Restart MindFS manually after updating. |
 | `-stop` | `false` | Stop the background service for the selected address. |
 | `-restart` | `false` | Stop the background service if present, then start it again. |
 | `-remove` | `false` | Remove `root` from the managed directory list. If the server is running, it is removed through the local API; otherwise it is removed from the local registry. |

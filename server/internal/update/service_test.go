@@ -146,6 +146,54 @@ func TestVerifyFileSHA256(t *testing.T) {
 	}
 }
 
+func TestInstallLayoutInstalled(t *testing.T) {
+	service := NewService("a9gent/mindfs", "v1.2.2", filepath.Join("opt", "mindfs", "bin", "mindfs"), nil, time.Hour)
+	layout, err := service.installLayout()
+	if err != nil {
+		t.Fatalf("installLayout() error = %v", err)
+	}
+	if layout.Mode != "installed" {
+		t.Fatalf("layout mode = %q, want installed", layout.Mode)
+	}
+	if got, want := filepath.Clean(layout.Prefix), filepath.Join("opt", "mindfs"); got != want {
+		t.Fatalf("layout prefix = %q, want %q", got, want)
+	}
+	bin, agents, web := layout.destinationPaths("mindfs")
+	if got, want := bin, filepath.Join("opt", "mindfs", "bin", "mindfs"); got != want {
+		t.Fatalf("bin path = %q, want %q", got, want)
+	}
+	if got, want := agents, filepath.Join("opt", "mindfs", "share", "mindfs", "agents.json"); got != want {
+		t.Fatalf("agents path = %q, want %q", got, want)
+	}
+	if got, want := web, filepath.Join("opt", "mindfs", "share", "mindfs", "web"); got != want {
+		t.Fatalf("web path = %q, want %q", got, want)
+	}
+}
+
+func TestInstallLayoutPortable(t *testing.T) {
+	service := NewService("a9gent/mindfs", "v1.2.2", filepath.Join("tmp", "mindfs_v1.2.2_linux_amd64", "mindfs"), nil, time.Hour)
+	layout, err := service.installLayout()
+	if err != nil {
+		t.Fatalf("installLayout() error = %v", err)
+	}
+	if layout.Mode != "portable" {
+		t.Fatalf("layout mode = %q, want portable", layout.Mode)
+	}
+	if got, want := filepath.Clean(layout.ExeDir), filepath.Join("tmp", "mindfs_v1.2.2_linux_amd64"); got != want {
+		t.Fatalf("layout exe dir = %q, want %q", got, want)
+	}
+	bin, agents, web := layout.destinationPaths("mindfs")
+	if got, want := bin, filepath.Join("tmp", "mindfs_v1.2.2_linux_amd64", "mindfs"); got != want {
+		t.Fatalf("bin path = %q, want %q", got, want)
+	}
+	if got, want := agents, filepath.Join("tmp", "mindfs_v1.2.2_linux_amd64", "agents.json"); got != want {
+		t.Fatalf("agents path = %q, want %q", got, want)
+	}
+	if got, want := web, filepath.Join("tmp", "mindfs_v1.2.2_linux_amd64", "web"); got != want {
+		t.Fatalf("web path = %q, want %q", got, want)
+	}
+}
+
 func TestSafeArchiveTargetRejectsTraversal(t *testing.T) {
 	root := t.TempDir()
 	cases := []string{"../escape", "/tmp/escape", ".."}

@@ -125,6 +125,22 @@ irm https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.ps1 | i
 
 安装脚本会自动检测系统和架构，先从 [`release-notes.md`](https://raw.githubusercontent.com/a9gent/mindfs/main/release-notes.md) 第一行读取最新版本号，再从 [GitHub Releases](https://github.com/a9gent/mindfs/releases) 下载对应的二进制包并完成安装。`release-notes.md` 会保留历史记录且最新版本在顶部；`make release TAG=v1.2.3` 会在它有变更时提交并推送，然后只用顶部当前版本内容作为 GitHub release notes。
 
+### 卸载
+
+卸载命令会删除已安装的二进制、内置 Web 资源、内置默认 `agents.json`，并移除安装脚本添加的 PATH 项。默认保留用户配置和项目 `.mindfs/` 数据。
+
+**macOS / Linux**
+```bash
+curl -fsSL https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.sh | bash -s -- --uninstall
+```
+
+**Windows（PowerShell）**
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.ps1))) -Uninstall
+```
+
+如需同时删除用户级 MindFS 配置和日志，macOS/Linux 追加 `--purge`，Windows 追加 `-Purge`。项目目录中的 `.mindfs/` 不会被自动删除。
+
 **从源码编译**（需要 Go 1.22+、Node.js 20+）
 ```bash
 git clone https://github.com/a9gent/mindfs.git
@@ -186,6 +202,7 @@ mindfs -addr :9000 /path/to/project
 mindfs -foreground /path/to/project
 mindfs -status
 mindfs -version
+mindfs -update
 mindfs -stop
 mindfs -restart
 mindfs -remove /path/to/project
@@ -199,6 +216,7 @@ mindfs -remove /path/to/project
 | `-foreground` | `false` | 前台运行服务，不启动后台进程。适合开发、调试或配合进程管理器使用。 |
 | `-status` | `false` | 查看后台服务状态、PID、访问地址和日志文件路径。 |
 | `-version` | `false` | 查看当前 MindFS 版本。 |
+| `-update` | `false` | 检查并安装最新 MindFS 版本。更新后需要手动重启 MindFS。 |
 | `-stop` | `false` | 停止所选监听地址对应的后台服务。 |
 | `-restart` | `false` | 如后台服务已存在则先停止，再重新启动。 |
 | `-remove` | `false` | 从托管目录列表中移除 `root`。服务运行中时通过本地 API 移除；服务未运行时从本地注册表移除。 |
