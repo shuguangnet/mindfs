@@ -869,11 +869,6 @@ func (h *StreamHub) replayCompletionToClient(rootID, clientID, sessionKey string
 		h.mu.Unlock()
 		return
 	}
-	if time.Since(completed.Completed) > 2*time.Minute {
-		delete(h.completed, sessionKey)
-		h.mu.Unlock()
-		return
-	}
 	requestID := completed.RequestID
 	h.mu.Unlock()
 	h.SendToClient(clientID, buildSessionDoneResponse(rootID, sessionKey, requestID))
