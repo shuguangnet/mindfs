@@ -42,10 +42,11 @@ type Exchange struct {
 }
 
 type ExchangeAux struct {
-	Seq      int                  `json:"seq"`
-	Line     int                  `json:"line"`
-	ToolCall *agenttypes.ToolCall `json:"toolcall,omitempty"`
-	Thought  string               `json:"thought,omitempty"`
+	Seq       int                  `json:"seq"`
+	Line      int                  `json:"line"`
+	ToolCall  *agenttypes.ToolCall `json:"toolcall,omitempty"`
+	Thought   string               `json:"thought,omitempty"`
+	ThoughtID string               `json:"thought_id,omitempty"`
 }
 
 func CompactExchangeAux(aux ExchangeAux) (ExchangeAux, bool) {

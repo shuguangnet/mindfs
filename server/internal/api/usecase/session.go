@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -1246,32 +1248,42 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	auxBuffer := make([]session.ExchangeAux, 0, 8)
 	defer manager.ClearPendingExchangeAux(context.Background(), current.Key)
 	var thoughtBuffer strings.Builder
+	currentThoughtID := ""
 	flushThought := func() {
 		thought := thoughtBuffer.String()
 		if strings.TrimSpace(thought) == "" {
 			thoughtBuffer.Reset()
+			currentThoughtID = ""
 			return
 		}
+		thoughtID := currentThoughtID
 		thoughtBuffer.Reset()
+		currentThoughtID = ""
 		auxBuffer = append(auxBuffer, session.ExchangeAux{
-			Seq:     plannedAssistantSeq,
-			Line:    currentAssistantLine(responseText),
-			Thought: thought,
+			Seq:       plannedAssistantSeq,
+			Line:      currentAssistantLine(responseText),
+			Thought:   thought,
+			ThoughtID: thoughtID,
 		})
 	}
 	lastResponseUpdateType := ""
 	attachSessionUpdates := func(runtime agenttypes.Session) {
 		runtime.OnUpdate(func(update agenttypes.Event) {
 			update = normalizeAgentUpdatePaths(root, update)
-			clientUpdate := compactAgentUpdate(update)
 			switch update.Type {
 			case agenttypes.EventTypeThoughtChunk:
 				if chunk, ok := update.Data.(agenttypes.ThoughtChunk); ok && chunk.Content != "" {
+					if currentThoughtID == "" {
+						currentThoughtID = "thought-" + randomHex(8)
+					}
+					chunk.ID = currentThoughtID
+					update.Data = chunk
 					thoughtBuffer.WriteString(chunk.Content)
 				}
 			case agenttypes.EventTypeToolCall, agenttypes.EventTypeToolUpdate, agenttypes.EventTypeTodoUpdate, agenttypes.EventTypeMessageChunk, agenttypes.EventTypeMessageDone:
 				flushThought()
 			}
+			clientUpdate := compactAgentUpdate(update)
 			if update.Type == agenttypes.EventTypeToolCall || update.Type == agenttypes.EventTypeToolUpdate {
 				if toolCall, ok := update.Data.(agenttypes.ToolCall); ok && toolCall.IsWriteOperation() {
 					for _, path := range toolCall.GetAffectedPaths() {
@@ -1530,17 +1542,22 @@ func attachBackgroundSessionUpdates(ctx context.Context, in subagentSessionInput
 	lastResponseUpdateType := ""
 	var doneMu sync.Mutex
 	doneSent := false
+	currentThoughtID := ""
 	flushThought := func() {
 		thought := thoughtBuffer.String()
 		if strings.TrimSpace(thought) == "" {
 			thoughtBuffer.Reset()
+			currentThoughtID = ""
 			return
 		}
+		thoughtID := currentThoughtID
 		thoughtBuffer.Reset()
+		currentThoughtID = ""
 		auxBuffer = append(auxBuffer, session.ExchangeAux{
-			Seq:     plannedAssistantSeq,
-			Line:    currentAssistantLine(responseText),
-			Thought: thought,
+			Seq:       plannedAssistantSeq,
+			Line:      currentAssistantLine(responseText),
+			Thought:   thought,
+			ThoughtID: thoughtID,
 		})
 	}
 	finish := func(emit bool) {
@@ -1571,15 +1588,20 @@ func attachBackgroundSessionUpdates(ctx context.Context, in subagentSessionInput
 		}
 	}
 	runtime.OnUpdate(func(update agenttypes.Event) {
-		clientUpdate := compactAgentUpdate(update)
 		switch update.Type {
 		case agenttypes.EventTypeThoughtChunk:
 			if chunk, ok := update.Data.(agenttypes.ThoughtChunk); ok && chunk.Content != "" {
+				if currentThoughtID == "" {
+					currentThoughtID = "thought-" + randomHex(8)
+				}
+				chunk.ID = currentThoughtID
+				update.Data = chunk
 				thoughtBuffer.WriteString(chunk.Content)
 			}
 		case agenttypes.EventTypeToolCall, agenttypes.EventTypeToolUpdate, agenttypes.EventTypeTodoUpdate, agenttypes.EventTypeMessageChunk, agenttypes.EventTypeMessageDone:
 			flushThought()
 		}
+		clientUpdate := compactAgentUpdate(update)
 		if update.Type == agenttypes.EventTypeToolCall || update.Type == agenttypes.EventTypeToolUpdate {
 			if toolCall, ok := update.Data.(agenttypes.ToolCall); ok {
 				toolCallCopy := toolCall
@@ -2027,6 +2049,17 @@ func appendResponseChunk(responseText, lastResponseUpdateType, chunk string) str
 		responseText += "\n\n"
 	}
 	return responseText + chunk
+}
+
+func randomHex(bytes int) string {
+	if bytes <= 0 {
+		return ""
+	}
+	buf := make([]byte, bytes)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }
 
 func subagentSessionName(toolCall agenttypes.ToolCall, receiverThreadID string) string {

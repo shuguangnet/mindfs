@@ -70,6 +70,7 @@ export type ExchangeAux = {
   line: number;
   toolcall?: ToolCall | null;
   thought?: string | null;
+  thought_id?: string;
 };
 
 export type Session = {
@@ -174,7 +175,7 @@ export type TodoUpdate = {
 
 export type StreamEvent =
   | { type: "message_chunk"; data: { content: string } }
-  | { type: "thought_chunk"; data: { content: string } }
+  | { type: "thought_chunk"; data: { id?: string; content: string } }
   | { type: "tool_call"; data: ToolCall }
   | { type: "tool_call_update"; data: ToolCall }
   | { type: "todo_update"; data: TodoUpdate }

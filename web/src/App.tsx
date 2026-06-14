@@ -147,6 +147,7 @@ export type SessionItem = {
     role?: string;
     agent?: string;
     content?: string;
+    thought_id?: string;
     timestamp?: string;
     model?: string;
     mode?: string;
@@ -264,6 +265,7 @@ type Exchange = {
   effort?: string;
   fast_service?: "" | "on" | "off";
   content?: string;
+  thought_id?: string;
   context_window?: {
     totalTokens: number;
     modelContextWindow: number;
@@ -2383,22 +2385,44 @@ export function App({ onGoHome }: AppProps) {
   );
 
   const appendThoughtChunkForSession = useCallback(
-    (rootID: string, sessionKey: string, content: string) => {
+    (rootID: string, sessionKey: string, content: string, thoughtID?: string) => {
       if (!content) return;
       const now = new Date().toISOString();
       const cacheKey = rootSessionKey(rootID, sessionKey);
       const updateList = (prevList: Exchange[]) => {
         const list = [...(prevList || [])];
+        if (thoughtID) {
+          const existingIndex = list.findIndex(
+            (item) => item.role === "thought" && item.thought_id === thoughtID,
+          );
+          if (existingIndex >= 0) {
+            const existing = list[existingIndex];
+            const existingContent = existing.content || "";
+            let nextContent = existingContent;
+            if (content.includes(existingContent)) {
+              nextContent = content;
+            } else if (!existingContent.includes(content)) {
+              nextContent = `${existingContent}${content}`;
+            }
+            list[existingIndex] = {
+              ...existing,
+              content: nextContent,
+              timestamp: now,
+            };
+            return list;
+          }
+        }
         const last = list.length > 0 ? list[list.length - 1] : null;
-        if (last && last.role === "thought") {
+        if (last && last.role === "thought" && (!thoughtID || !last.thought_id)) {
           list[list.length - 1] = {
             ...last,
             content: `${last.content || ""}${content}`,
+            thought_id: thoughtID || last.thought_id,
             timestamp: now,
           };
           return list;
         }
-        list.push({ role: "thought", content, timestamp: now });
+        list.push({ role: "thought", content, thought_id: thoughtID, timestamp: now });
         return list;
       };
       const cached = sessionCacheRef.current[cacheKey];
@@ -6319,6 +6343,7 @@ export function App({ onGoHome }: AppProps) {
             activeRoot,
             streamKey,
             event.data?.content || "",
+            event.data?.id || "",
           );
           updateDrawerIfShowingStream();
           break;

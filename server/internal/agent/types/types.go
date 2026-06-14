@@ -196,6 +196,7 @@ type MessageChunk struct {
 }
 
 type ThoughtChunk struct {
+	ID      string `json:"id,omitempty"`
 	Content string `json:"content"`
 }
 
