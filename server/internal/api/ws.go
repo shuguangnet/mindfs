@@ -27,6 +27,9 @@ const (
 	wsPongWait     = 2 * time.Minute
 	wsProofQuery   = "e2ee_proof"
 	wsTSQuery      = "e2ee_ts"
+
+	sessionDoneSettleWindow = 50 * time.Millisecond
+	sessionDoneMaxWait      = 2 * time.Second
 )
 
 var upgrader = websocket.Upgrader{}
@@ -60,6 +63,71 @@ type sessionMessageJob struct {
 	ClientCtx       usecase.ClientContext
 	ExcludeClientID string
 	Queued          bool
+}
+
+type turnUpdateTracker struct {
+	mu           sync.Mutex
+	inFlight     int
+	lastActivity time.Time
+}
+
+func newTurnUpdateTracker() *turnUpdateTracker {
+	return &turnUpdateTracker{lastActivity: time.Now()}
+}
+
+func (t *turnUpdateTracker) Begin() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.inFlight++
+	t.lastActivity = time.Now()
+	t.mu.Unlock()
+}
+
+func (t *turnUpdateTracker) End() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	if t.inFlight > 0 {
+		t.inFlight--
+	}
+	t.lastActivity = time.Now()
+	t.mu.Unlock()
+}
+
+func (t *turnUpdateTracker) WaitIdle(ctx context.Context, settleWindow, maxWait time.Duration) bool {
+	if t == nil {
+		return true
+	}
+	if settleWindow <= 0 {
+		settleWindow = 50 * time.Millisecond
+	}
+	if maxWait <= 0 {
+		maxWait = 2 * time.Second
+	}
+	deadline := time.Now().Add(maxWait)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		t.mu.Lock()
+		inFlight := t.inFlight
+		idleFor := time.Since(t.lastActivity)
+		t.mu.Unlock()
+		if inFlight == 0 && idleFor >= settleWindow {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
 }
 
 // ServeHTTP upgrades the connection and processes JSON-RPC messages.
@@ -564,6 +632,19 @@ func (h *WSHandler) runSessionMessage(job sessionMessageJob) {
 	streamHub := h.AppContext.GetSessionStreamHub()
 	msgCtx, cancel := h.sessionMessageContext()
 	defer cancel()
+	updateTracker := newTurnUpdateTracker()
+	subTrackers := map[string]*turnUpdateTracker{}
+	var subTrackersMu sync.Mutex
+	subTrackerFor := func(sessionKey string) *turnUpdateTracker {
+		subTrackersMu.Lock()
+		defer subTrackersMu.Unlock()
+		tracker := subTrackers[sessionKey]
+		if tracker == nil {
+			tracker = newTurnUpdateTracker()
+			subTrackers[sessionKey] = tracker
+		}
+		return tracker
+	}
 
 	err := uc.SendMessage(msgCtx, usecase.SendMessageInput{
 		RootID:       rootID,
@@ -581,6 +662,8 @@ func (h *WSHandler) runSessionMessage(job sessionMessageJob) {
 			streamHub.BroadcastSessionUserMessage(rootID, key, job.SessionType, job.SessionName, job.User.Agent, job.User.Model, job.User.Mode, job.User.Effort, job.User.FastService, job.User.Content, job.ExcludeClientID, job.Queued)
 		},
 		OnUpdate: func(update agenttypes.Event) {
+			updateTracker.Begin()
+			defer updateTracker.End()
 			event := updateToEvent(update)
 			if event == nil {
 				return
@@ -594,15 +677,24 @@ func (h *WSHandler) runSessionMessage(job sessionMessageJob) {
 			}
 		},
 		OnSubSessionUpdate: func(sessionKey string, update agenttypes.Event) {
+			tracker := subTrackerFor(sessionKey)
+			tracker.Begin()
 			event := updateToEvent(update)
 			if event == nil {
+				tracker.End()
 				return
 			}
 			streamHub.BroadcastSessionStream(rootID, sessionKey, event)
 			if update.Type == agenttypes.EventTypeMessageDone {
+				tracker.End()
+				if ok := tracker.WaitIdle(msgCtx, sessionDoneSettleWindow, sessionDoneMaxWait); !ok {
+					log.Printf("[ws] sub-session.done.wait_timeout root=%s session=%s", rootID, sessionKey)
+				}
 				streamHub.ClearSessionPending(sessionKey)
 				streamHub.BroadcastSessionDone(rootID, sessionKey, "")
+				return
 			}
+			tracker.End()
 		},
 	})
 	if err != nil {
@@ -613,6 +705,9 @@ func (h *WSHandler) runSessionMessage(job sessionMessageJob) {
 			Data: map[string]string{"message": errorMessage},
 		}
 		streamHub.BroadcastSessionStream(rootID, key, event)
+	}
+	if ok := updateTracker.WaitIdle(msgCtx, sessionDoneSettleWindow, sessionDoneMaxWait); !ok {
+		log.Printf("[ws] session.done.wait_timeout root=%s session=%s request=%s", rootID, key, requestID)
 	}
 	streamHub.ClearSessionPending(key)
 
