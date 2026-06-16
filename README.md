@@ -71,6 +71,10 @@ Access your personal AI agents and workstation data anywhere, anytime through Mi
 - **Selectable shell type**: Choose the shell used for command execution, so Windows users do not need to worry about shell type mismatches.
 - **Session persistence**: Each session gets a long-lived shell, making tmux-like command continuity easier.
 
+### Remote Access to Local Services
+- **One-Click Exposure**: In Relay mode, configure the address of your local service in MindFS to expose it to the public network with one click.
+- **Public Domain Name**: Access local services directly via a unique public domain name.
+
 ### Installation
 
 - **Single binary**: The production build is a statically compiled binary with all web assets embedded, and the install package is under 10 MB.
