@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -43,6 +44,7 @@ func (r *Runtime) OpenSession(_ context.Context, opts OpenOptions) (types.Sessio
 		return nil, errors.New("session key required")
 	}
 	client := r.getOrCreateClient(opts)
+	var sess *session
 	threadOptions := codexsdk.ThreadOptions{
 		Model:                strings.TrimSpace(opts.Model),
 		ModelReasoningEffort: codexsdk.ModelReasoningEffort(strings.TrimSpace(opts.Effort)),
@@ -52,6 +54,12 @@ func (r *Runtime) OpenSession(_ context.Context, opts OpenOptions) (types.Sessio
 		ApprovalPolicy:       codexsdk.ApprovalModeNever,
 		ApprovalHandler: func(_ codexsdk.ApprovalRequest) (codexsdk.ApprovalDecision, error) {
 			return codexsdk.ApprovalDecisionApproved, nil
+		},
+		AskUserHandler: func(req codexsdk.AskUserRequest) (codexsdk.AskUserResponse, error) {
+			if sess == nil {
+				return codexsdk.AskUserResponse{}, errors.New("codex session not initialized")
+			}
+			return sess.handleAskUserRequest(req)
 		},
 	}
 	if opts.PlanMode {
@@ -71,15 +79,17 @@ func (r *Runtime) OpenSession(_ context.Context, opts OpenOptions) (types.Sessio
 	} else if id := thread.ID(); id != nil && strings.TrimSpace(*id) != "" {
 		threadID = strings.TrimSpace(*id)
 	}
-	return &session{
+	sess = &session{
 		client:        client,
 		thread:        thread,
 		threadOpts:    threadOptions,
 		threadID:      threadID,
 		sessionKey:    opts.SessionKey,
 		planMode:      opts.PlanMode,
+		questionWaits: make(map[string]chan codexAskUserAnswerResult),
 		agentDebugLog: logs.NewAgentLogger(opts.RootPath, opts.SessionKey, opts.AgentName),
-	}, nil
+	}
+	return sess, nil
 }
 
 func codexCollaborationMode(enabled bool) *codexsdk.CollaborationMode {
@@ -154,6 +164,14 @@ type session struct {
 	contextWindow types.ContextWindow
 
 	agentDebugLog *logs.AgentLogger
+
+	questionMu    sync.Mutex
+	questionWaits map[string]chan codexAskUserAnswerResult
+}
+
+type codexAskUserAnswerResult struct {
+	answers map[string]string
+	err     error
 }
 
 func (s *session) SendMessage(ctx context.Context, content string) error {
@@ -269,8 +287,180 @@ func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent) error
 	return nil
 }
 
-func (s *session) AnswerQuestion(context.Context, types.AskUserAnswer) error {
-	return errors.New("ask user question is not supported by codex sessions")
+func (s *session) AnswerQuestion(ctx context.Context, answer types.AskUserAnswer) error {
+	callID := strings.TrimSpace(answer.ToolUseID)
+	if callID == "" {
+		return errors.New("toolUseId required")
+	}
+	if len(answer.Answers) == 0 {
+		return errors.New("answers required")
+	}
+
+	s.questionMu.Lock()
+	waiter, ok := s.questionWaits[callID]
+	s.questionMu.Unlock()
+	if !ok {
+		return errors.New("question is not pending: " + callID)
+	}
+
+	answers := make(map[string]string, len(answer.Answers))
+	for key, value := range answer.Answers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			answers[key] = value
+		}
+	}
+	if len(answers) == 0 {
+		return errors.New("answers required")
+	}
+
+	select {
+	case waiter <- codexAskUserAnswerResult{answers: answers}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *session) handleAskUserRequest(req codexsdk.AskUserRequest) (codexsdk.AskUserResponse, error) {
+	callID := strings.TrimSpace(req.ItemID)
+	if callID == "" {
+		return codexsdk.AskUserResponse{}, errors.New("ask user question missing item id")
+	}
+	if len(req.Questions) == 0 {
+		return codexsdk.AskUserResponse{}, errors.New("ask user question missing questions")
+	}
+
+	waiter := make(chan codexAskUserAnswerResult, 1)
+	s.questionMu.Lock()
+	if s.questionWaits == nil {
+		s.questionWaits = make(map[string]chan codexAskUserAnswerResult)
+	}
+	if _, exists := s.questionWaits[callID]; exists {
+		s.questionMu.Unlock()
+		return codexsdk.AskUserResponse{}, errors.New("ask user question already pending: " + callID)
+	}
+	s.questionWaits[callID] = waiter
+	s.questionMu.Unlock()
+	defer func() {
+		s.questionMu.Lock()
+		delete(s.questionWaits, callID)
+		s.questionMu.Unlock()
+	}()
+
+	toolCall := codexAskUserToolCall(callID, req)
+	s.emit(types.Event{
+		Type:      types.EventTypeToolCall,
+		SessionID: s.SessionID(),
+		Data:      toolCall,
+	})
+
+	result := <-waiter
+	if result.err != nil {
+		return codexsdk.AskUserResponse{}, result.err
+	}
+	response := codexAskUserResponse(req.Questions, result.answers)
+	if len(response.Answers) == 0 {
+		return codexsdk.AskUserResponse{}, errors.New("empty ask user answers")
+	}
+	return response, nil
+}
+
+func (s *session) cancelPendingQuestions(err error) {
+	if err == nil {
+		err = errors.New("turn canceled")
+	}
+	s.questionMu.Lock()
+	waiters := make([]chan codexAskUserAnswerResult, 0, len(s.questionWaits))
+	for callID, waiter := range s.questionWaits {
+		waiters = append(waiters, waiter)
+		delete(s.questionWaits, callID)
+	}
+	s.questionMu.Unlock()
+
+	for _, waiter := range waiters {
+		select {
+		case waiter <- codexAskUserAnswerResult{err: err}:
+		default:
+		}
+	}
+}
+
+func codexAskUserToolCall(callID string, req codexsdk.AskUserRequest) types.ToolCall {
+	questions := make([]types.AskUserQuestionItem, 0, len(req.Questions))
+	for _, question := range req.Questions {
+		options := make([]types.AskUserQuestionOption, 0, len(question.Options))
+		for _, option := range question.Options {
+			options = append(options, types.AskUserQuestionOption{
+				Label:       option.Label,
+				Description: option.Description,
+			})
+		}
+		questions = append(questions, types.AskUserQuestionItem{
+			Question: question.Question,
+			Header:   question.Header,
+			Options:  options,
+		})
+	}
+
+	raw, _ := json.Marshal(map[string]any{"questions": questions})
+	meta := map[string]any{
+		"toolUseId": callID,
+		"questions": questions,
+		"rawType":   "request_user_input",
+		"input":     strings.TrimSpace(string(raw)),
+	}
+	if strings.TrimSpace(req.ThreadID) != "" {
+		meta["threadId"] = strings.TrimSpace(req.ThreadID)
+	}
+	if strings.TrimSpace(req.TurnID) != "" {
+		meta["turnId"] = strings.TrimSpace(req.TurnID)
+	}
+	return types.ToolCall{
+		CallID:  callID,
+		Title:   "ask user",
+		Status:  "running",
+		Kind:    types.ToolKindAskUser,
+		RawType: "request_user_input",
+		Meta:    meta,
+	}
+}
+
+func codexAskUserResponse(questions []codexsdk.AskUserQuestion, answers map[string]string) codexsdk.AskUserResponse {
+	response := codexsdk.AskUserResponse{Answers: make(map[string]codexsdk.AskUserAnswer)}
+	for key, value := range answers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		questionID := codexQuestionIDForAnswerKey(key, questions)
+		if questionID == "" {
+			continue
+		}
+		response.Answers[questionID] = codexsdk.AskUserAnswer{
+			Answers: []string{value},
+		}
+	}
+	return response
+}
+
+func codexQuestionIDForAnswerKey(key string, questions []codexsdk.AskUserQuestion) string {
+	if strings.HasPrefix(key, "q_") {
+		indexText := strings.TrimPrefix(key, "q_")
+		for index, question := range questions {
+			if indexText == strconv.Itoa(index) {
+				return strings.TrimSpace(question.ID)
+			}
+		}
+	}
+	for _, question := range questions {
+		if key == strings.TrimSpace(question.ID) {
+			return key
+		}
+	}
+	return ""
 }
 
 func (s *session) CurrentModel() string {
@@ -456,6 +646,7 @@ func (s *session) OnUpdate(onUpdate func(types.Event)) {
 }
 
 func (s *session) CancelCurrentTurn() error {
+	s.cancelPendingQuestions(errors.New("turn canceled"))
 	s.turn.Cancel()
 	return nil
 }
