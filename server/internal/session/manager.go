@@ -448,7 +448,7 @@ func (m *Manager) AddExchangeAux(_ context.Context, sessionKey string, aux Excha
 	if aux.Seq <= 0 {
 		return errors.New("aux seq required")
 	}
-	if aux.ToolCall == nil && strings.TrimSpace(aux.Thought) == "" {
+	if aux.ToolCall == nil && strings.TrimSpace(aux.Thought) == "" && aux.Plan == nil && aux.Compact == nil {
 		return errors.New("aux content required")
 	}
 	m.mu.Lock()

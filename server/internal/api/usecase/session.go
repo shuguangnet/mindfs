@@ -1344,7 +1344,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 					update.Data = chunk
 					thoughtBuffer.WriteString(chunk.Content)
 				}
-			case agenttypes.EventTypeToolCall, agenttypes.EventTypeToolUpdate, agenttypes.EventTypeTodoUpdate, agenttypes.EventTypeMessageChunk, agenttypes.EventTypeMessageDone:
+			case agenttypes.EventTypeToolCall, agenttypes.EventTypeToolUpdate, agenttypes.EventTypeTodoUpdate, agenttypes.EventTypePlanUpdate, agenttypes.EventTypeCompact, agenttypes.EventTypeMessageChunk, agenttypes.EventTypeMessageDone:
 				flushThought()
 			}
 			clientUpdate := compactAgentUpdate(update)
@@ -1387,6 +1387,26 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 					_ = manager.UpsertPendingExchangeAux(context.Background(), current.Key, session.ExchangeAux{ToolCall: &toolCallCopy})
 				}
 			}
+			if update.Type == agenttypes.EventTypePlanUpdate {
+				if plan, ok := update.Data.(agenttypes.PlanUpdate); ok && strings.TrimSpace(plan.Content) != "" {
+					planCopy := plan
+					auxBuffer = append(auxBuffer, session.ExchangeAux{
+						Seq:  plannedAssistantSeq,
+						Line: currentAssistantLine(responseText),
+						Plan: &planCopy,
+					})
+				}
+			}
+			if update.Type == agenttypes.EventTypeCompact {
+				if compact, ok := update.Data.(agenttypes.CompactNotice); ok {
+					compactCopy := compact
+					auxBuffer = append(auxBuffer, session.ExchangeAux{
+						Seq:     plannedAssistantSeq,
+						Line:    currentAssistantLine(responseText),
+						Compact: &compactCopy,
+					})
+				}
+			}
 			if update.Type == agenttypes.EventTypeMessageChunk {
 				if chunk, ok := update.Data.(agenttypes.MessageChunk); ok {
 					sawAssistantChunk = true
@@ -1396,7 +1416,9 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 			} else if update.Type == agenttypes.EventTypeThoughtChunk ||
 				update.Type == agenttypes.EventTypeToolCall ||
 				update.Type == agenttypes.EventTypeToolUpdate ||
-				update.Type == agenttypes.EventTypeTodoUpdate {
+				update.Type == agenttypes.EventTypeTodoUpdate ||
+				update.Type == agenttypes.EventTypePlanUpdate ||
+				update.Type == agenttypes.EventTypeCompact {
 				lastResponseUpdateType = string(update.Type)
 			}
 			if watcher != nil {
@@ -1668,7 +1690,7 @@ func attachBackgroundSessionUpdates(ctx context.Context, in subagentSessionInput
 				update.Data = chunk
 				thoughtBuffer.WriteString(chunk.Content)
 			}
-		case agenttypes.EventTypeToolCall, agenttypes.EventTypeToolUpdate, agenttypes.EventTypeTodoUpdate, agenttypes.EventTypeMessageChunk, agenttypes.EventTypeMessageDone:
+		case agenttypes.EventTypeToolCall, agenttypes.EventTypeToolUpdate, agenttypes.EventTypeTodoUpdate, agenttypes.EventTypePlanUpdate, agenttypes.EventTypeCompact, agenttypes.EventTypeMessageChunk, agenttypes.EventTypeMessageDone:
 			flushThought()
 		}
 		clientUpdate := compactAgentUpdate(update)
@@ -1683,6 +1705,26 @@ func attachBackgroundSessionUpdates(ctx context.Context, in subagentSessionInput
 				_ = in.Manager.UpsertPendingExchangeAux(context.Background(), child.Key, session.ExchangeAux{ToolCall: &toolCallCopy})
 			}
 		}
+		if update.Type == agenttypes.EventTypePlanUpdate {
+			if plan, ok := update.Data.(agenttypes.PlanUpdate); ok && strings.TrimSpace(plan.Content) != "" {
+				planCopy := plan
+				auxBuffer = append(auxBuffer, session.ExchangeAux{
+					Seq:  plannedAssistantSeq,
+					Line: currentAssistantLine(responseText),
+					Plan: &planCopy,
+				})
+			}
+		}
+		if update.Type == agenttypes.EventTypeCompact {
+			if compact, ok := update.Data.(agenttypes.CompactNotice); ok {
+				compactCopy := compact
+				auxBuffer = append(auxBuffer, session.ExchangeAux{
+					Seq:     plannedAssistantSeq,
+					Line:    currentAssistantLine(responseText),
+					Compact: &compactCopy,
+				})
+			}
+		}
 		if update.Type == agenttypes.EventTypeMessageChunk {
 			if chunk, ok := update.Data.(agenttypes.MessageChunk); ok {
 				responseText = appendResponseChunk(responseText, lastResponseUpdateType, chunk.Content)
@@ -1691,7 +1733,9 @@ func attachBackgroundSessionUpdates(ctx context.Context, in subagentSessionInput
 		} else if update.Type == agenttypes.EventTypeThoughtChunk ||
 			update.Type == agenttypes.EventTypeToolCall ||
 			update.Type == agenttypes.EventTypeToolUpdate ||
-			update.Type == agenttypes.EventTypeTodoUpdate {
+			update.Type == agenttypes.EventTypeTodoUpdate ||
+			update.Type == agenttypes.EventTypePlanUpdate ||
+			update.Type == agenttypes.EventTypeCompact {
 			lastResponseUpdateType = string(update.Type)
 		}
 		if update.Type != agenttypes.EventTypeMessageDone {
@@ -2092,6 +2136,8 @@ func dedupeExchangeAuxBuffer(items []session.ExchangeAux) []session.ExchangeAux 
 		return nil
 	}
 	seenToolCallIDs := make(map[string]struct{}, len(items))
+	seenPlanIDs := make(map[string]struct{}, len(items))
+	seenCompactIDs := make(map[string]struct{}, len(items))
 	out := make([]session.ExchangeAux, 0, len(items))
 	for i := len(items) - 1; i >= 0; i-- {
 		item := items[i]
@@ -2104,6 +2150,24 @@ func dedupeExchangeAuxBuffer(items []session.ExchangeAux) []session.ExchangeAux 
 				continue
 			}
 			seenToolCallIDs[callID] = struct{}{}
+		}
+		if item.Plan != nil {
+			planID := strings.TrimSpace(item.Plan.ID)
+			if planID != "" {
+				if _, exists := seenPlanIDs[planID]; exists {
+					continue
+				}
+				seenPlanIDs[planID] = struct{}{}
+			}
+		}
+		if item.Compact != nil {
+			compactID := strings.TrimSpace(item.Compact.ID)
+			if compactID != "" {
+				if _, exists := seenCompactIDs[compactID]; exists {
+					continue
+				}
+				seenCompactIDs[compactID] = struct{}{}
+			}
 		}
 		out = append(out, item)
 	}
@@ -2118,7 +2182,9 @@ func appendResponseChunk(responseText, lastResponseUpdateType, chunk string) str
 		(lastResponseUpdateType == string(agenttypes.EventTypeThoughtChunk) ||
 			lastResponseUpdateType == string(agenttypes.EventTypeToolCall) ||
 			lastResponseUpdateType == string(agenttypes.EventTypeToolUpdate) ||
-			lastResponseUpdateType == string(agenttypes.EventTypeTodoUpdate)) &&
+			lastResponseUpdateType == string(agenttypes.EventTypeTodoUpdate) ||
+			lastResponseUpdateType == string(agenttypes.EventTypePlanUpdate) ||
+			lastResponseUpdateType == string(agenttypes.EventTypeCompact)) &&
 		!strings.HasSuffix(responseText, "\n\n") &&
 		!strings.HasSuffix(responseText, "\n") {
 		responseText += "\n\n"

@@ -95,6 +95,54 @@ func TestManagerStoresFullToolCallAndReturnsCompactedAux(t *testing.T) {
 	}
 }
 
+func TestManagerStoresPlanAndCompactAux(t *testing.T) {
+	root := rootfs.NewRootInfo("mindfs", "mindfs", t.TempDir())
+	manager := NewManager(root)
+
+	created, err := manager.Create(context.Background(), CreateInput{
+		Type: TypeChat,
+		Name: "Chat",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	if err := manager.AddExchangeAux(context.Background(), created.Key, ExchangeAux{
+		Seq:  2,
+		Line: 0,
+		Plan: &agenttypes.PlanUpdate{
+			ID:      "plan-1",
+			Content: "- inspect\n- patch",
+		},
+	}); err != nil {
+		t.Fatalf("add plan aux: %v", err)
+	}
+	if err := manager.AddExchangeAux(context.Background(), created.Key, ExchangeAux{
+		Seq:  2,
+		Line: 0,
+		Compact: &agenttypes.CompactNotice{
+			ID:     "compact-1",
+			Status: "complete",
+		},
+	}); err != nil {
+		t.Fatalf("add compact aux: %v", err)
+	}
+
+	aux, err := manager.GetExchangeAux(context.Background(), created.Key, 0)
+	if err != nil {
+		t.Fatalf("get aux: %v", err)
+	}
+	if len(aux[2]) != 2 {
+		t.Fatalf("aux[2] length = %d, want 2: %#v", len(aux[2]), aux[2])
+	}
+	if aux[2][0].Plan == nil || aux[2][0].Plan.Content != "- inspect\n- patch" {
+		t.Fatalf("plan aux = %#v", aux[2][0])
+	}
+	if aux[2][1].Compact == nil || aux[2][1].Compact.Status != "complete" {
+		t.Fatalf("compact aux = %#v", aux[2][1])
+	}
+}
+
 func TestManagerGetFullToolCallReadsPendingAuxBeforeDisk(t *testing.T) {
 	root := rootfs.NewRootInfo("mindfs", "mindfs", t.TempDir())
 	manager := NewManager(root)

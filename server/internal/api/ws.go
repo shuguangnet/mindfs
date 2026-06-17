@@ -1041,6 +1041,14 @@ func updateToEvent(update agenttypes.Event) *StreamEvent {
 		if todo, ok := update.Data.(agenttypes.TodoUpdate); ok {
 			return &StreamEvent{Type: "todo_update", Data: todo}
 		}
+	case agenttypes.EventTypePlanUpdate:
+		if plan, ok := update.Data.(agenttypes.PlanUpdate); ok {
+			return &StreamEvent{Type: "plan_update", Data: plan}
+		}
+	case agenttypes.EventTypeCompact:
+		if compact, ok := update.Data.(agenttypes.CompactNotice); ok {
+			return &StreamEvent{Type: "compact_notice", Data: compact}
+		}
 	case agenttypes.EventTypeMessageDone:
 		if done, ok := update.Data.(agenttypes.MessageDone); ok {
 			return &StreamEvent{Type: "message_done", Data: done}

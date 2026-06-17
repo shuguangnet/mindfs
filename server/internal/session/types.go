@@ -43,15 +43,20 @@ type Exchange struct {
 }
 
 type ExchangeAux struct {
-	Seq       int                  `json:"seq"`
-	Line      int                  `json:"line"`
-	ToolCall  *agenttypes.ToolCall `json:"toolcall,omitempty"`
-	Thought   string               `json:"thought,omitempty"`
-	ThoughtID string               `json:"thought_id,omitempty"`
+	Seq       int                       `json:"seq"`
+	Line      int                       `json:"line"`
+	ToolCall  *agenttypes.ToolCall      `json:"toolcall,omitempty"`
+	Thought   string                    `json:"thought,omitempty"`
+	ThoughtID string                    `json:"thought_id,omitempty"`
+	Plan      *agenttypes.PlanUpdate    `json:"plan,omitempty"`
+	Compact   *agenttypes.CompactNotice `json:"compact,omitempty"`
 }
 
 func CompactExchangeAux(aux ExchangeAux) (ExchangeAux, bool) {
 	if aux.ToolCall == nil {
+		if aux.Plan != nil || aux.Compact != nil {
+			return aux, true
+		}
 		return ExchangeAux{}, false
 	}
 

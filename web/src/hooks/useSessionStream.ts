@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   sessionService,
+  type CompactNotice,
   type ExchangeAux,
+  type PlanUpdate,
   type TodoUpdate,
   type ToolCall,
 } from "../services/session";
@@ -22,6 +24,8 @@ type ExchangeLike = {
   timestamp?: string;
   toolCall?: ToolCall;
   todoUpdate?: TodoUpdate;
+  planUpdate?: PlanUpdate;
+  compactNotice?: CompactNotice;
   pending_ack?: boolean;
 };
 
@@ -46,7 +50,9 @@ export type TimelineItem =
     }
   | { id: string; type: "thought"; content: string }
   | { id: string; type: "tool"; toolCall: ToolCall }
-  | { id: string; type: "todo"; todoUpdate: TodoUpdate; timestamp?: string };
+  | { id: string; type: "todo"; todoUpdate: TodoUpdate; timestamp?: string }
+  | { id: string; type: "plan"; planUpdate: PlanUpdate; timestamp?: string }
+  | { id: string; type: "compact"; compactNotice: CompactNotice; timestamp?: string };
 
 type UseSessionStreamResult = {
   timeline: TimelineItem[];
@@ -214,6 +220,38 @@ function buildAssistantTimeline(
         content: aux.thought,
       });
       segmentIndex += 1;
+    } else if (aux.plan) {
+      out.push({
+        id:
+          aux.plan.id ||
+          stableTimelineID(
+            "plan",
+            index * 1000 + segmentIndex,
+            aux.plan.content || "",
+            ex.timestamp,
+            ex.agent,
+          ),
+        type: "plan",
+        planUpdate: aux.plan,
+        timestamp: ex.timestamp,
+      });
+      segmentIndex += 1;
+    } else if (aux.compact) {
+      out.push({
+        id:
+          aux.compact.id ||
+          stableTimelineID(
+            "compact",
+            index * 1000 + segmentIndex,
+            JSON.stringify(aux.compact),
+            ex.timestamp,
+            ex.agent,
+          ),
+        type: "compact",
+        compactNotice: aux.compact,
+        timestamp: ex.timestamp,
+      });
+      segmentIndex += 1;
     } else if (aux.toolcall) {
       const normalizedTool = normalizeToolCall(aux.toolcall);
       out.push({
@@ -247,9 +285,10 @@ function buildAssistantTimeline(
     }
   } else {
     for (let i = out.length - 1; i >= 0; i -= 1) {
-      if (out[i].type === "assistant_text") {
+      const item = out[i];
+      if (item.type === "assistant_text") {
         out[i] = {
-          ...out[i],
+          ...item,
           contextWindow: ex.context_window,
         };
         break;
@@ -328,6 +367,26 @@ function buildBaseTimeline(
         ),
         type: "todo",
         todoUpdate: ex.todoUpdate,
+        timestamp: ex.timestamp,
+      });
+      continue;
+    }
+    if (role === "plan") {
+      if (!ex.planUpdate) continue;
+      out.push({
+        id: ex.planUpdate.id || stableTimelineID("plan", index, ex.planUpdate.content || "", ex.timestamp, ex.agent),
+        type: "plan",
+        planUpdate: ex.planUpdate,
+        timestamp: ex.timestamp,
+      });
+      continue;
+    }
+    if (role === "compact") {
+      if (!ex.compactNotice) continue;
+      out.push({
+        id: ex.compactNotice.id || stableTimelineID("compact", index, JSON.stringify(ex.compactNotice), ex.timestamp, ex.agent),
+        type: "compact",
+        compactNotice: ex.compactNotice,
         timestamp: ex.timestamp,
       });
     }

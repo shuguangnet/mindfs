@@ -184,6 +184,8 @@ const (
 	EventTypeToolCall     EventType = "tool_call"
 	EventTypeToolUpdate   EventType = "tool_update"
 	EventTypeTodoUpdate   EventType = "todo_update"
+	EventTypePlanUpdate   EventType = "plan_update"
+	EventTypeCompact      EventType = "compact_notice"
 	EventTypeMessageDone  EventType = "message_done"
 	EventTypeRecovery     EventType = "recovery"
 )
@@ -220,6 +222,18 @@ type TodoItem struct {
 
 type TodoUpdate struct {
 	Items []TodoItem `json:"items"`
+}
+
+type PlanUpdate struct {
+	ID      string `json:"id,omitempty"`
+	Content string `json:"content"`
+	Delta   bool   `json:"delta,omitempty"`
+}
+
+type CompactNotice struct {
+	ID      string `json:"id,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Summary string `json:"summary,omitempty"`
 }
 
 type AskUserQuestionOption struct {

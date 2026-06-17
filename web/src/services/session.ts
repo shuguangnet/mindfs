@@ -71,6 +71,8 @@ export type ExchangeAux = {
   toolcall?: ToolCall | null;
   thought?: string | null;
   thought_id?: string;
+  plan?: PlanUpdate | null;
+  compact?: CompactNotice | null;
 };
 
 export type Session = {
@@ -111,6 +113,8 @@ export type Session = {
     timestamp?: string;
     toolCall?: ToolCall;
     todoUpdate?: TodoUpdate;
+    planUpdate?: PlanUpdate;
+    compactNotice?: CompactNotice;
     pending_ack?: boolean;
   }>;
 };
@@ -174,12 +178,26 @@ export type TodoUpdate = {
   items: TodoItem[];
 };
 
+export type PlanUpdate = {
+  id?: string;
+  content: string;
+  delta?: boolean;
+};
+
+export type CompactNotice = {
+  id?: string;
+  status?: string;
+  summary?: string;
+};
+
 export type StreamEvent =
   | { type: "message_chunk"; data: { content: string } }
   | { type: "thought_chunk"; data: { id?: string; content: string } }
   | { type: "tool_call"; data: ToolCall }
   | { type: "tool_call_update"; data: ToolCall }
   | { type: "todo_update"; data: TodoUpdate }
+  | { type: "plan_update"; data: PlanUpdate }
+  | { type: "compact_notice"; data: CompactNotice }
   | { type: "recovery"; data: { message: string } }
   | {
       type: "message_done";

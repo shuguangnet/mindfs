@@ -278,6 +278,8 @@ type Exchange = {
   timestamp?: string;
   toolCall?: any;
   todoUpdate?: any;
+  planUpdate?: any;
+  compactNotice?: any;
   pending_ack?: boolean;
 };
 type PendingSend = {
@@ -2636,6 +2638,116 @@ export function App({ onGoHome }: AppProps) {
       sessionCacheRef.current[cacheKey] = {
         ...(base as any),
         exchanges: nextList,
+        updated_at: new Date().toISOString(),
+      } as Session;
+      bumpCacheVersion();
+    },
+    [rootSessionKey, bumpCacheVersion],
+  );
+
+  const appendPlanUpdateForSession = useCallback(
+    (rootID: string, sessionKey: string, planUpdate: any) => {
+      if (!planUpdate) return;
+      const content = `${planUpdate.content || ""}`;
+      if (!content) return;
+      const now = new Date().toISOString();
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      const updateList = (prevList: Exchange[]) => {
+        const list = [...(prevList || [])];
+        const planId = `${planUpdate.id || ""}`;
+        if (planId) {
+          for (let i = list.length - 1; i >= 0; i -= 1) {
+            if (list[i]?.role !== "plan") continue;
+            if (`${list[i]?.planUpdate?.id || ""}` !== planId) continue;
+            const existingContent = `${list[i].planUpdate?.content || ""}`;
+            const nextContent = planUpdate.delta
+              ? `${existingContent}${content}`
+              : content;
+            list[i] = {
+              ...list[i],
+              timestamp: now,
+              planUpdate: { ...list[i].planUpdate, ...planUpdate, content: nextContent },
+            };
+            return list;
+          }
+        }
+        const last = list.length > 0 ? list[list.length - 1] : null;
+        if (last?.role === "plan" && !planId) {
+          const existingContent = `${last.planUpdate?.content || ""}`;
+          list[list.length - 1] = {
+            ...last,
+            timestamp: now,
+            planUpdate: {
+              ...last.planUpdate,
+              ...planUpdate,
+              content: planUpdate.delta ? `${existingContent}${content}` : content,
+            },
+          };
+          return list;
+        }
+        list.push({ role: "plan", content: "", timestamp: now, planUpdate });
+        return list;
+      };
+      const cached = sessionCacheRef.current[cacheKey];
+      const base =
+        cached ||
+        ({
+          key: sessionKey,
+          type: "chat",
+          agent: "",
+          name: "",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          exchanges: [],
+        } as any);
+      sessionCacheRef.current[cacheKey] = {
+        ...(base as any),
+        exchanges: updateList(((base as any).exchanges || []) as Exchange[]),
+        updated_at: new Date().toISOString(),
+      } as Session;
+      bumpCacheVersion();
+    },
+    [rootSessionKey, bumpCacheVersion],
+  );
+
+  const appendCompactNoticeForSession = useCallback(
+    (rootID: string, sessionKey: string, compactNotice: any) => {
+      if (!compactNotice) return;
+      const now = new Date().toISOString();
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      const updateList = (prevList: Exchange[]) => {
+        const list = [...(prevList || [])];
+        const compactId = `${compactNotice.id || ""}`;
+        if (compactId) {
+          for (let i = list.length - 1; i >= 0; i -= 1) {
+            if (list[i]?.role !== "compact") continue;
+            if (`${list[i]?.compactNotice?.id || ""}` !== compactId) continue;
+            list[i] = {
+              ...list[i],
+              timestamp: now,
+              compactNotice: { ...list[i].compactNotice, ...compactNotice },
+            };
+            return list;
+          }
+        }
+        list.push({ role: "compact", content: "", timestamp: now, compactNotice });
+        return list;
+      };
+      const cached = sessionCacheRef.current[cacheKey];
+      const base =
+        cached ||
+        ({
+          key: sessionKey,
+          type: "chat",
+          agent: "",
+          name: "",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          exchanges: [],
+        } as any);
+      sessionCacheRef.current[cacheKey] = {
+        ...(base as any),
+        exchanges: updateList(((base as any).exchanges || []) as Exchange[]),
         updated_at: new Date().toISOString(),
       } as Session;
       bumpCacheVersion();
@@ -6444,6 +6556,22 @@ export function App({ onGoHome }: AppProps) {
           );
           updateDrawerIfShowingStream();
           break;
+        case "plan_update":
+          appendPlanUpdateForSession(
+            activeRoot,
+            streamKey,
+            event.data || {},
+          );
+          updateDrawerIfShowingStream();
+          break;
+        case "compact_notice":
+          appendCompactNoticeForSession(
+            activeRoot,
+            streamKey,
+            event.data || {},
+          );
+          updateDrawerIfShowingStream();
+          break;
         case "message_done":
           attachContextWindowToLatestAssistant(
             activeRoot,
@@ -7155,6 +7283,8 @@ export function App({ onGoHome }: AppProps) {
     appendThoughtChunkForSession,
     appendToolCallForSession,
     appendTodoUpdateForSession,
+    appendPlanUpdateForSession,
+    appendCompactNoticeForSession,
     clearSessionStale,
     markSessionPending,
     markSessionStale,

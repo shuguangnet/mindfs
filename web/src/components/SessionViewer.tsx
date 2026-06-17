@@ -356,7 +356,74 @@ const formatTodoToolCallInput = (rawInput: string): string => {
 
 function isAuxiliaryTimelineItem(item: TimelineItem | null): boolean {
   return (
-    item?.type === "tool" || item?.type === "thought" || item?.type === "todo"
+    item?.type === "tool" ||
+    item?.type === "thought" ||
+    item?.type === "todo" ||
+    item?.type === "plan" ||
+    item?.type === "compact"
+  );
+}
+
+function PlanUpdateCard({ content }: { content: string }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        minWidth: 0,
+        borderRadius: "10px",
+        border: "1px solid rgba(59, 130, 246, 0.24)",
+        background: "linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.03))",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: "6px 8px",
+          fontSize: "12px",
+          fontWeight: 600,
+          color: "var(--text-primary)",
+          borderBottom: "1px solid var(--border-color)",
+        }}
+      >
+        Plan
+      </div>
+      <div style={{ padding: "10px" }}>
+        <MarkdownViewer content={content || ""} />
+      </div>
+    </div>
+  );
+}
+
+function CompactNoticeCard({
+  status,
+  summary,
+}: {
+  status?: string;
+  summary?: string;
+}) {
+  const normalizedStatus = `${status || ""}`.toLowerCase();
+  const label =
+    normalizedStatus === "running"
+      ? "Compacting context"
+      : normalizedStatus === "error"
+        ? "Context compaction failed"
+        : "Context compacted";
+  return (
+    <div
+      style={{
+        width: "100%",
+        minWidth: 0,
+        borderRadius: "10px",
+        border: "1px solid rgba(148, 163, 184, 0.28)",
+        background: "rgba(148, 163, 184, 0.08)",
+        padding: "10px",
+        color: "var(--text-secondary)",
+        fontSize: "13px",
+      }}
+    >
+      <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{label}</div>
+      {summary ? <div style={{ marginTop: "6px" }}>{summary}</div> : null}
+    </div>
   );
 }
 
@@ -1189,6 +1256,23 @@ if (useInnerScrollContainer && !container) {
       return (
         <div key={timelineItemKey} style={{ marginTop: spacing }}>
           <TodoUpdateCard todoUpdate={item.todoUpdate} />
+        </div>
+      );
+    }
+    if (item.type === "plan") {
+      return (
+        <div key={timelineItemKey} style={{ marginTop: spacing }}>
+          <PlanUpdateCard content={item.planUpdate?.content || ""} />
+        </div>
+      );
+    }
+    if (item.type === "compact") {
+      return (
+        <div key={timelineItemKey} style={{ marginTop: spacing }}>
+          <CompactNoticeCard
+            status={item.compactNotice?.status}
+            summary={item.compactNotice?.summary}
+          />
         </div>
       );
     }
