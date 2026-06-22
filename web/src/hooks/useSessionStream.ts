@@ -304,11 +304,14 @@ function buildBaseTimeline(
   exchangeAux: ExchangeAuxMapLike,
 ): TimelineItem[] {
   const out: TimelineItem[] = [];
+  let inferredSeq = 0;
   for (let index = 0; index < exchanges.length; index += 1) {
     const ex = exchanges[index];
     const role = normalizeRole(ex.role);
     const content = ex.content || "";
     if (role === "user") {
+      inferredSeq += 1;
+      const seq = Number(ex.seq || 0) > 0 ? Number(ex.seq || 0) : inferredSeq;
       if (!content) continue;
       out.push({
         id: stableTimelineID("user", index, content, ex.timestamp, ex.agent),
@@ -317,13 +320,15 @@ function buildBaseTimeline(
         timestamp: ex.timestamp,
         agent: ex.agent,
         pendingAck: ex.pending_ack === true,
-        seq: ex.seq,
+        seq,
       });
       continue;
     }
     if (role === "agent" || role === "assistant") {
-      const auxList = ex.seq ? exchangeAux[String(ex.seq)] || [] : [];
-      out.push(...buildAssistantTimeline(ex, index, auxList));
+      inferredSeq += 1;
+      const seq = Number(ex.seq || 0) > 0 ? Number(ex.seq || 0) : inferredSeq;
+      const auxList = seq ? exchangeAux[String(seq)] || [] : [];
+      out.push(...buildAssistantTimeline({ ...ex, seq }, index, auxList));
       continue;
     }
     if (role === "thought") {

@@ -10,6 +10,7 @@ export type SessionItem = {
   type?: SessionType;
   parent_session_key?: string;
   parent_tool_call_id?: string;
+  source?: string;
   agent?: string;
   shell?: string;
   name?: string;
@@ -54,6 +55,45 @@ function shellBadgeLabel(shell?: string): string {
   if (base === "cmd.exe") return "cmd";
   if (base.endsWith(".exe")) return base.slice(0, -4);
   return base;
+}
+
+type ForkSessionSource = {
+  sessionKey: string;
+  seq: number;
+};
+
+function parseForkSessionSource(source?: string): ForkSessionSource | null {
+  const value = String(source || "").trim();
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as {
+      type?: unknown;
+      session_key?: unknown;
+      seq?: unknown;
+    };
+    if (parsed?.type !== "fork") return null;
+    return {
+      sessionKey: String(parsed.session_key || "").trim(),
+      seq: Number(parsed.seq || 0),
+    };
+  } catch {
+    if (!value.includes('"type":"fork"') && !value.includes('"type": "fork"')) {
+      return null;
+    }
+    return { sessionKey: "", seq: 0 };
+  }
+}
+
+function forkSessionDisplayName(
+  storedName: string,
+  source: ForkSessionSource | null,
+  sessionByKey: Map<string, SessionItem>,
+): string {
+  if (!source) return storedName;
+  const parentName = String(sessionByKey.get(source.sessionKey)?.name || "").trim();
+  const fallbackName = storedName.replace(/\s+fork\s+@\d+\s*$/i, "").trim();
+  const base = parentName || fallbackName || storedName;
+  return source.seq > 0 ? `${base}#${source.seq}` : base;
 }
 
 export function SessionList({
@@ -111,6 +151,13 @@ export function SessionList({
     if (!selectedKey) return "";
     return sessions.find((item) => item.key === selectedKey)?.parent_session_key || "";
   }, [selectedKey, sessions]);
+  const sessionByKey = useMemo(() => {
+    const byKey = new Map<string, SessionItem>();
+    for (const item of sessions) {
+      byKey.set(item.key, item);
+    }
+    return byKey;
+  }, [sessions]);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -338,6 +385,7 @@ export function SessionList({
               <SessionCard
                 key={session.key}
                 session={session}
+                sessionByKey={sessionByKey}
                 selected={session.key === selectedKey}
                 parentHighlighted={!!selectedParentKey && session.key === selectedParentKey}
                 highlightQuery={searchResultsMode ? searchQuery : ""}
@@ -375,6 +423,7 @@ export function SessionList({
 
 function SessionCard({
   session,
+  sessionByKey,
   selected,
   parentHighlighted,
   highlightQuery,
@@ -384,6 +433,7 @@ function SessionCard({
   onDelete,
 }: {
   session: SessionItem;
+  sessionByKey: Map<string, SessionItem>;
   selected: boolean;
   parentHighlighted?: boolean;
   highlightQuery?: string;
@@ -394,12 +444,17 @@ function SessionCard({
 }) {
   const isClosed = !!session.closed_at;
   const isSubagent = !!session.parent_session_key;
-  const displayName = session.name || `Session ${session.key.slice(0, 8)}`;
+  const forkSource = parseForkSessionSource(session.source);
+  const isForkSession = !!forkSource;
+  const storedName = session.name || `Session ${session.key.slice(0, 8)}`;
+  const displayName = isForkSession
+    ? forkSessionDisplayName(storedName, forkSource, sessionByKey)
+    : storedName;
   const snippet = (session.search_snippet || "").trim();
   const isSearchResult = !!session.search_match_type;
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [draftName, setDraftName] = useState(displayName);
+  const [draftName, setDraftName] = useState(storedName);
   const [saving, setSaving] = useState(false);
   const rowBackground = selected
     ? "rgba(59, 130, 246, 0.1)"
@@ -413,9 +468,9 @@ function SessionCard({
 
   useEffect(() => {
     if (!editing) {
-      setDraftName(displayName);
+      setDraftName(storedName);
     }
-  }, [displayName, editing]);
+  }, [storedName, editing]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -447,7 +502,7 @@ function SessionCard({
   const cancelEditing = () => {
     setEditing(false);
     setSaving(false);
-    setDraftName(displayName);
+    setDraftName(storedName);
   };
 
   const submitRename = async () => {
@@ -457,7 +512,7 @@ function SessionCard({
       cancelEditing();
       return;
     }
-    if (trimmed === displayName.trim()) {
+    if (trimmed === storedName.trim()) {
       cancelEditing();
       return;
     }
@@ -522,9 +577,17 @@ function SessionCard({
             }}
           >
             {isSubagent ? (
-              <SubSessionIcon />
+              isForkSession ? (
+                <ForkSessionIcon />
+              ) : (
+                <SubSessionIcon />
+              )
             ) : (
-              <ModeIcon type={session.type || "chat"} size={16} />
+              isForkSession ? (
+                <ForkSessionIcon />
+              ) : (
+                <ModeIcon type={session.type || "chat"} size={16} />
+              )
             )}
             {!isSubagent && session.type === "command" ? (
               <span
@@ -851,7 +914,7 @@ function SessionCard({
               onClick={(e) => {
                 e.stopPropagation();
                 setMenuOpen(false);
-                setDraftName(displayName);
+                setDraftName(storedName);
                 setEditing(true);
               }}
               style={{
@@ -1020,6 +1083,33 @@ function SubSessionIcon() {
       <path
         fill="currentColor"
         d="M23 20c-2.41 0-4.43 1.72-4.9 4H14c-2.21 0-4-1.79-4-4v-8.1A5 5 0 1 0 4 7c0 2.41 1.72 4.43 4 4.9V20c0 3.31 2.69 6 6 6h4.1a5 5 0 1 0 4.9-6M6 7c0-1.65 1.35-3 3-3s3 1.35 3 3s-1.35 3-3 3s-3-1.35-3-3"
+      />
+    </svg>
+  );
+}
+
+function ForkSessionIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      style={{
+        color: "var(--accent-color)",
+        display: "block",
+        transform: "rotate(180deg) scaleX(-1)",
+      }}
+    >
+      <path d="M0 0h24v24H0z" fill="none" />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+        d="M17 7a2 2 0 1 0 0-4a2 2 0 0 0 0 4M7 7a2 2 0 1 0 0-4a2 2 0 0 0 0 4m0 14a2 2 0 1 0 0-4a2 2 0 0 0 0 4M7 7v10M17 7v1c0 2.5-2 3-2 3l-6 2s-2 .5-2 3v1"
       />
     </svg>
   );

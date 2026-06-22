@@ -43,6 +43,8 @@ type OpenOptions struct {
 	Args            []string
 	Env             map[string]string
 	ResumeSessionID string
+	ForkSessionID   string
+	ResumeMessageID string
 }
 
 type Runtime struct{}
@@ -76,8 +78,28 @@ func (r *Runtime) OpenSession(ctx context.Context, opts OpenOptions) (types.Sess
 	if strings.TrimSpace(opts.Command) != "" {
 		optionList = append(optionList, claudeagent.WithCLIPath(opts.Command))
 	}
-	if strings.TrimSpace(opts.ResumeSessionID) != "" {
+	forkSessionID := strings.TrimSpace(opts.ForkSessionID)
+	resumeMessageID := strings.TrimSpace(opts.ResumeMessageID)
+	explicitSessionID := ""
+	if forkSessionID != "" && resumeMessageID != "" {
+		forked, err := claudeagent.ForkSession(forkSessionID, &claudeagent.ForkSessionOptions{
+			UpToMessageID: resumeMessageID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("fork claude session at message: %w", err)
+		}
+		if forked == nil || strings.TrimSpace(forked.SessionID) == "" {
+			return nil, errors.New("fork claude session did not return session id")
+		}
+		explicitSessionID = strings.TrimSpace(forked.SessionID)
+		optionList = append(optionList, claudeagent.WithResume(explicitSessionID))
+	} else if forkSessionID != "" {
+		optionList = append(optionList, claudeagent.WithForkSession(forkSessionID))
+	} else if strings.TrimSpace(opts.ResumeSessionID) != "" {
 		optionList = append(optionList, claudeagent.WithResume(strings.TrimSpace(opts.ResumeSessionID)))
+	}
+	if resumeMessageID != "" && forkSessionID == "" {
+		optionList = append(optionList, claudeagent.WithResumeSessionAt(resumeMessageID))
 	}
 	if strings.TrimSpace(opts.Model) != "" {
 		optionList = append(optionList, claudeagent.WithModel(strings.TrimSpace(opts.Model)))
@@ -121,6 +143,9 @@ func (r *Runtime) OpenSession(ctx context.Context, opts OpenOptions) (types.Sess
 	s.client = client
 	s.stream = stream
 	s.sessionID = stream.SessionID()
+	if strings.TrimSpace(s.sessionID) == "" {
+		s.sessionID = explicitSessionID
+	}
 	s.model = selectedModel
 	go s.consumeMessages()
 	return s, nil

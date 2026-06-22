@@ -52,6 +52,51 @@ type Session interface {
 	Close() error
 }
 
+type ForkPointKind string
+
+const (
+	ForkPointClaudeMessageUUID ForkPointKind = "claude_message_uuid"
+	ForkPointCodexUserOrdinal  ForkPointKind = "codex_user_ordinal"
+)
+
+type ResolveForkPointInput struct {
+	RootPath       string
+	AgentSessionID string
+	AgentTurnIndex int
+}
+
+type ResolveForkPointOutput struct {
+	Kind              ForkPointKind
+	AgentSessionID    string
+	ClaudeMessageUUID string
+	CodexUserOrdinal  int
+}
+
+type ForkPointResolver interface {
+	ResolveForkPointByAgentTurnIndex(ctx context.Context, in ResolveForkPointInput) (ResolveForkPointOutput, error)
+}
+
+type ForkSessionInput struct {
+	SessionKey         string
+	AgentName          string
+	Model              string
+	Mode               string
+	Effort             string
+	FastService        string
+	PlanMode           bool
+	RootPath           string
+	SourceAgentSession string
+	ForkPoint          ResolveForkPointOutput
+}
+
+type ForkSessionOutput struct {
+	AgentSessionID string
+}
+
+type SessionForker interface {
+	ForkSession(ctx context.Context, in ForkSessionInput) (ForkSessionOutput, error)
+}
+
 type ContextWindow struct {
 	TotalTokens        int `json:"totalTokens"`
 	ModelContextWindow int `json:"modelContextWindow"`
@@ -69,6 +114,7 @@ type OpenSessionInput struct {
 	RootPath       string
 	AgentSessionID string
 	AgentCtxSeq    int
+	ForkPoint      ResolveForkPointOutput
 }
 
 type RuntimeDefaults struct {

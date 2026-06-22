@@ -18,6 +18,7 @@ type Session struct {
 	Type             string         `json:"type"`
 	ParentSessionKey string         `json:"parent_session_key,omitempty"`
 	ParentToolCallID string         `json:"parent_tool_call_id,omitempty"`
+	Source           string         `json:"source,omitempty"`
 	AgentCtxSeq      map[string]int `json:"agent_ctx_seq,omitempty"`
 	Model            string         `json:"model,omitempty"`
 	Shell            string         `json:"shell,omitempty"`

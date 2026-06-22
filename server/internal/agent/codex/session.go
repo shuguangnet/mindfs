@@ -17,18 +17,20 @@ import (
 )
 
 type OpenOptions struct {
-	AgentName       string
-	SessionKey      string
-	Model           string
-	Effort          string
-	FastService     string
-	PlanMode        bool
-	Probe           bool
-	RootPath        string
-	Command         string
-	Args            []string
-	Env             map[string]string
-	ResumeSessionID string
+	AgentName        string
+	SessionKey       string
+	Model            string
+	Effort           string
+	FastService      string
+	PlanMode         bool
+	Probe            bool
+	RootPath         string
+	Command          string
+	Args             []string
+	Env              map[string]string
+	ResumeSessionID  string
+	ForkSessionID    string
+	CodexUserOrdinal *int
 }
 
 type Runtime struct {
@@ -68,7 +70,14 @@ func (r *Runtime) OpenSession(_ context.Context, opts OpenOptions) (types.Sessio
 	}
 
 	var thread *codexsdk.Thread
-	if strings.TrimSpace(opts.ResumeSessionID) != "" {
+	if strings.TrimSpace(opts.ForkSessionID) != "" {
+		threadID, err := forkCodexThread(context.Background(), client, threadOptions, strings.TrimSpace(opts.ForkSessionID), opts.CodexUserOrdinal)
+		if err != nil {
+			return nil, err
+		}
+		opts.ResumeSessionID = threadID
+		thread = client.ResumeThread(threadID, threadOptions)
+	} else if strings.TrimSpace(opts.ResumeSessionID) != "" {
 		thread = client.ResumeThread(strings.TrimSpace(opts.ResumeSessionID), threadOptions)
 	} else {
 		thread = client.StartThread(threadOptions)
@@ -91,6 +100,29 @@ func (r *Runtime) OpenSession(_ context.Context, opts OpenOptions) (types.Sessio
 		agentDebugLog: logs.NewAgentLogger(opts.RootPath, opts.SessionKey, opts.AgentName),
 	}
 	return sess, nil
+}
+
+func forkCodexThread(ctx context.Context, client *codexsdk.Codex, opts codexsdk.ThreadOptions, sourceThreadID string, userOrdinal *int) (string, error) {
+	sourceThreadID = strings.TrimSpace(sourceThreadID)
+	if sourceThreadID == "" {
+		return "", errors.New("codex source thread id required")
+	}
+
+	thread, err := client.ForkThread(ctx, sourceThreadID, codexsdk.ThreadForkOptions{
+		ThreadOptions:                opts,
+		TruncateBeforeNthUserMessage: userOrdinal,
+	})
+	if err != nil {
+		return "", err
+	}
+	var threadID string
+	if thread != nil && thread.ID() != nil {
+		threadID = strings.TrimSpace(*thread.ID())
+	}
+	if threadID == "" {
+		return "", errors.New("codex thread/fork did not return thread id")
+	}
+	return threadID, nil
 }
 
 func codexCollaborationMode(enabled bool) *codexsdk.CollaborationMode {

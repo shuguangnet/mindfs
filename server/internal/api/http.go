@@ -285,6 +285,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/sessions/external", h.protectedEndpoint(h.handleExternalSessionsList))
 	r.Post("/api/sessions/import", h.protectedEndpoint(h.handleExternalSessionImport))
 	r.Post("/api/sessions/import/batch", h.protectedEndpoint(h.handleExternalSessionImportBatch))
+	r.Post("/api/sessions/fork", h.protectedEndpoint(h.handleSessionFork))
 	r.Get("/api/sessions/{key}/toolcalls/{callID}", h.protectedEndpoint(h.handleSessionToolCallGet))
 	r.Get("/api/sessions/{key}", h.protectedEndpoint(h.handleSessionGet))
 	r.Get("/api/sessions/{key}/related-files", h.protectedEndpoint(h.handleSessionRelatedFilesGet))
@@ -721,6 +722,44 @@ func (h *HTTPHandler) handleSessionRelatedFilesDelete(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *HTTPHandler) handleSessionFork(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RootID     string `json:"root_id"`
+		SessionKey string `json:"session_key"`
+		Seq        int    `json:"seq"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json body"))
+		return
+	}
+	if strings.TrimSpace(req.RootID) == "" || strings.TrimSpace(req.SessionKey) == "" || req.Seq <= 0 {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root_id, session_key and seq are required"))
+		return
+	}
+	out, err := h.service().ForkSession(r.Context(), usecase.ForkSessionInput{
+		RootID: req.RootID,
+		Key:    req.SessionKey,
+		Seq:    req.Seq,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	if h.AppContext != nil && out.Session != nil {
+		h.AppContext.GetSessionStreamHub().BroadcastAll(WSResponse{
+			Type: "session.created",
+			Payload: map[string]any{
+				"root_id": req.RootID,
+				"session": h.sessionListResponse(out.Session),
+			},
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"session_key": out.Session.Key,
+		"session":     h.sessionResponse(out.Session, nil, agenttypes.ContextWindow{}, nil),
+	})
+}
+
 func (h *HTTPHandler) handleSessionRename(w http.ResponseWriter, r *http.Request) {
 	rootID := r.URL.Query().Get("root")
 	key := chi.URLParam(r, "key")
@@ -810,6 +849,7 @@ func (h *HTTPHandler) sessionResponse(
 		"type":                s.Type,
 		"parent_session_key":  s.ParentSessionKey,
 		"parent_tool_call_id": s.ParentToolCallID,
+		"source":              s.Source,
 		"agent":               session.InferAgentFromSession(s),
 		"model":               s.Model,
 		"mode":                session.InferModeFromSession(s),
@@ -837,6 +877,7 @@ func (h *HTTPHandler) sessionListResponse(s *session.Session) map[string]any {
 		"type":                s.Type,
 		"parent_session_key":  s.ParentSessionKey,
 		"parent_tool_call_id": s.ParentToolCallID,
+		"source":              s.Source,
 		"agent":               session.InferAgentFromSession(s),
 		"model":               s.Model,
 		"mode":                session.InferModeFromSession(s),

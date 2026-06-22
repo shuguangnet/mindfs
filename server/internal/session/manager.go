@@ -29,7 +29,7 @@ const (
 	exchangeFileTpl  = "sessions/%s.jsonl"
 	auxFileTpl       = "sessions/%s.aux.jsonl"
 	selectSessionSQL = `
-	SELECT key, type, parent_session_key, parent_tool_call_id, model, shell, plan_mode, name, related_files_json, created_at, updated_at, closed_at
+	SELECT key, type, parent_session_key, parent_tool_call_id, source, model, shell, plan_mode, name, related_files_json, created_at, updated_at, closed_at
 	FROM sessions`
 	deleteSessionSQL = `
 DELETE FROM sessions
@@ -39,12 +39,13 @@ DELETE FROM session_agent_bindings
 WHERE session_key = ?`
 	upsertSessionMetaSQL = `
 INSERT INTO sessions (
-		key, type, parent_session_key, parent_tool_call_id, model, shell, plan_mode, name, related_files_json, created_at, updated_at, closed_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		key, type, parent_session_key, parent_tool_call_id, source, model, shell, plan_mode, name, related_files_json, created_at, updated_at, closed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(key) DO UPDATE SET
 	type = excluded.type,
 	parent_session_key = excluded.parent_session_key,
 		parent_tool_call_id = excluded.parent_tool_call_id,
+		source = excluded.source,
 		model = excluded.model,
 		shell = excluded.shell,
 		plan_mode = excluded.plan_mode,
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	type TEXT NOT NULL,
 	parent_session_key TEXT NOT NULL DEFAULT '',
 	parent_tool_call_id TEXT NOT NULL DEFAULT '',
+	source TEXT NOT NULL DEFAULT '',
 		model TEXT NOT NULL DEFAULT '',
 		shell TEXT NOT NULL DEFAULT '',
 		plan_mode INTEGER NOT NULL DEFAULT 0,
@@ -117,6 +119,7 @@ type CreateInput struct {
 	Type             string
 	ParentSessionKey string
 	ParentToolCallID string
+	Source           string
 	Agent            string
 	Model            string
 	Shell            string
@@ -202,6 +205,7 @@ func (m *Manager) Create(_ context.Context, input CreateInput) (*Session, error)
 		Type:             input.Type,
 		ParentSessionKey: strings.TrimSpace(input.ParentSessionKey),
 		ParentToolCallID: strings.TrimSpace(input.ParentToolCallID),
+		Source:           strings.TrimSpace(input.Source),
 		AgentCtxSeq:      agentCtxSeq,
 		Model:            strings.TrimSpace(input.Model),
 		Shell:            strings.TrimSpace(input.Shell),
@@ -1374,6 +1378,7 @@ func (m *Manager) ensureSessionMetaDBUnsafe() (*sql.DB, error) {
 	for _, stmt := range []string{
 		`ALTER TABLE sessions ADD COLUMN parent_session_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN parent_tool_call_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN source TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			db.Close()
@@ -1401,6 +1406,7 @@ func sessionMetaUpsertArgs(session *Session) ([]any, error) {
 		session.Type,
 		session.ParentSessionKey,
 		session.ParentToolCallID,
+		session.Source,
 		session.Model,
 		session.Shell,
 		boolToSQLiteInt(session.PlanMode),
@@ -1429,6 +1435,7 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		typ              string
 		parentSessionKey string
 		parentToolCallID string
+		source           string
 		model            string
 		shell            string
 		planMode         int
@@ -1443,6 +1450,7 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		&typ,
 		&parentSessionKey,
 		&parentToolCallID,
+		&source,
 		&model,
 		&shell,
 		&planMode,
@@ -1459,6 +1467,7 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		Type:             typ,
 		ParentSessionKey: parentSessionKey,
 		ParentToolCallID: parentToolCallID,
+		Source:           source,
 		Model:            model,
 		Shell:            shell,
 		PlanMode:         planMode != 0,
@@ -1503,6 +1512,7 @@ func normalizeSessionMeta(s *Session) {
 	}
 	s.ParentSessionKey = strings.TrimSpace(s.ParentSessionKey)
 	s.ParentToolCallID = strings.TrimSpace(s.ParentToolCallID)
+	s.Source = strings.TrimSpace(s.Source)
 }
 
 var errSessionNotFound = errors.New("session not found")

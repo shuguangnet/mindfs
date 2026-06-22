@@ -80,6 +80,7 @@ export type Session = {
   type: SessionType;
   parent_session_key?: string;
   parent_tool_call_id?: string;
+  source?: string;
   agent?: string;
   model?: string;
   shell?: string;
@@ -124,6 +125,7 @@ export type SessionSearchHit = {
   type: SessionType;
   parent_session_key?: string;
   parent_tool_call_id?: string;
+  source?: string;
   agent?: string;
   model?: string;
   shell?: string;
@@ -1124,6 +1126,35 @@ class SessionService {
       return data as Session;
     } catch (err) {
       console.error("[Session] Failed to rename session:", err);
+      return null;
+    }
+  }
+
+  async forkSession(
+    rootId: string,
+    sessionKey: string,
+    seq: number,
+  ): Promise<{ session_key: string; session?: Session } | null> {
+    try {
+      if (!rootId || !sessionKey || !seq) {
+        return null;
+      }
+      return await protectedJSON<{ session_key: string; session?: Session }>(
+        appURL("/api/sessions/fork"),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            root_id: rootId,
+            session_key: sessionKey,
+            seq,
+          }),
+        },
+      );
+    } catch (err) {
+      console.error("[Session] Failed to fork session:", err);
       return null;
     }
   }

@@ -120,9 +120,12 @@ export type SessionItem = {
   root_id?: string;
   name?: string;
   type?: SessionMode;
+  parent_session_key?: string;
+  parent_tool_call_id?: string;
   agent?: string;
   model?: string;
   shell?: string;
+  source?: string;
   mode?: string;
   effort?: string;
   fast_service?: "" | "on" | "off";
@@ -205,6 +208,7 @@ function toSessionItem(
       typeof session?.parent_tool_call_id === "string"
         ? session.parent_tool_call_id
         : undefined,
+    source: typeof session?.source === "string" ? session.source : undefined,
     agent:
       typeof session?.agent === "string" && session.agent.trim()
         ? session.agent
@@ -3764,6 +3768,57 @@ export function App({ onGoHome }: AppProps) {
     ],
   );
 
+  const handleForkAgentMessage = useCallback(
+    async (
+      rootID: string | null | undefined,
+      sessionKey: string | null | undefined,
+      seq: number,
+    ) => {
+      const resolvedRoot = String(rootID || currentRootIdRef.current || "").trim();
+      const resolvedKey = String(sessionKey || "").trim();
+      if (!resolvedRoot || !resolvedKey || seq <= 0) {
+        reportError("session.sync_failed", "无法 fork：缺少会话或消息位置");
+        return;
+      }
+      const result = await sessionService.forkSession(resolvedRoot, resolvedKey, seq);
+      const forked = result?.session;
+      const forkedKey = String(result?.session_key || forked?.key || "").trim();
+      if (!forkedKey) {
+        reportError("session.sync_failed", "fork 会话失败");
+        return;
+      }
+      if (forked) {
+        const normalized = {
+          ...(forked as any),
+          key: forkedKey,
+          session_key: forkedKey,
+          root_id: resolvedRoot,
+        } as Session;
+        const cacheKey = rootSessionKey(resolvedRoot, forkedKey);
+        sessionCacheRef.current[cacheKey] = normalized;
+        loadedSessionRef.current[cacheKey] = true;
+        const item = toSessionItem(resolvedRoot, normalized);
+        if (item) {
+          setSessions((prev) => mergeSessionItems(prev, [item]));
+          await handleSelectSession(item);
+        } else {
+          await handleSelectSession({ key: forkedKey, session_key: forkedKey, root_id: resolvedRoot });
+        }
+      } else {
+        await handleSelectSession({ key: forkedKey, session_key: forkedKey, root_id: resolvedRoot });
+      }
+      void loadSessionsForRoot(resolvedRoot, { replace: true, force: true });
+      bumpCacheVersion();
+    },
+    [
+      bumpCacheVersion,
+      handleSelectSession,
+      loadSessionsForRoot,
+      mergeSessionItems,
+      rootSessionKey,
+    ],
+  );
+
   useEffect(() => {
     handleSelectSessionRef.current = handleSelectSession;
   }, [handleSelectSession]);
@@ -6827,6 +6882,14 @@ export function App({ onGoHome }: AppProps) {
           }
           break;
         }
+        case "session.created": {
+          const rootID =
+            typeof payload?.root_id === "string" ? payload.root_id : "";
+          if (rootID && rootID === currentRootIdRef.current) {
+            void loadSessionsForRoot(rootID, { replace: true });
+          }
+          break;
+        }
         case "session.stream":
           handleSessionStream(payload);
           break;
@@ -7145,6 +7208,10 @@ export function App({ onGoHome }: AppProps) {
                   typeof payload.session.parent_tool_call_id === "string"
                     ? payload.session.parent_tool_call_id
                     : (cached as any).parent_tool_call_id,
+                source:
+                  typeof payload.session.source === "string"
+                    ? payload.session.source
+                    : (cached as any).source,
                 updated_at: payload.session.updated_at || cached.updated_at,
               } as Session;
               bumpCacheVersion();
@@ -7188,6 +7255,10 @@ export function App({ onGoHome }: AppProps) {
                         typeof payload.session.parent_tool_call_id === "string"
                           ? payload.session.parent_tool_call_id
                           : (prev as any).parent_tool_call_id,
+                      source:
+                        typeof payload.session.source === "string"
+                          ? payload.session.source
+                          : (prev as any).source,
                       updated_at: payload.session.updated_at || prev.updated_at,
                     } as SessionItem)
                   : prev,
@@ -8005,6 +8076,13 @@ export function App({ onGoHome }: AppProps) {
       }
       onAskUserAnswer={handleAskUserAnswer}
       onEditUserMessage={handleEditUserMessage}
+      onForkAgentMessage={(seq) =>
+        void handleForkAgentMessage(
+          selectedSession?.root_id || currentRootId,
+          selectedSessionSnapshot?.key || selectedSessionSnapshot?.session_key,
+          seq,
+        )
+      }
     />
   );
 
@@ -9093,6 +9171,13 @@ export function App({ onGoHome }: AppProps) {
                 }
                 onAskUserAnswer={handleAskUserAnswer}
                 onEditUserMessage={handleEditUserMessage}
+                onForkAgentMessage={(seq) =>
+                  void handleForkAgentMessage(
+                    currentRootId,
+                    drawerSessionSnapshot?.key || drawerSessionSnapshot?.session_key,
+                    seq,
+                  )
+                }
               />
             ) : (
               <div style={{ padding: "40px", textAlign: "center" }}>

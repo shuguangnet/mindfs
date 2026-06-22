@@ -41,6 +41,7 @@ type SessionItem = {
     };
   }>;
   closed_at?: string;
+  source?: string;
   related_files?: RelatedFile[];
   exchange_aux?: Record<string, ExchangeAux[]>;
 };
@@ -67,6 +68,7 @@ type SessionViewerProps = {
     answers: Record<string, string>;
   }) => void | Promise<void>;
   onEditUserMessage?: (content: string) => void;
+  onForkAgentMessage?: (seq: number) => void | Promise<void>;
   targetSeqRequestKey?: string | number;
 };
 
@@ -528,6 +530,29 @@ function AskUserIcon() {
   );
 }
 
+function ForkIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      style={{ transform: "rotate(180deg) scaleX(-1)" }}
+    >
+      <path d="M0 0h24v24H0z" fill="none" />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+        d="M17 7a2 2 0 1 0 0-4a2 2 0 0 0 0 4M7 7a2 2 0 1 0 0-4a2 2 0 0 0 0 4m0 14a2 2 0 1 0 0-4a2 2 0 0 0 0 4M7 7v10M17 7v1c0 2.5-2 3-2 3l-6 2s-2 .5-2 3v1"
+      />
+    </svg>
+  );
+}
+
 function AskUserQuestionCard({
   toolCall,
   rootId,
@@ -887,6 +912,7 @@ function SessionViewerInner({
   onRemoveRelatedFile,
   onAskUserAnswer,
   onEditUserMessage,
+  onForkAgentMessage,
 }: SessionViewerProps) {
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [relatedFilesCollapsed, setRelatedFilesCollapsed] = useState(false);
@@ -1310,6 +1336,7 @@ if (useInnerScrollContainer && !container) {
     const assistantExchangeMeta = !isUser
       ? formatAssistantExchangeMeta(item)
       : "";
+    const canForkAgentMessage = !isUser && Number(item.seq || 0) > 0 && !!onForkAgentMessage;
     return (
       <div
         key={timelineItemKey}
@@ -1708,6 +1735,22 @@ if (useInnerScrollContainer && !container) {
                     </svg>
                   )}
                 </button>
+                {canForkAgentMessage ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const seq = Number(item.seq || 0);
+                      if (seq > 0) {
+                        void onForkAgentMessage?.(seq);
+                      }
+                    }}
+                    style={userMetaButtonStyle}
+                    aria-label="从此消息 fork"
+                    title="从此消息 fork"
+                  >
+                    <ForkIcon />
+                  </button>
+                ) : null}
                 <AgentIcon
                   agentName={item.agent || ""}
                   style={{ width: "12px", height: "12px" }}
