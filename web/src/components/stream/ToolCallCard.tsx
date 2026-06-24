@@ -148,7 +148,7 @@ export function renderToolIcon(kind: string): React.ReactNode {
 
 function stripAnsi(text: string): string {
   return text
-    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)/g, "")
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\x1b[ -/]*[@-~]/g, "");
 }
@@ -303,7 +303,7 @@ function parseAnsiSegments(text: string): AnsiSegment[] {
   const segments: AnsiSegment[] = [];
   const style: AnsiStyle = {};
   let lastIndex = 0;
-  const pattern = /\x1b\[([0-9;?]*)([ -/]*)?([@-~])|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[ -/]*[@-~]/g;
+  const pattern = /\x1b\[([0-9;?]*)([ -/]*)?([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)|\x1b[ -/]*[@-~]/g;
   for (const match of normalized.matchAll(pattern)) {
     const index = match.index ?? 0;
     pushAnsiSegment(segments, normalized.slice(lastIndex, index), style);
