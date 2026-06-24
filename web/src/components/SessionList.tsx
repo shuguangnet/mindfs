@@ -57,7 +57,7 @@ type SessionListProps = {
 const COLLAPSED_CHILD_SESSION_LIMIT = 3;
 const MULTI_PROJECT_VISIBLE_LIMIT = 6;
 const MAIN_SESSION_ICON_OFFSET = "2px";
-const SUB_SESSION_ICON_OFFSET = "12px";
+const SUB_SESSION_ICON_OFFSET = "0px";
 const PINNED_PROJECTS_STORAGE_KEY = "mindfs-pinned-session-projects";
 
 type VisibleSessionRow =

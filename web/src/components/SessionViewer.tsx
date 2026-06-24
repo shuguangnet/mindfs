@@ -51,6 +51,12 @@ type SessionItem = {
 type SessionViewerProps = {
   session: SessionItem | null;
   loading?: boolean;
+  slashCommandResult?: {
+    command: string;
+    content: string;
+    status: "running" | "complete" | "failed";
+    error?: string;
+  } | null;
   rootId?: string | null;
   rootPath?: string | null;
   interactionMode?: "main" | "drawer";
@@ -957,6 +963,7 @@ function shouldDefaultCollapseRelatedFiles(
 function SessionViewerInner({
   session,
   loading = false,
+  slashCommandResult = null,
   rootId,
   rootPath,
   interactionMode = "main",
@@ -1078,7 +1085,7 @@ if (useInnerScrollContainer && !container) {
     if (shouldStickToBottomRef.current) {
       scrollEndRef.current.scrollIntoView({ behavior: "auto", block: "end" });
     }
-  }, [sessionKey, timeline, isStreaming, streamVersion, useInnerScrollContainer]);
+  }, [sessionKey, timeline, isStreaming, streamVersion, slashCommandResult, useInnerScrollContainer]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -1824,6 +1831,71 @@ if (useInnerScrollContainer && !container) {
     );
   };
 
+  const renderSlashCommandResult = () => {
+    if (!slashCommandResult) {
+      return null;
+    }
+    const commandLabel = `/${slashCommandResult.command || "status"}`;
+    const content =
+      slashCommandResult.error ||
+      slashCommandResult.content ||
+      (slashCommandResult.status === "running" ? "正在获取状态..." : "");
+    return (
+      <div
+        style={{
+          marginTop: hasVisibleTimeline ? "18px" : "0",
+          width: "100%",
+          boxSizing: "border-box",
+          border: "1px solid rgba(148,163,184,0.36)",
+          background: "rgba(148,163,184,0.10)",
+          borderRadius: "8px",
+          padding: "10px 12px",
+          color: "var(--text-primary)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "8px",
+            marginBottom: content ? "6px" : 0,
+            fontSize: "11px",
+            lineHeight: 1.4,
+            color: "var(--text-secondary)",
+          }}
+        >
+          <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" }}>
+            {commandLabel}
+          </span>
+          <span>
+            {slashCommandResult.status === "running"
+              ? "运行中"
+              : slashCommandResult.status === "failed"
+                ? "失败"
+                : "完成"}
+          </span>
+        </div>
+        {content ? (
+          <div
+            style={{
+              fontSize: "13px",
+              lineHeight: "1.6",
+              minWidth: 0,
+              overflowWrap: "anywhere",
+            }}
+          >
+            <MarkdownViewer
+              content={content}
+              root={rootId || undefined}
+              onFileClick={onFileClickRef.current}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   return (
     <div
       style={{
@@ -1938,6 +2010,7 @@ if (useInnerScrollContainer && !container) {
                 timelineItemSpacing(idx > 0 ? timeline[idx - 1] : null, item),
               ),
             )}
+            {renderSlashCommandResult()}
             {(isAwaiting || isStreaming) && (
               <div
                 style={{

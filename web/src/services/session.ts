@@ -840,6 +840,41 @@ class SessionService {
     });
   }
 
+  async runSlashCommand(
+    rootId: string,
+    sessionKey: string,
+    command: string,
+    agent: string,
+    model?: string,
+    agentMode?: string,
+    effort?: string,
+    fastService?: string,
+    requestId = this.createRequestId("slash"),
+  ): Promise<boolean> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    if (!rootId || !sessionKey || !command || !agent) {
+      return false;
+    }
+    const msg = {
+      id: requestId,
+      type: "session.slash_command.run",
+      payload: {
+        root_id: rootId,
+        session_key: sessionKey,
+        command,
+        agent,
+        model,
+        agent_mode: agentMode,
+        effort,
+        fast_service: fastService,
+      },
+    };
+    this.pendingMessages.set(requestId, { id: requestId, message: msg });
+    return this.sendWSMessage(msg);
+  }
+
   private resendPendingMessages() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;

@@ -453,6 +453,8 @@ func (h *WSHandler) handleWSRequest(ctx context.Context, conn *websocket.Conn, c
 		h.handleWSPing(conn, clientID, req)
 	case "session.message":
 		go h.handleSessionMessage(ctx, conn, clientID, req)
+	case "session.slash_command.run":
+		go h.handleSessionSlashCommandRun(ctx, conn, clientID, req)
 	case "session.plan_mode.set":
 		h.handleSessionPlanModeSet(ctx, conn, clientID, req)
 	case "session.answer_question":
@@ -647,6 +649,73 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		streamHub.BroadcastSessionQueueUpdated(rootID, key, queue)
 	}
 	h.runSessionMessage(job)
+}
+
+func (h *WSHandler) handleSessionSlashCommandRun(ctx context.Context, conn *websocket.Conn, clientID string, req WSRequest) {
+	rootID := getString(req.Payload, "root_id")
+	key := getString(req.Payload, "session_key")
+	requestID := strings.TrimSpace(req.ID)
+	agentName := getString(req.Payload, "agent")
+	model := getString(req.Payload, "model")
+	agentMode := getString(req.Payload, "agent_mode")
+	effort := getString(req.Payload, "effort")
+	fastService := normalizeFastServiceValue(getString(req.Payload, "fast_service"))
+	command := strings.TrimSpace(getString(req.Payload, "command"))
+	normalizedCommand := strings.TrimPrefix(strings.ToLower(command), "/")
+	if rootID == "" || key == "" || agentName == "" || normalizedCommand == "" {
+		h.sendWSError(conn, clientID, req.ID, "invalid_request", "root_id, session_key, agent and command required")
+		return
+	}
+	if agentName != "codex" || normalizedCommand != "status" {
+		h.sendWSError(conn, clientID, req.ID, "unsupported_slash_command", "only codex /status is supported")
+		return
+	}
+	if requestID != "" {
+		if !h.reserveClientRequest(requestID) {
+			h.sendWSAccepted(conn, clientID, requestID, rootID, key)
+			return
+		}
+		h.sendWSAccepted(conn, clientID, requestID, rootID, key)
+	}
+	if h.AppContext != nil {
+		h.AppContext.GetSessionStreamHub().BindSessionClient(key, clientID)
+	}
+
+	uc := &usecase.Service{Registry: h.AppContext}
+	msgCtx, cancel := h.sessionMessageContext()
+	defer cancel()
+	updateTracker := newTurnUpdateTracker()
+	err := uc.RunTransientSlashCommand(msgCtx, usecase.RunTransientSlashCommandInput{
+		RootID:      rootID,
+		Key:         key,
+		Agent:       agentName,
+		Model:       model,
+		Mode:        agentMode,
+		Effort:      effort,
+		FastService: fastService,
+		Command:     normalizedCommand,
+		OnUpdate: func(update agenttypes.Event) {
+			updateTracker.Begin()
+			defer updateTracker.End()
+			event := updateToEvent(update)
+			if event == nil {
+				return
+			}
+			_ = h.writeWSJSON(clientID, conn, buildSlashCommandStreamResponse(rootID, key, normalizedCommand, requestID, event))
+		},
+	})
+	if err != nil {
+		log.Printf("[ws] session.slash_command.error root=%s session=%s command=%s request=%s err=%v", rootID, key, normalizedCommand, requestID, err)
+		event := &StreamEvent{
+			Type: "error",
+			Data: map[string]string{"message": normalizeAgentErrorMessage(err)},
+		}
+		_ = h.writeWSJSON(clientID, conn, buildSlashCommandStreamResponse(rootID, key, normalizedCommand, requestID, event))
+	}
+	if ok := updateTracker.WaitIdle(msgCtx, sessionDoneSettleWindow, sessionDoneMaxWait); !ok {
+		log.Printf("[ws] session.slash_command.done.wait_timeout root=%s session=%s command=%s request=%s", rootID, key, normalizedCommand, requestID)
+	}
+	_ = h.writeWSJSON(clientID, conn, buildSlashCommandDoneResponse(rootID, key, normalizedCommand, requestID))
 }
 
 func (h *WSHandler) handleSessionPlanModeSet(ctx context.Context, conn *websocket.Conn, clientID string, req WSRequest) {

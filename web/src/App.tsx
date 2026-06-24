@@ -184,6 +184,16 @@ type MultiProjectSessionGroup = {
   totalCount: number;
 };
 
+type SlashCommandResult = {
+  rootId: string;
+  sessionKey: string;
+  requestId: string;
+  command: string;
+  content: string;
+  status: "running" | "complete" | "failed";
+  error?: string;
+};
+
 function latestExchangeText(
   exchanges: unknown,
   field: "agent" | "mode" | "effort" | "fast_service",
@@ -1139,6 +1149,9 @@ export function App({ onGoHome }: AppProps) {
   const [pendingPlanMode, setPendingPlanMode] = useState(false);
   const [currentSession, setCurrentSession] = useState<SessionItem | null>(null);
   const [cacheVersion, setCacheVersion] = useState(0);
+  const [slashCommandResults, setSlashCommandResults] = useState<
+    Record<string, SlashCommandResult>
+  >({});
   const [queueVersion, setQueueVersion] = useState(0);
   const [interactionMode, setInteractionMode] = useState<"main" | "drawer">(
     "main",
@@ -1764,6 +1777,20 @@ export function App({ onGoHome }: AppProps) {
     [],
   );
   const bumpCacheVersion = useCallback(() => setCacheVersion((v) => v + 1), []);
+  const clearSlashCommandResultForSession = useCallback(
+    (rootID: string, sessionKey: string) => {
+      const key = rootSessionKey(rootID, sessionKey);
+      setSlashCommandResults((prev) => {
+        if (!prev[key]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    },
+    [rootSessionKey],
+  );
   const applyPendingToMultiProjectGroups = useCallback(
     (groups: MultiProjectSessionGroup[], pendingByKey: Record<string, boolean>) =>
       groups.map((group) => ({
@@ -4415,6 +4442,7 @@ export function App({ onGoHome }: AppProps) {
       const messageRequestsPlanMode =
         message.trim().toLowerCase() === "/plan" ||
         message.trim().toLowerCase().startsWith("/plan ");
+      const messageRequestsStatus = message.trim().toLowerCase() === "/status";
       const isQueueSend =
         !!sendSessionKey &&
         !!session &&
@@ -4480,6 +4508,13 @@ export function App({ onGoHome }: AppProps) {
           } as Session);
         }
       } else {
+        if (messageRequestsStatus) {
+          reportError(
+            "session.slash_command_failed",
+            "/status 需要在已有 codex 会话中运行",
+          );
+          return;
+        }
         sendSessionKey = undefined;
         const tempKey = `pending-${Date.now()}`;
         session = {
@@ -4496,6 +4531,87 @@ export function App({ onGoHome }: AppProps) {
           pending: true,
         } as any;
         setBoundSessionForRoot(activeRoot, tempKey);
+      }
+      if (messageRequestsStatus) {
+        if (!sendSessionKey || !session) {
+          reportError(
+            "session.slash_command_failed",
+            "/status 需要在已有 codex 会话中运行",
+          );
+          return;
+        }
+        if (effectiveAgent !== "codex") {
+          reportError(
+            "session.slash_command_failed",
+            "/status 目前只支持 codex 会话",
+          );
+          return;
+        }
+	        const requestId = sessionService.createRequestId("slash");
+	        const targetSessionKey = sendSessionKey;
+	        const resultKey = rootSessionKey(activeRoot, targetSessionKey);
+	        setSelectedPendingByKey(targetSessionKey, false);
+	        setMultiProjectSessionPending(activeRoot, targetSessionKey, false);
+	        setSessions((prev) =>
+	          prev.map((item) => {
+	            const itemKey = item.key || item.session_key;
+	            if (itemKey !== targetSessionKey) {
+	              return item;
+	            }
+	            return { ...(item as any), pending: false } as SessionItem;
+	          }),
+	        );
+	        const drawerSession = drawerSessionByRootRef.current[activeRoot];
+	        if (drawerSession && drawerSession.key === targetSessionKey) {
+	          setDrawerSessionForRoot(activeRoot, {
+	            ...(drawerSession as any),
+	            pending: false,
+	          } as Session);
+	        }
+	        setSlashCommandResults((prev) => ({
+	          ...prev,
+	          [resultKey]: {
+            rootId: activeRoot,
+            sessionKey: targetSessionKey,
+            requestId,
+            command: "status",
+            content: "",
+            status: "running",
+          },
+        }));
+        const sent = await sessionService.runSlashCommand(
+          activeRoot,
+          targetSessionKey,
+          "status",
+          effectiveAgent,
+          effectiveModel || undefined,
+          effectiveAgentMode || undefined,
+          effectiveEffort || undefined,
+          effectiveFastService,
+          requestId,
+        );
+        if (!sent) {
+          setSlashCommandResults((prev) => ({
+            ...prev,
+            [resultKey]: {
+              rootId: activeRoot,
+              sessionKey: targetSessionKey,
+              requestId,
+              command: "status",
+              content: "",
+              status: "failed",
+              error: "连接未就绪，请稍后重试",
+            },
+          }));
+          reportError(
+            "network.disconnected",
+            "命令发送失败：连接未就绪，请稍后重试",
+          );
+        }
+        return;
+      }
+      if (sendSessionKey) {
+        clearSlashCommandResultForSession(activeRoot, sendSessionKey);
       }
       const now = new Date().toISOString();
       const requestId = sessionService.createRequestId("msg");
@@ -4731,6 +4847,7 @@ export function App({ onGoHome }: AppProps) {
       mergeSessionItems,
       setSelectedPendingByKey,
       bumpCacheVersion,
+      clearSlashCommandResultForSession,
       setBoundSessionForRoot,
       setDrawerOpenForRoot,
       setDrawerSessionForRoot,
@@ -7066,6 +7183,97 @@ export function App({ onGoHome }: AppProps) {
           break;
       }
     };
+    const handleSlashCommandStream = (payload: any) => {
+      const sessionKey =
+        typeof payload?.session_key === "string" ? payload.session_key : "";
+      const rootID =
+        typeof payload?.root_id === "string" && payload.root_id
+          ? payload.root_id
+          : resolveRootForSessionKey(sessionKey) || currentRootIdRef.current;
+      const command =
+        typeof payload?.command === "string" ? payload.command : "status";
+      const requestId =
+        typeof payload?.request_id === "string"
+          ? payload.request_id
+          : typeof payload?.id === "string"
+            ? payload.id
+            : "";
+      const event = payload?.event;
+      if (!rootID || !sessionKey || !event?.type) {
+        return;
+      }
+      const resultKey = rootSessionKey(rootID, sessionKey);
+      if (event.type === "message_chunk") {
+        const chunk = typeof event.data?.content === "string" ? event.data.content : "";
+        if (!chunk) {
+          return;
+        }
+        setSlashCommandResults((prev) => {
+          const current = prev[resultKey];
+          return {
+            ...prev,
+            [resultKey]: {
+              rootId: rootID,
+              sessionKey,
+              requestId: current?.requestId || requestId,
+              command: current?.command || command,
+              content: `${current?.content || ""}${chunk}`,
+              status: "running",
+            },
+          };
+        });
+        return;
+      }
+      if (event.type === "error") {
+        const message =
+          typeof event.data?.message === "string"
+            ? event.data.message
+            : "命令执行失败";
+        setSlashCommandResults((prev) => {
+          const current = prev[resultKey];
+          return {
+            ...prev,
+            [resultKey]: {
+              rootId: rootID,
+              sessionKey,
+              requestId: current?.requestId || requestId,
+              command: current?.command || command,
+              content: current?.content || "",
+              status: "failed",
+              error: message,
+            },
+          };
+        });
+        reportError("session.slash_command_failed", message, {
+          details: { rootId: rootID, sessionKey, command },
+        });
+      }
+    };
+    const handleSlashCommandDone = (payload: any) => {
+      const sessionKey =
+        typeof payload?.session_key === "string" ? payload.session_key : "";
+      const rootID =
+        typeof payload?.root_id === "string" && payload.root_id
+          ? payload.root_id
+          : resolveRootForSessionKey(sessionKey) || currentRootIdRef.current;
+      if (!rootID || !sessionKey) {
+        return;
+      }
+      const resultKey = rootSessionKey(rootID, sessionKey);
+      setSlashCommandResults((prev) => {
+        const current = prev[resultKey];
+        if (!current || current.status === "failed") {
+          return prev;
+        }
+        return {
+          ...prev,
+          [resultKey]: {
+            ...current,
+            status: "complete",
+          },
+        };
+      });
+    };
     const dirname = (path: string): string => {
       const clean = (path || "").replace(/^\/+|\/+$/g, "");
       if (!clean || clean === ".") return ".";
@@ -7319,6 +7527,12 @@ export function App({ onGoHome }: AppProps) {
         }
         case "session.stream":
           handleSessionStream(payload);
+          break;
+        case "session.slash_command.stream":
+          handleSlashCommandStream(payload);
+          break;
+        case "session.slash_command.done":
+          handleSlashCommandDone(payload);
           break;
         case "session.queue.updated": {
           const rootID =
@@ -8497,10 +8711,25 @@ export function App({ onGoHome }: AppProps) {
     file?.root || currentRootId,
     file?.path,
   );
+  const slashCommandResultForSession = (
+    rootID: string | null | undefined,
+    session: { key?: string; session_key?: string } | null | undefined,
+  ) => {
+    const sessionKey = session?.key || session?.session_key || "";
+    const resolvedRoot = rootID || "";
+    if (!resolvedRoot || !sessionKey) {
+      return null;
+    }
+    return slashCommandResults[rootSessionKey(resolvedRoot, sessionKey)] || null;
+  };
   const sessionView = (
     <SessionViewer
       session={selectedSessionSnapshot}
       agents={availableAgents}
+      slashCommandResult={slashCommandResultForSession(
+        selectedSession?.root_id || currentRootId,
+        selectedSessionSnapshot,
+      )}
       targetSeq={selectedSession?.search_seq}
       targetSeqRequestKey={selectedSession?.search_target_id}
       loading={selectedSessionLoading}
@@ -9634,6 +9863,10 @@ export function App({ onGoHome }: AppProps) {
               <SessionViewer
                 session={drawerSessionSnapshot}
                 agents={availableAgents}
+                slashCommandResult={slashCommandResultForSession(
+                  currentRootId,
+                  drawerSessionSnapshot,
+                )}
                 targetSeq={currentSession?.search_seq}
                 targetSeqRequestKey={currentSession?.search_target_id}
                 loading={false}

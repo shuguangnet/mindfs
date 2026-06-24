@@ -871,6 +871,18 @@ type SendMessageInput struct {
 	OnSubSessionUpdate  func(sessionKey string, update agenttypes.Event)
 }
 
+type RunTransientSlashCommandInput struct {
+	RootID      string
+	Key         string
+	Agent       string
+	Model       string
+	Mode        string
+	Effort      string
+	FastService string
+	Command     string
+	OnUpdate    func(agenttypes.Event)
+}
+
 var activeSubagentSubscriptions sync.Map
 
 type AnswerQuestionInput struct {
@@ -1992,6 +2004,73 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		prober.ReportSuccess(in.Agent)
 	}
 	return nil
+}
+
+func (s *Service) RunTransientSlashCommand(ctx context.Context, in RunTransientSlashCommandInput) error {
+	if err := s.ensureRegistry(); err != nil {
+		return err
+	}
+	command := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(in.Command)), "/")
+	agentName := strings.TrimSpace(in.Agent)
+	if agentName != "codex" || command != "status" {
+		return errors.New("unsupported transient slash command")
+	}
+	if strings.TrimSpace(in.Key) == "" {
+		return errors.New("session key required")
+	}
+	sendLock := getSessionSendLock(in.Key)
+	sendLock.Lock()
+	defer sendLock.Unlock()
+
+	turnCtx, turnCancel := context.WithCancel(ctx)
+	registerActiveTurn(in.RootID, in.Key, turnCancel)
+	defer unregisterActiveTurn(in.RootID, in.Key)
+
+	manager, err := s.Registry.GetSessionManager(in.RootID)
+	if err != nil {
+		return err
+	}
+	current, err := manager.Get(ctx, in.Key, 0)
+	if err != nil {
+		return err
+	}
+	if current.Type == session.TypeCommand {
+		return errors.New("slash commands are not supported for command sessions")
+	}
+	if currentAgent := strings.TrimSpace(session.InferAgentFromSession(current)); currentAgent != "" && currentAgent != agentName {
+		return errors.New("slash command agent does not match session agent")
+	}
+	if err := s.validateAgentModel(agentName, in.Model); err != nil {
+		return err
+	}
+	agentPool := s.Registry.GetAgentPool()
+	if agentPool == nil {
+		return errors.New("agent pool not configured")
+	}
+	root := manager.Root()
+	rootAbs, _ := root.RootDir()
+	sess, _, err := s.ensureAgentSession(turnCtx, agentPool, manager, current, agentName, in.Model, in.Mode, in.Effort, in.FastService, rootAbs)
+	if err != nil {
+		return err
+	}
+	setActiveTurnSession(in.RootID, current.Key, sess)
+
+	sess.OnUpdate(func(update agenttypes.Event) {
+		update = normalizeAgentUpdatePaths(root, update)
+		clientUpdate := compactAgentUpdate(update)
+		if in.OnUpdate != nil {
+			in.OnUpdate(clientUpdate)
+		}
+	})
+
+	err = sess.SendMessage(turnCtx, "/"+command)
+	if err != nil && !isCanceledTurnError(err) {
+		if prober := s.Registry.GetProber(); prober != nil {
+			prober.ReportRuntimeFailure(agentName, err)
+		}
+		return err
+	}
+	return err
 }
 
 type subagentSessionInput struct {

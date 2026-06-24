@@ -154,6 +154,33 @@ func buildSessionDoneResponse(rootID, sessionKey, requestID string) WSResponse {
 	}
 }
 
+func buildSlashCommandStreamResponse(rootID, sessionKey, command, requestID string, event *StreamEvent) WSResponse {
+	return WSResponse{
+		ID:   requestID,
+		Type: "session.slash_command.stream",
+		Payload: map[string]any{
+			"root_id":     rootID,
+			"session_key": sessionKey,
+			"command":     command,
+			"request_id":  requestID,
+			"event":       event,
+		},
+	}
+}
+
+func buildSlashCommandDoneResponse(rootID, sessionKey, command, requestID string) WSResponse {
+	return WSResponse{
+		ID:   requestID,
+		Type: "session.slash_command.done",
+		Payload: map[string]any{
+			"root_id":     rootID,
+			"session_key": sessionKey,
+			"command":     command,
+			"request_id":  requestID,
+		},
+	}
+}
+
 func buildSessionUserMessageResponse(rootID, sessionKey, sessionType, sessionName, agentName, model, mode, effort, fastService string, content string, timestamp time.Time, queued bool) WSResponse {
 	queueState := "active"
 	if queued {
