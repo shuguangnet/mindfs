@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useRef, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStream, type TimelineItem } from "../hooks/useSessionStream";
 import type { TodoUpdate } from "../services/session";
 import { ThinkingBlock } from "./stream/ThinkingBlock";
@@ -969,6 +969,29 @@ function shouldDefaultCollapseRelatedFiles(
   return relatedFileCount > 5;
 }
 
+const USER_MESSAGE_SUMMARY_LENGTH = 48;
+
+function normalizeUserMessageSummary(content: string): string {
+  const text = stripUploadAttachmentTokens(content || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return "空消息";
+  }
+  return text.length > USER_MESSAGE_SUMMARY_LENGTH
+    ? `${text.slice(0, USER_MESSAGE_SUMMARY_LENGTH)}...`
+    : text;
+}
+
+function UserMessageListIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M0 0h32v32H0z" fill="none" />
+      <path fill="currentColor" d="M4.082 4.083v3h22.835v-3zm0 16.223h22.835v-3H4.082zm0-6.612h22.835v-3H4.082zm0 13.223h22.835v-3H4.082z" />
+    </svg>
+  );
+}
+
 function SessionViewerInner({
   session,
   loading = false,
@@ -1007,6 +1030,7 @@ function SessionViewerInner({
   const onFileClickRef = useRef(onFileClick);
   const copyResetTimersRef = useRef<Record<string, number>>({});
   const relatedFilesDefaultStateRef = useRef<string>("");
+  const userSummaryRootRef = useRef<HTMLDivElement | null>(null);
   const sessionKey = session?.key || session?.session_key || null;
   const exchanges = Array.isArray(session?.exchanges) ? session.exchanges : [];
   const isAwaiting = !!(session as any)?.pending;
@@ -1023,6 +1047,8 @@ function SessionViewerInner({
   const targetSeqFrameRef = useRef<number | null>(null);
   const targetSeqTimerRefs = useRef<number[]>([]);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [userSummaryHoverOpen, setUserSummaryHoverOpen] = useState(false);
+  const [userSummaryPinnedOpen, setUserSummaryPinnedOpen] = useState(false);
 
   const cancelTargetSeqScroll = () => {
     if (targetSeqFrameRef.current !== null) {
@@ -1055,12 +1081,76 @@ function SessionViewerInner({
   useEffect(() => {
     setSavedPromptKeys({});
     setCopiedMessageKeys({});
+    setUserSummaryHoverOpen(false);
+    setUserSummaryPinnedOpen(false);
     relatedFilesDefaultStateRef.current = "";
     Object.values(copyResetTimersRef.current).forEach((timer) =>
       window.clearTimeout(timer),
     );
     copyResetTimersRef.current = {};
   }, [sessionKey, useInnerScrollContainer]);
+
+  const userMessageSummaries = useMemo(
+    () =>
+      timeline
+        .filter((item): item is Extract<TimelineItem, { type: "user_text" }> => item.type === "user_text")
+        .map((item, index) => ({
+          id: item.id || `user-${index}`,
+          index: index + 1,
+          summary: normalizeUserMessageSummary(item.content || ""),
+        })),
+    [timeline],
+  );
+  const userSummaryOpen = userSummaryHoverOpen || userSummaryPinnedOpen;
+
+  const scrollToUserMessageSummary = (index: number) => {
+    const container = scrollRef.current;
+    if (!container) {
+      return;
+    }
+    const node = container.querySelector<HTMLElement>(
+      `[data-user-message-index="${index}"]`,
+    );
+    if (!node) {
+      return;
+    }
+    shouldStickToBottomRef.current = false;
+    cancelTargetSeqScroll();
+    const containerRect = container.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const nextTop = Math.max(
+      0,
+      Math.min(
+        maxTop,
+        container.scrollTop +
+          nodeRect.top -
+          containerRect.top -
+          container.clientHeight / 2 +
+          nodeRect.height / 2,
+      ),
+    );
+    container.scrollTop = nextTop;
+    setShowJumpToLatest(nextTop < maxTop - 40);
+    setUserSummaryPinnedOpen(false);
+    setUserSummaryHoverOpen(false);
+  };
+
+  useEffect(() => {
+    if (!userSummaryOpen) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const root = userSummaryRootRef.current;
+      if (!root || root.contains(event.target as Node)) {
+        return;
+      }
+      setUserSummaryPinnedOpen(false);
+      setUserSummaryHoverOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [userSummaryOpen]);
 
   useEffect(() => {
     return () => {
@@ -1376,6 +1466,9 @@ if (useInnerScrollContainer && !container) {
       );
     }
     const isUser = item.type === "user_text";
+    const userMessageIndex = isUser
+      ? timeline.slice(0, idx + 1).filter((timelineItem) => timelineItem.type === "user_text").length
+      : undefined;
     const next = idx + 1 < timeline.length ? timeline[idx + 1] : null;
     const hasFollowingAssistantFlow =
       !isUser && !!next && next.type !== "user_text";
@@ -1413,6 +1506,7 @@ if (useInnerScrollContainer && !container) {
       <div
         key={timelineItemKey}
         data-session-seq={item.seq || undefined}
+        data-user-message-index={userMessageIndex}
         style={{
           marginTop: spacing,
           alignSelf: isUser ? "flex-end" : "flex-start",
@@ -2430,6 +2524,141 @@ if (useInnerScrollContainer && !container) {
           </div>
           </div>
         </div>
+        {interactionMode !== "drawer" && userMessageSummaries.length > 0 ? (
+          <div
+            ref={userSummaryRootRef}
+            onMouseEnter={() => setUserSummaryHoverOpen(true)}
+            onMouseLeave={() => setUserSummaryHoverOpen(false)}
+            style={{
+              position: "absolute",
+              right: "24px",
+              bottom: showJumpToLatest ? "68px" : "28px",
+              zIndex: 4,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-end",
+              gap: "8px",
+            }}
+          >
+            {userSummaryOpen ? (
+              <div
+                role="dialog"
+                aria-label="用户消息摘要"
+                style={{
+                  width: "min(320px, calc(100vw - 72px))",
+                  maxHeight: "260px",
+                  overflowY: "auto",
+                  padding: "6px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--menu-border)",
+                  background: "var(--menu-bg)",
+                  boxShadow: "0 16px 34px rgba(15, 23, 42, 0.18)",
+                  color: "var(--text-primary)",
+                  boxSizing: "border-box",
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                  {userMessageSummaries.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => scrollToUserMessageSummary(item.index)}
+                      style={{
+                        width: "100%",
+                        border: "none",
+                        background: "transparent",
+                        display: "block",
+                        padding: "6px 8px",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        color: "var(--text-primary)",
+                      }}
+                      onMouseEnter={(event) => {
+                        event.currentTarget.style.background = "var(--menu-active-bg)";
+                      }}
+                      onMouseLeave={(event) => {
+                        event.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      <span
+                        title={item.summary}
+                        style={{
+                          display: "block",
+                          minWidth: 0,
+                          fontSize: "12px",
+                          lineHeight: "18px",
+                          color: "var(--text-primary)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {item.summary}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                setUserSummaryPinnedOpen((open) => {
+                  const nextOpen = !open;
+                  if (!nextOpen) {
+                    setUserSummaryHoverOpen(false);
+                  }
+                  return nextOpen;
+                });
+              }}
+              aria-label={userSummaryOpen ? "隐藏用户消息摘要" : "显示用户消息摘要"}
+              title={userSummaryOpen ? "隐藏用户消息摘要" : "显示用户消息摘要"}
+              style={{
+                position: "relative",
+                width: "34px",
+                height: "34px",
+                border: "none",
+                borderRadius: "8px",
+                background: userSummaryOpen ? "var(--accent-color)" : "var(--menu-bg)",
+                color: userSummaryOpen ? "#ffffff" : "var(--text-secondary)",
+                boxShadow: "0 10px 24px rgba(15, 23, 42, 0.16)",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                fontSize: "18px",
+              }}
+            >
+              <UserMessageListIcon />
+              <span
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  top: "-7px",
+                  right: "-7px",
+                  minWidth: "18px",
+                  height: "18px",
+                  padding: "0 5px",
+                  borderRadius: "999px",
+                  background: "#2563eb",
+                  color: "#ffffff",
+                  border: "2px solid var(--menu-bg)",
+                  fontSize: "10px",
+                  fontWeight: 800,
+                  lineHeight: "14px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxSizing: "border-box",
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {userMessageSummaries.length > 99 ? "99+" : userMessageSummaries.length}
+              </span>
+            </button>
+          </div>
+        ) : null}
         {showJumpToLatest ? (
           <button
             type="button"
