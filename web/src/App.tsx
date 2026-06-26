@@ -1036,6 +1036,7 @@ type AppProps = {
 
 const MOBILE_ENTER_KEY_SEND_STORAGE_KEY = "mindfs-mobile-enter-key-sends";
 const SIDEBARS_SWAPPED_STORAGE_KEY = "mindfs-sidebars-swapped";
+const GIT_DIFF_SIDE_BY_SIDE_STORAGE_KEY = "mindfs-git-diff-side-by-side";
 
 function loadMobileEnterKeySends(): boolean {
   if (typeof window === "undefined") {
@@ -1054,6 +1055,17 @@ function loadSidebarsSwapped(): boolean {
   }
   try {
     return window.localStorage.getItem(SIDEBARS_SWAPPED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function loadGitDiffSideBySide(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(GIT_DIFF_SIDE_BY_SIDE_STORAGE_KEY) === "1";
   } catch {
     return false;
   }
@@ -1187,6 +1199,7 @@ export function App({ onGoHome }: AppProps) {
   const { isMobile } = useResponsive();
   const [mobileEnterKeySends, setMobileEnterKeySends] = useState(loadMobileEnterKeySends);
   const [sidebarsSwapped, setSidebarsSwapped] = useState(loadSidebarsSwapped);
+  const [gitDiffSideBySide, setGitDiffSideBySide] = useState(loadGitDiffSideBySide);
   const [isLeftOpen, setIsLeftOpen] = useState(() => window.innerWidth >= 768);
   const [isRightOpen, setIsRightOpen] = useState(
     () => window.innerWidth >= 768,
@@ -1224,6 +1237,17 @@ export function App({ onGoHome }: AppProps) {
       // Ignore storage failures; the setting can still apply for this session.
     }
   }, [sidebarsSwapped]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        GIT_DIFF_SIDE_BY_SIDE_STORAGE_KEY,
+        gitDiffSideBySide ? "1" : "0",
+      );
+    } catch {
+      // Ignore storage failures; the setting can still apply for this session.
+    }
+  }, [gitDiffSideBySide]);
 
   const [managedRootIds, setManagedRootIds] = useState<string[]>([]);
   const managedRootByIdRef = useRef<Record<string, ManagedRootPayload>>({});
@@ -10152,6 +10176,7 @@ export function App({ onGoHome }: AppProps) {
       <GitDiffViewer
         diff={gitDiff}
         root={currentRootId}
+        sideBySide={gitDiffSideBySide}
         onPathClick={handleGitDiffPathClick}
         onSessionClick={(sessionKey) =>
           handleSessionChipClick(sessionKey, currentRootIdRef.current)
@@ -10850,6 +10875,8 @@ export function App({ onGoHome }: AppProps) {
             onEnterKeySendsChange={setMobileEnterKeySends}
             sidebarsSwapped={sidebarsSwapped}
             onSidebarsSwappedChange={setSidebarsSwapped}
+            gitDiffSideBySide={gitDiffSideBySide}
+            onGitDiffSideBySideChange={setGitDiffSideBySide}
             multiProjectSessionsEnabled={multiProjectSessionsEnabled}
             onMultiProjectSessionsChange={setMultiProjectSessionsEnabled}
             onRunAgentLifecycleCommand={handleRunAgentLifecycleCommand}
