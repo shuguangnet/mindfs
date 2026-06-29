@@ -33,7 +33,29 @@ const (
 	sessionDoneMaxWait      = 2 * time.Second
 )
 
-var upgrader = websocket.Upgrader{}
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin == "" {
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		host := strings.TrimSpace(r.Host)
+		if host == "" {
+			return false
+		}
+		if strings.EqualFold(u.Host, host) {
+			return true
+		}
+		if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwarded != "" && strings.EqualFold(u.Host, forwarded) {
+			return true
+		}
+		return false
+	},
+}
 
 // WSHandler manages JSON-RPC over WebSocket.
 type WSHandler struct {

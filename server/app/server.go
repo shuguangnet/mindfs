@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -91,6 +92,7 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 	}
 	agentPool := agent.NewPool(agentConfig)
 	agentProber := agent.NewProber(&agentConfig, agentPool, 5*time.Minute)
+	configureAgentRuntimeEnv(&agentConfig, agentPool, agentProber)
 	agentProber.Start(ctx)
 	startHostedAgentConfigLoop(ctx, relayBaseURL, agentConfig, agentPool, agentProber)
 	prefs, err := preferences.NewStore()
@@ -233,6 +235,64 @@ func hostedAgentsURL(relayBaseURL string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String(), nil
+}
+
+func configureAgentRuntimeEnv(cfg *agent.Config, pool *agent.Pool, prober *agent.Prober) {
+	if cfg == nil || pool == nil || prober == nil {
+		return
+	}
+	for _, def := range cfg.Agents {
+		if strings.TrimSpace(def.Name) != "codex" {
+			continue
+		}
+		env := cloneAgentEnv(def.Env)
+		if strings.TrimSpace(env["OPENAI_API_KEY"]) == "" {
+			if value := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); value != "" {
+				env["OPENAI_API_KEY"] = value
+			} else if value := strings.TrimSpace(loadCodexAPIKey()); value != "" {
+				env["OPENAI_API_KEY"] = value
+			}
+		}
+		if len(env) == 0 {
+			continue
+		}
+		if err := pool.SetAgentEnv(def.Name, env); err != nil {
+			log.Printf("[agents/runtime-env] pool.set.error agent=%s err=%v", def.Name, err)
+			continue
+		}
+		if err := prober.SetAgentEnv(def.Name, env); err != nil {
+			log.Printf("[agents/runtime-env] prober.set.error agent=%s err=%v", def.Name, err)
+		}
+	}
+}
+
+func cloneAgentEnv(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return map[string]string{}
+	}
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func loadCodexAPIKey() string {
+	home := strings.TrimSpace(os.Getenv("HOME"))
+	if home == "" {
+		return ""
+	}
+	payload, err := os.ReadFile(filepath.Join(home, ".codex", "auth.json"))
+	if err != nil {
+		return ""
+	}
+	var auth struct {
+		OpenAIAPIKey string `json:"OPENAI_API_KEY"`
+	}
+	if err := json.Unmarshal(payload, &auth); err != nil {
+		return ""
+	}
+	return auth.OpenAIAPIKey
 }
 
 func fetchHostedAgentConfig(ctx context.Context, endpoint string, localConfig agent.Config) (agent.Config, error) {
