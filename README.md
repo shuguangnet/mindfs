@@ -1,6 +1,6 @@
 # MindFS
 
-[English](./README.md) | [简体中文](./README.zh.md) | [Official Site](https://relay.a9gent.com/) | [Discord](https://discord.gg/YPJMqeWSn) | [Twitter](https://x.com/yandc18) | [【wechat group】](#wechat-group)
+[English](./README.md) | [简体中文](./README.zh.md) | [Official Site](https://github.com/shuguangnet/mindfs) | [Discord](https://discord.gg/YPJMqeWSn) | [Twitter](https://x.com/yandc18) | [【wechat group】](#wechat-group)
 
 > **AI Agent Remote Access Gateway · Result Visualization**
 
