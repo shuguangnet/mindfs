@@ -646,6 +646,7 @@ func (s *Service) downloadReleaseAsset(ctx context.Context, asset releaseAsset, 
 	if err := s.downloadFile(ctx, primaryURL, dst); err != nil {
 		return err
 	}
+	return nil
 }
 
 func (s *Service) fetchURL(ctx context.Context, url string, limit int64) ([]byte, error) {
