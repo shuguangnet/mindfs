@@ -202,6 +202,72 @@ html {
   box-shadow: none !important;
 }
 
+:root[data-theme="moss"] {
+  color-scheme: light;
+  --mindfs-safe-area-top: 0px;
+  --mindfs-safe-area-bottom: 0px;
+  --mindfs-ime-bottom: 0px;
+  --mindfs-viewport-height: 100dvh;
+  --mindfs-viewport-offset-top: 0px;
+  --mindfs-system-bar-bg: #E8F0E4;
+  --mindfs-topbar-bg: #E8F0E4;
+  --mindfs-launcher-bg: radial-gradient(circle at top left, rgba(74, 124, 63, 0.07), transparent 22%), radial-gradient(circle at right 18%, rgba(100, 140, 100, 0.14), transparent 24%), linear-gradient(180deg, #EDF5E9 0%, #DCE8D6 100%);
+  --mindfs-launcher-surface: rgba(245, 250, 242, 0.84);
+  --mindfs-launcher-surface-strong: rgba(245, 250, 242, 0.95);
+  --mindfs-launcher-surface-soft: rgba(245, 250, 242, 0.50);
+  --mindfs-launcher-border: rgba(74, 124, 63, 0.16);
+  --mindfs-launcher-border-strong: rgba(74, 124, 63, 0.30);
+  --mindfs-launcher-modal-border: rgba(245, 250, 242, 0.66);
+  --mindfs-launcher-input-bg: rgba(255, 255, 255, 0.72);
+  --mindfs-launcher-text: #1A2E1A;
+  --mindfs-launcher-muted: #4A6B4A;
+  --mindfs-launcher-accent: #4A7C3F;
+  --mindfs-launcher-shadow: 0 16px 44px rgba(26, 46, 26, 0.08);
+  --mindfs-launcher-error-bg: #fef2f2;
+  --mindfs-launcher-error-text: #b85c1a;
+  --bg-gradient-start: #E8F0E4;
+  --bg-gradient-end: #D4E2D0;
+  --text-primary: #1A2E1A;
+  --text-secondary: #4A6B4A;
+  --border-color: rgba(60, 90, 60, 0.10);
+  --sidebar-bg: rgba(240, 248, 235, 0.70);
+  --mobile-sidebar-bg: #F0F8EB;
+  --content-bg: rgba(248, 252, 245, 0.88);
+  --mobile-overlay-bg: #F5FAF2;
+  --panel-bg: #F5FAF2;
+  --panel-border: rgba(60, 90, 60, 0.18);
+  --panel-shadow: 0 4px 12px rgba(26, 46, 26, 0.04);
+  --panel-focus-shadow: 0 4px 24px rgba(74, 124, 63, 0.12);
+  --mindfs-code-bg: #F2F7EF;
+  --mindfs-code-text: #1A2E1A;
+  --mindfs-code-border: rgba(60, 90, 60, 0.14);
+  --menu-bg: #F5FAF2;
+  --menu-border: rgba(60, 90, 60, 0.10);
+  --menu-divider: rgba(60, 90, 60, 0.06);
+  --menu-active-bg: rgba(74, 124, 63, 0.10);
+  --accent-color: #4A7C3F;
+  --accent-hover: #3D6B34;
+  --selection-bg: rgba(74, 124, 63, 0.14);
+  --root-badge-bg: rgba(74, 124, 63, 0.16);
+  --root-badge-border: rgba(74, 124, 63, 0.26);
+  --root-badge-text: #3D6B34;
+}
+
+:root[data-theme="moss"] pre[class*="language-"],
+:root[data-theme="moss"] code[class*="language-"] {
+  box-shadow: none !important;
+  background: var(--mindfs-code-bg) !important;
+  color: var(--mindfs-code-text) !important;
+  text-shadow: none !important;
+  border: 1px solid var(--mindfs-code-border) !important;
+}
+
+:root[data-theme="moss"] pre[class*="language-"] > code[class*="language-"] {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
 * {
   box-sizing: border-box;
 }
