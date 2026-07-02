@@ -1,13 +1,17 @@
-export type AppearanceMode = "dark" | "light" | "system" | "moss";
+export type AppearanceMode = "dark" | "light" | "system" | "moss" | "mist" | "sakura" | "amber" | "graphite";
 
 export const APPEARANCE_STORAGE_KEY = "mindfs-appearance-mode";
 export const APPEARANCE_CHANGE_EVENT = "mindfs:appearance-changed";
 
-const appearanceModes = new Set<AppearanceMode>(["dark", "light", "system", "moss"]);
+const appearanceModes = new Set<AppearanceMode>(["dark", "light", "system", "moss", "mist", "sakura", "amber", "graphite"]);
 const themeColors: Record<string, string> = {
   dark: "#0f172a",
   light: "#f3f4f6",
   moss: "#E8F0E4",
+  mist: "#EAF2FA",
+  sakura: "#F8EAF0",
+  amber: "#F5EBDD",
+  graphite: "#101418",
 };
 
 export function normalizeAppearanceMode(value: unknown): AppearanceMode {
@@ -29,7 +33,10 @@ export function getEffectiveAppearanceMode(mode: AppearanceMode = getAppearanceM
   if (mode === "dark" || mode === "light") {
     return mode;
   }
-  if (mode === "moss") {
+  if (mode === "graphite") {
+    return "dark";
+  }
+  if (mode === "moss" || mode === "mist" || mode === "sakura" || mode === "amber") {
     return "light";
   }
   if (typeof window === "undefined") {
@@ -42,7 +49,7 @@ export function syncThemeColor(mode: AppearanceMode = getAppearanceMode()): void
   if (typeof document === "undefined") {
     return;
   }
-  const color = mode === "moss" ? themeColors.moss : themeColors[getEffectiveAppearanceMode(mode)];
+  const color = themeColors[mode] || themeColors[getEffectiveAppearanceMode(mode)];
   const metas = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]');
   metas.forEach((meta) => {
     meta.content = color;
