@@ -264,12 +264,12 @@ html {
     linear-gradient(
       180deg,
       transparent 0%,
-      rgba(37, 99, 235, 0.32) 12%,
-      rgba(37, 99, 235, 0.9) 50%,
-      rgba(37, 99, 235, 0.32) 88%,
+      rgba(148, 163, 184, 0.22) 12%,
+      rgba(148, 163, 184, 0.72) 50%,
+      rgba(148, 163, 184, 0.22) 88%,
       transparent 100%
     );
-  box-shadow: 0 0 10px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 10px rgba(148, 163, 184, 0.08);
   opacity: 0.72;
   transform: translateX(-50%) scaleY(0.88);
   transition:
@@ -283,7 +283,7 @@ html {
   opacity: 1;
   width: 5px;
   transform: translateX(-50%) scaleY(1.06);
-  box-shadow: 0 0 16px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 0 16px rgba(148, 163, 184, 0.22);
 }
 
 .mindfs-sidebar-resize-rail--left.is-open::before {
