@@ -193,6 +193,7 @@ func (s *TaskStore) backfillTaskNumbers() error {
 type ListTasksOptions struct {
 	TemplateID string
 	Status     string
+	TaskNumber int
 	Stage      int
 	HasStage   bool
 	After      string
@@ -238,6 +239,10 @@ func (s *TaskStore) ListTasks(ctx context.Context, opts ListTasksOptions) ([]Tas
 	if strings.TrimSpace(opts.Status) != "" {
 		where = append(where, "status = ?")
 		args = append(args, strings.TrimSpace(opts.Status))
+	}
+	if opts.TaskNumber > 0 {
+		where = append(where, "task_number = ?")
+		args = append(args, opts.TaskNumber)
 	}
 	if opts.HasStage {
 		where = append(where, "current_stage_index = ?")

@@ -134,6 +134,14 @@ func (h *HTTPHandler) handleKanbanTasksList(w http.ResponseWriter, r *http.Reque
 		}
 		opts.Limit = limit
 	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("task_number")); raw != "" {
+		taskNumber, err := strconv.Atoi(strings.TrimPrefix(raw, "#"))
+		if err != nil || taskNumber <= 0 {
+			respondError(w, http.StatusBadRequest, errInvalidRequest("invalid task_number"))
+			return
+		}
+		opts.TaskNumber = taskNumber
+	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("stage")); raw != "" {
 		stage, err := strconv.Atoi(raw)
 		if err != nil {

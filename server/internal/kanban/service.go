@@ -803,7 +803,7 @@ func (s *Service) runAgentStage(ctx context.Context, store *TaskStore, task Task
 	values := s.promptValues(ctx, store, task, tmpl, stage, run)
 	prompt := BuildAgentPrompt(stage.PromptTemplate, values, TaskControlPromptContext{
 		RootID:            task.RootID,
-		TaskID:            task.ID,
+		TaskNumber:        task.TaskNumber,
 		CurrentStageIndex: strconv.Itoa(task.CurrentStageIndex),
 		CurrentStageName:  stage.Name,
 		Enabled:           stage.AgentCanControlStage,
@@ -1185,7 +1185,7 @@ func eventReason(payload string) string {
 
 type TaskControlPromptContext struct {
 	RootID            string
-	TaskID            string
+	TaskNumber        int
 	CurrentStageIndex string
 	CurrentStageName  string
 	Enabled           bool
@@ -1197,9 +1197,10 @@ func BuildAgentPrompt(template string, values map[string]string, control TaskCon
 		out = strings.ReplaceAll(out, "{"+key+"}", value)
 	}
 	if control.Enabled {
-		out += fmt.Sprintf("\n\nTask control context:\n- root_id: %s\n- task_id: %s\n- current_stage_index: %s\n- current_stage_name: %s\n\nBefore changing the task stage, inspect the current task state.\n\nmindfs %s -task %s -status\nmindfs %s -task %s -next -reason \"...\"\nmindfs %s -task %s -prev -reason \"...\"\nmindfs %s -task %s -jump <stage_index> -reason \"...\"\nmindfs %s -task %s -fail -reason \"...\"",
-			control.RootID, control.TaskID, control.CurrentStageIndex, control.CurrentStageName,
-			control.RootID, control.TaskID, control.RootID, control.TaskID, control.RootID, control.TaskID, control.RootID, control.TaskID, control.RootID, control.TaskID)
+		taskNumber := strconv.Itoa(control.TaskNumber)
+		out += fmt.Sprintf("\n\nTask control context:\n- root_id: %s\n- task_number: %s\n- current_stage_index: %s\n- current_stage_name: %s\n\nBefore changing the task stage, inspect the current task state.\n\nmindfs %s -task %s\nmindfs %s -task %s -next\nmindfs %s -task %s -prev",
+			control.RootID, taskNumber, control.CurrentStageIndex, control.CurrentStageName,
+			control.RootID, taskNumber, control.RootID, taskNumber, control.RootID, taskNumber)
 	}
 	return out
 }

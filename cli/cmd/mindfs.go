@@ -57,6 +57,8 @@ func main() {
 		fmt.Fprintf(out, "  mindfs --stop\n")
 		fmt.Fprintf(out, "  mindfs -addr :9000 /path/to/project\n")
 		fmt.Fprintf(out, "  mindfs -remove /path/to/project\n")
+		fmt.Fprintf(out, "  mindfs <rootid> -task 12\n")
+		fmt.Fprintf(out, "  mindfs <rootid> -task 12 -next\n")
 	}
 
 	addr := flag.String("addr", "127.0.0.1:7331", "listen address")
@@ -74,17 +76,13 @@ func main() {
 	configFlag := flag.String("config", "", "mindfs startup config file; command-line flags override file values")
 	agentConfigFlag := flag.String("agent-config", "", "extra agents.json file for customizable agent(ACP-protocol) and shell")
 	remove := flag.Bool("remove", false, "remove the managed directory")
-	taskID := flag.String("task", "", "task id for task stage control")
-	taskStatus := flag.Bool("status-task", false, "show task status (or use -status with -task)")
+	taskNumber := flag.String("task", "", "task number for task stage control; defaults to status when set")
 	taskNext := flag.Bool("next", false, "advance task to next stage")
 	taskPrev := flag.Bool("prev", false, "move task to previous stage")
-	taskJump := flag.Int("jump", -1, "jump task to stage index")
-	taskFail := flag.Bool("fail", false, "mark task as failed")
-	taskReason := flag.String("reason", "", "task stage control reason")
 	tlsFlag := flag.Bool("tls", false, "enable HTTPS (auto-generates self-signed cert if -cert/-key not provided)")
 	certFlag := flag.String("cert", "", "TLS certificate file (PEM); auto-generated if empty with -tls")
 	keyFlag := flag.String("key", "", "TLS private key file (PEM); auto-generated if empty with -tls")
-	flag.Parse()
+	_ = flag.CommandLine.Parse(normalizeTaskRootFirstArgs(os.Args[1:]))
 	explicitFlags := visitedFlags(flag.CommandLine)
 	startupCfg, err := loadStartupConfig(*configFlag)
 	if err != nil {
@@ -96,13 +94,13 @@ func main() {
 		printVersion()
 		return
 	}
-	if strings.TrimSpace(*taskID) != "" {
+	if strings.TrimSpace(*taskNumber) != "" {
 		rootID := ""
 		if flag.NArg() > 0 {
 			rootID = flag.Arg(0)
 		}
-		action := taskCLIAction(*statusFlag || *taskStatus, *taskNext, *taskPrev, taskJump, *taskFail)
-		if err := handleTaskCommand(*addr, *tlsFlag, rootID, strings.TrimSpace(*taskID), action, *taskJump, *taskReason); err != nil {
+		action := taskCLIAction(*statusFlag, *taskNext, *taskPrev)
+		if err := handleTaskCommand(*addr, *tlsFlag, rootID, strings.TrimSpace(*taskNumber), action); err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(1)
 		}
@@ -799,7 +797,26 @@ func removeManagedDir(addr string, useTLS bool, path string) error {
 	return fmt.Errorf("failed to remove managed directory: %s", message)
 }
 
-func taskCLIAction(status, next, prev bool, jump *int, fail bool) string {
+func normalizeTaskRootFirstArgs(args []string) []string {
+	if len(args) < 2 || strings.HasPrefix(args[0], "-") || !containsTaskFlag(args[1:]) {
+		return args
+	}
+	out := make([]string, 0, len(args))
+	out = append(out, args[1:]...)
+	out = append(out, args[0])
+	return out
+}
+
+func containsTaskFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "-task" || arg == "--task" || strings.HasPrefix(arg, "-task=") || strings.HasPrefix(arg, "--task=") {
+			return true
+		}
+	}
+	return false
+}
+
+func taskCLIAction(status, next, prev bool) string {
 	actions := []string{}
 	if status {
 		actions = append(actions, "status")
@@ -810,58 +827,65 @@ func taskCLIAction(status, next, prev bool, jump *int, fail bool) string {
 	if prev {
 		actions = append(actions, "prev")
 	}
-	if jump != nil && *jump >= 0 {
-		actions = append(actions, "jump")
+	if len(actions) == 0 {
+		return "status"
 	}
-	if fail {
-		actions = append(actions, "fail")
-	}
-	if len(actions) != 1 {
+	if len(actions) > 1 {
 		return ""
 	}
 	return actions[0]
 }
 
-func handleTaskCommand(addr string, useTLS bool, rootID, taskID, action string, stageIndex int, reason string) error {
+type taskCLIListResponse struct {
+	Items []json.RawMessage `json:"items"`
+}
+
+type taskCLIDetailHeader struct {
+	Task struct {
+		ID         string `json:"id"`
+		TaskNumber int    `json:"task_number"`
+	} `json:"task"`
+}
+
+func handleTaskCommand(addr string, useTLS bool, rootID, taskNumberRaw, action string) error {
 	rootID = strings.TrimSpace(rootID)
-	taskID = strings.TrimSpace(taskID)
+	taskNumberRaw = strings.TrimSpace(strings.TrimPrefix(taskNumberRaw, "#"))
 	if rootID == "" {
-		return errors.New("root id argument required: mindfs <rootid> -task <task_id> -status")
+		return errors.New("root id argument required: mindfs <rootid> -task <task_number>")
 	}
-	if taskID == "" {
-		return errors.New("task id required")
+	taskNumber, err := strconv.Atoi(taskNumberRaw)
+	if err != nil || taskNumber <= 0 {
+		return errors.New("task number must be a positive integer")
 	}
 	if action == "" {
-		return errors.New("exactly one task action required: -status, -next, -prev, -jump, or -fail")
+		return errors.New("at most one task action allowed: -status, -next, or -prev")
 	}
 	token, err := app.ReadLocalCLIToken(addr)
 	if err != nil {
 		return err
 	}
-	method := http.MethodGet
-	path := "/api/tasks/" + url.PathEscape(taskID) + "?root=" + url.QueryEscape(rootID)
-	var body io.Reader
-	if action != "status" {
-		method = http.MethodPost
-		path = "/api/tasks/" + url.PathEscape(taskID) + "/" + action
-		payload := map[string]any{"root_id": rootID, "reason": reason}
-		if action == "jump" {
-			payload["stage_index"] = stageIndex
-		}
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(data)
+	taskID, detail, err := fetchTaskDetailByNumber(addr, useTLS, token, rootID, taskNumber)
+	if err != nil {
+		return err
 	}
-	req, err := http.NewRequest(method, addrToURL(addr, path, useTLS), body)
+	if action == "status" {
+		_, err = os.Stdout.Write(detail)
+		if err == nil {
+			fmt.Fprintln(os.Stdout)
+		}
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{"root_id": rootID})
+	if err != nil {
+		return err
+	}
+	path := "/api/tasks/" + url.PathEscape(taskID) + "/" + action
+	req, err := http.NewRequest(http.MethodPost, addrToURL(addr, path, useTLS), bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("X-MindFS-Local-CLI-Token", token)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	req.Header.Set("Content-Type", "application/json")
 	client := newHTTPClient(useTLS, 10*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -876,6 +900,42 @@ func handleTaskCommand(addr string, useTLS bool, rootID, taskID, action string, 
 		fmt.Fprintln(os.Stdout)
 	}
 	return err
+}
+
+func fetchTaskDetailByNumber(addr string, useTLS bool, token, rootID string, taskNumber int) (string, json.RawMessage, error) {
+	query := url.Values{}
+	query.Set("root", rootID)
+	query.Set("task_number", strconv.Itoa(taskNumber))
+	query.Set("limit", "1")
+	req, err := http.NewRequest(http.MethodGet, addrToURL(addr, "/api/tasks?"+query.Encode(), useTLS), nil)
+	if err != nil {
+		return "", nil, err
+	}
+	req.Header.Set("X-MindFS-Local-CLI-Token", token)
+	client := newHTTPClient(useTLS, 10*time.Second)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", nil, fmt.Errorf("task lookup failed: %s", httpErrorMessage(resp))
+	}
+	var list taskCLIListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return "", nil, err
+	}
+	if len(list.Items) == 0 {
+		return "", nil, fmt.Errorf("task #%d not found in root %s", taskNumber, rootID)
+	}
+	var header taskCLIDetailHeader
+	if err := json.Unmarshal(list.Items[0], &header); err != nil {
+		return "", nil, err
+	}
+	if strings.TrimSpace(header.Task.ID) == "" || header.Task.TaskNumber != taskNumber {
+		return "", nil, fmt.Errorf("invalid task lookup response for #%d", taskNumber)
+	}
+	return header.Task.ID, list.Items[0], nil
 }
 
 func httpErrorMessage(resp *http.Response) string {

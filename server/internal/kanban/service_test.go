@@ -717,6 +717,13 @@ func TestTaskNumbersIncrement(t *testing.T) {
 	if first.Task.TaskNumber != 1 || second.Task.TaskNumber != 2 {
 		t.Fatalf("task numbers = %d/%d, want 1/2", first.Task.TaskNumber, second.Task.TaskNumber)
 	}
+	numbered, err := svc.ListTaskDetails(ctx, root.ID, ListTasksOptions{TaskNumber: 2})
+	if err != nil {
+		t.Fatalf("ListTaskDetails by task number: %v", err)
+	}
+	if len(numbered) != 1 || numbered[0].Task.ID != second.Task.ID {
+		t.Fatalf("task number lookup = %#v, want second task", numbered)
+	}
 }
 
 func TestBuildAgentPromptAppendsOnlyConfiguredContext(t *testing.T) {
@@ -739,12 +746,12 @@ func TestBuildAgentPromptAppendsOnlyConfiguredContext(t *testing.T) {
 	}
 	withControl := BuildAgentPrompt("Do: {previous_input}", values, TaskControlPromptContext{
 		RootID:            "root",
-		TaskID:            "task",
+		TaskNumber:        12,
 		CurrentStageIndex: "1",
 		CurrentStageName:  "Agent",
 		Enabled:           true,
 	})
-	if !containsAll(withControl, []string{"Task control context:", "mindfs root -task task -status"}) {
+	if !containsAll(withControl, []string{"Task control context:", "task_number: 12", "mindfs root -task 12", "mindfs root -task 12 -next"}) {
 		t.Fatalf("control prompt missing context: %q", withControl)
 	}
 }
