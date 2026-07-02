@@ -2697,176 +2697,196 @@ if (useInnerScrollContainer && !container) {
           </div>
           </div>
         </div>
-        {interactionMode !== "drawer" && userMessageSummaries.length > 0 ? (
+        {interactionMode !== "drawer" && (userMessageSummaries.length > 0 || showJumpToLatest) ? (
           <div
-            ref={userSummaryRootRef}
-            onMouseEnter={() => setUserSummaryHoverOpen(true)}
-            onMouseLeave={() => setUserSummaryHoverOpen(false)}
-            style={{
-              position: "absolute",
-              right: "24px",
-              bottom: showJumpToLatest ? "68px" : "28px",
-              zIndex: 4,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "flex-end",
-              gap: "8px",
-            }}
-          >
-            {userSummaryOpen ? (
-              <div
-                role="dialog"
-                aria-label="用户消息摘要"
-                style={{
-                  width: "min(320px, calc(100vw - 72px))",
-                  maxHeight: "260px",
-                  overflowY: "auto",
-                  padding: "6px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--menu-border)",
-                  background: "var(--menu-bg)",
-                  boxShadow: "0 16px 34px rgba(15, 23, 42, 0.18)",
-                  color: "var(--text-primary)",
-                  boxSizing: "border-box",
-                }}
-              >
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                  {userMessageSummaries.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => scrollToUserMessageSummary(item.index)}
-                      style={{
-                        width: "100%",
-                        border: "none",
-                        background: "transparent",
-                        display: "block",
-                        padding: "6px 8px",
-                        borderRadius: "6px",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        color: "var(--text-primary)",
-                      }}
-                      onMouseEnter={(event) => {
-                        event.currentTarget.style.background = "var(--menu-active-bg)";
-                      }}
-                      onMouseLeave={(event) => {
-                        event.currentTarget.style.background = "transparent";
-                      }}
-                    >
-                      <span
-                        title={item.summary}
-                        style={{
-                          display: "block",
-                          minWidth: 0,
-                          fontSize: "12px",
-                          lineHeight: "18px",
-                          color: "var(--text-primary)",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {item.summary}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                setUserSummaryPinnedOpen((open) => {
-                  const nextOpen = !open;
-                  if (!nextOpen) {
-                    setUserSummaryHoverOpen(false);
-                  }
-                  return nextOpen;
-                });
-              }}
-              aria-label={userSummaryOpen ? "隐藏用户消息摘要" : "显示用户消息摘要"}
-              title={userSummaryOpen ? "隐藏用户消息摘要" : "显示用户消息摘要"}
-              style={{
-                position: "relative",
-                width: "34px",
-                height: "34px",
-                border: "none",
-                borderRadius: "8px",
-                background: userSummaryOpen ? "var(--accent-color)" : "var(--menu-bg)",
-                color: userSummaryOpen ? "#ffffff" : "var(--text-secondary)",
-                boxShadow: "0 10px 24px rgba(15, 23, 42, 0.16)",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                fontSize: "18px",
-              }}
-            >
-              <UserMessageListIcon />
-              <span
-                aria-hidden="true"
-                style={{
-                  position: "absolute",
-                  top: "-7px",
-                  right: "-7px",
-                  minWidth: "18px",
-                  height: "18px",
-                  padding: "0 5px",
-                  borderRadius: "999px",
-                  background: "#2563eb",
-                  color: "#ffffff",
-                  border: "2px solid var(--menu-bg)",
-                  fontSize: "10px",
-                  fontWeight: 800,
-                  lineHeight: "14px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxSizing: "border-box",
-                  fontVariantNumeric: "tabular-nums",
-                }}
-              >
-                {userMessageSummaries.length > 99 ? "99+" : userMessageSummaries.length}
-              </span>
-            </button>
-          </div>
-        ) : null}
-        {showJumpToLatest ? (
-          <button
-            type="button"
-            onClick={() => {
-              cancelTargetSeqScroll();
-              if (targetSeq) {
-                targetSeqScrollKeyRef.current = `${sessionKey || ""}:${targetSeq}:${targetSeqRequestKey}`;
-              }
-              shouldStickToBottomRef.current = true;
-              setShowJumpToLatest(false);
-              stickSessionToBottom("smooth");
-            }}
-            aria-label="回到底部最新消息"
-            title="回到底部最新消息"
             style={{
               position: "absolute",
               right: "16px",
               bottom: "16px",
-              zIndex: 3,
-              display: "inline-flex",
+              zIndex: 4,
+              display: "flex",
               alignItems: "center",
               gap: "6px",
-              border: "1px solid rgba(37,99,235,0.35)",
-              background: "#2563eb",
-              color: "#ffffff",
-              borderRadius: "999px",
-              padding: "8px 12px",
-              boxShadow: "0 8px 24px rgba(15, 23, 42, 0.14)",
-              cursor: "pointer",
-              fontSize: "12px",
             }}
           >
-            <ChevronDownSmallIcon />
-            <span>回到底部</span>
-          </button>
+            {showJumpToLatest ? (
+              <button
+                type="button"
+                onClick={() => {
+                  cancelTargetSeqScroll();
+                  if (targetSeq) {
+                    targetSeqScrollKeyRef.current = `${sessionKey || ""}:${targetSeq}:${targetSeqRequestKey}`;
+                  }
+                  shouldStickToBottomRef.current = true;
+                  setShowJumpToLatest(false);
+                  stickSessionToBottom("smooth");
+                }}
+                aria-label="回到底部最新消息"
+                title="回到底部最新消息"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  height: "34px",
+                  border: "1px solid rgba(37,99,235,0.35)",
+                  background: "#2563eb",
+                  color: "#ffffff",
+                  borderRadius: "999px",
+                  padding: "0 12px",
+                  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.14)",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <span>回到底部</span>
+              </button>
+            ) : null}
+            {userMessageSummaries.length > 0 ? (
+              <div
+                ref={userSummaryRootRef}
+                onMouseEnter={() => setUserSummaryHoverOpen(true)}
+                onMouseLeave={() => setUserSummaryHoverOpen(false)}
+                style={{
+                  position: "relative",
+                  display: "inline-flex",
+                }}
+              >
+                {userSummaryOpen ? (
+                  <>
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        position: "absolute",
+                        right: 0,
+                        bottom: "100%",
+                        width: "min(320px, calc(100vw - 72px))",
+                        height: "8px",
+                      }}
+                    />
+                    <div
+                      role="dialog"
+                      aria-label="用户消息摘要"
+                      style={{
+                        position: "absolute",
+                        right: 0,
+                        bottom: "calc(100% + 8px)",
+                        width: "min(320px, calc(100vw - 72px))",
+                        maxHeight: "260px",
+                        overflowY: "auto",
+                        padding: "6px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--menu-border)",
+                        background: "var(--menu-bg)",
+                        boxShadow: "0 16px 34px rgba(15, 23, 42, 0.18)",
+                        color: "var(--text-primary)",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        {userMessageSummaries.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => scrollToUserMessageSummary(item.index)}
+                            style={{
+                              width: "100%",
+                              border: "none",
+                              background: "transparent",
+                              display: "block",
+                              padding: "6px 8px",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              textAlign: "left",
+                              color: "var(--text-primary)",
+                            }}
+                            onMouseEnter={(event) => {
+                              event.currentTarget.style.background = "var(--menu-active-bg)";
+                            }}
+                            onMouseLeave={(event) => {
+                              event.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            <span
+                              title={item.summary}
+                              style={{
+                                display: "block",
+                                minWidth: 0,
+                                fontSize: "12px",
+                                lineHeight: "18px",
+                                color: "var(--text-primary)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {item.summary}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUserSummaryPinnedOpen((open) => {
+                      const nextOpen = !open;
+                      if (!nextOpen) {
+                        setUserSummaryHoverOpen(false);
+                      }
+                      return nextOpen;
+                    });
+                  }}
+                  aria-label={userSummaryOpen ? "隐藏用户消息摘要" : "显示用户消息摘要"}
+                  title={userSummaryOpen ? "隐藏用户消息摘要" : "显示用户消息摘要"}
+                  style={{
+                    position: "relative",
+                    width: "34px",
+                    height: "34px",
+                    border: "none",
+                    borderRadius: "8px",
+                    background: userSummaryOpen ? "var(--accent-color)" : "var(--menu-bg)",
+                    color: userSummaryOpen ? "#ffffff" : "var(--text-secondary)",
+                    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.16)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    fontSize: "18px",
+                  }}
+                >
+                  <UserMessageListIcon />
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      top: "-7px",
+                      right: "-7px",
+                      minWidth: "18px",
+                      height: "18px",
+                      padding: "0 5px",
+                      borderRadius: "999px",
+                      background: "#2563eb",
+                      color: "#ffffff",
+                      border: "2px solid var(--menu-bg)",
+                      fontSize: "10px",
+                      fontWeight: 800,
+                      lineHeight: "14px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      boxSizing: "border-box",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {userMessageSummaries.length > 99 ? "99+" : userMessageSummaries.length}
+                  </span>
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
       <style>{`
@@ -2884,24 +2904,6 @@ if (useInnerScrollContainer && !container) {
         }
       `}</style>
     </div>
-  );
-}
-
-function ChevronDownSmallIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
   );
 }
 
