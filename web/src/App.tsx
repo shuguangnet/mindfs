@@ -1088,7 +1088,7 @@ export function App({ onGoHome }: AppProps) {
   const cancelRequestedBySessionRef = useRef<Record<string, boolean>>({});
   const sessionCacheRef = useRef<Record<string, Session>>({});
   const loadedSessionRef = useRef<Record<string, boolean>>({});
-  const loadingSessionRef = useRef<Record<string, Promise<SyncSessionResult>>>({});
+  const loadingSessionRef = useRef<Partial<Record<string, Promise<SyncSessionResult>>>>({});
   const staleSessionKeysRef = useRef<Set<string>>(new Set());
   const invalidTreeCacheKeysRef = useRef<Set<string>>(new Set());
   const boundSessionByRootRef = useRef<Record<string, string | null>>({});

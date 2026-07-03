@@ -19,6 +19,7 @@ import { renderToolIcon } from "./stream/ToolCallCard";
 type SessionInfo = {
   key: string;
   session_key?: string;
+  root_id?: string;
   name: string;
   type: "chat" | "plugin" | "command";
   agent: string;

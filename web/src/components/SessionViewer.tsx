@@ -52,6 +52,7 @@ type SessionViewerProps = {
   session: SessionItem | null;
   loading?: boolean;
   slashCommandResult?: {
+    sessionKey: string;
     command: string;
     content: string;
     status: "running" | "complete" | "failed";

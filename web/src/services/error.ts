@@ -10,12 +10,15 @@ export type ErrorCode =
   | "session.import_failed"
   | "session.rename_failed"
   | "session.sync_failed"
+  | "session.slash_command_failed"
   | "app.init_failed"
   // Root/project errors
   | "root.create_failed"
   | "root.delete_failed"
   | "root.rename_failed"
   | "git.checkout_failed"
+  | "git.worktree_switch_failed"
+  | "git.worktree_remove_failed"
   // Agent errors
   | "agent.unavailable"
   | "agent.timeout"
@@ -148,6 +151,11 @@ class ErrorService {
         severity: "error",
         recoverable: true,
       },
+      "session.slash_command_failed": {
+        message: "斜杠命令执行失败",
+        severity: "error",
+        recoverable: true,
+      },
       "app.init_failed": {
         message: "初始化失败",
         severity: "error",
@@ -170,6 +178,16 @@ class ErrorService {
       },
       "git.checkout_failed": {
         message: "切换分支失败",
+        severity: "error",
+        recoverable: true,
+      },
+      "git.worktree_switch_failed": {
+        message: "切换 worktree 失败",
+        severity: "error",
+        recoverable: true,
+      },
+      "git.worktree_remove_failed": {
+        message: "移除 worktree 失败",
         severity: "error",
         recoverable: true,
       },

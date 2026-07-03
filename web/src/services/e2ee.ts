@@ -331,7 +331,9 @@ class E2EEService {
   async protectedJSON<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
     const response = await this.protectedFetch(input, init);
     if (!response.ok) {
-      const payload = await this.parseProtectedJSONResponse<{ error?: string; message?: string }>(response.clone()).catch(() => ({}));
+      const payload: { error?: string; message?: string } = await this
+        .parseProtectedJSONResponse<{ error?: string; message?: string }>(response.clone())
+        .catch(() => ({}));
       throw new Error(String(payload.message || payload.error || `request failed: ${response.status}`));
     }
     return this.parseProtectedJSONResponse<T>(response);
@@ -502,7 +504,7 @@ async function buildHmacProof(secret: string, label: string, parts: string[]): P
       ["sign"],
   );
   const digest = await sha256Bytes([label, ...parts].join("\x1f"));
-  const signature = await crypto.subtle.sign("HMAC", secretKey, digest);
+  const signature = await crypto.subtle.sign("HMAC", secretKey, toArrayBuffer(digest));
   return encodeBase64(new Uint8Array(signature));
 }
 
@@ -550,7 +552,7 @@ async function buildRequestProof(key: Uint8Array, method: string, path: string, 
     ["sign"],
   );
   const digest = await sha256Bytes(["mindfs-request-proof", method, path, ts, clientId].join("\x1f"));
-  const signature = await crypto.subtle.sign("HMAC", hmacKey, digest);
+  const signature = await crypto.subtle.sign("HMAC", hmacKey, toArrayBuffer(digest));
   return encodeBase64(new Uint8Array(signature));
 }
 
@@ -560,7 +562,7 @@ async function hkdfBytes(secret: Uint8Array, salt: Uint8Array | ArrayBuffer | nu
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: salt ? toArrayBuffer(toUint8Array(salt)) : new Uint8Array(),
+      salt: salt ? toArrayBuffer(toUint8Array(salt)) : new ArrayBuffer(0),
       info: toArrayBuffer(toUint8Array(info)),
     },
     baseKey,
