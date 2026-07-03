@@ -86,6 +86,8 @@ HARMONY_HAP ?= $(HARMONY_DIR)/entry/build/default/outputs/default/entry-default-
 HARMONY_DIST_HAP ?= $(DIST_DIR)/mindfs_$(VERSION)_harmony_$(HARMONY_BUILD_MODE).hap
 RELEASE_ANDROID ?= 0
 RELEASE_UPLOAD_JOBS ?= 4
+RELEASE_REPO ?= shuguangnet/mindfs
+RELEASE_REMOTE ?= fork
 ANDROID_JAVA_HOME ?= $(shell if command -v /usr/libexec/java_home >/dev/null 2>&1; then /usr/libexec/java_home -v 21 2>/dev/null; fi)
 ANDROID_GRADLE_ENV :=
 ifneq ($(strip $(ANDROID_JAVA_HOME)),)
@@ -144,9 +146,9 @@ dist-clean:
 tag:
 	@test -n "$(TAG)" || (echo "Usage: make tag TAG=v1.2.3" >&2; exit 1)
 	@echo "Tagging $(TAG)"
-	git push origin main
+	git push $(RELEASE_REMOTE) main
 	git tag $(TAG)
-	git push origin $(TAG)
+	git push $(RELEASE_REMOTE) $(TAG)
 
 # Usage: make publish-release-notes TAG=v1.2.3
 publish-release-notes:
@@ -159,14 +161,14 @@ publish-release-notes:
 		echo "No release notes changes to commit."; \
 	else \
 		git commit -m "update release notes"; \
-		git push origin main; \
+		git push $(RELEASE_REMOTE) main; \
 	fi
 
 # Usage: make verify-release TAG=v1.2.3
 verify-release:
 	@test -n "$(TAG)" || (echo "Usage: make verify-release TAG=v1.2.3" >&2; exit 1)
 	@test -n "$(MINDFS_RELEASE_PUBLIC_KEY)" || (echo "Error: MINDFS_RELEASE_PUBLIC_KEY is required to verify release manifests." >&2; exit 1)
-	@$(GO) run scripts/sign-release-manifest.go -verify -version "$(TAG)" -dist "$(DIST_DIR)" -repo "a9gent/mindfs" -public-key "$(MINDFS_RELEASE_PUBLIC_KEY)"
+	@$(GO) run scripts/sign-release-manifest.go -verify -version "$(TAG)" -dist "$(DIST_DIR)" -repo "$(RELEASE_REPO)" -public-key "$(MINDFS_RELEASE_PUBLIC_KEY)"
 
 # Usage: make release TAG=v1.2.3 [RELEASE_ANDROID=1]
 # Builds desktop/server platforms and creates a GitHub release.
@@ -190,7 +192,7 @@ release:
 	else \
 		echo "Skipping Android release. Use RELEASE_ANDROID=1 to include the APK."; \
 	fi
-	@$(GO) run scripts/sign-release-manifest.go -version "$(TAG)" -dist "$(DIST_DIR)" -repo "a9gent/mindfs"
+	@$(GO) run scripts/sign-release-manifest.go -version "$(TAG)" -dist "$(DIST_DIR)" -repo "$(RELEASE_REPO)"
 	$(MAKE) verify-release TAG="$(TAG)" MINDFS_RELEASE_PUBLIC_KEY="$(MINDFS_RELEASE_PUBLIC_KEY)"
 	@echo "Creating draft GitHub release $(TAG)"
 	gh release create $(TAG) \
