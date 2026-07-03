@@ -53,9 +53,9 @@ func TestFetchPullPushAndFirstPush(t *testing.T) {
 	work, bare := setupRemoteRepo(t)
 	other := cloneRepo(t, bare)
 	writeFile(t, filepath.Join(other, "remote.txt"), "remote\n")
-	runTestGit(t, other, "add", "remote.txt")
-	runTestGit(t, other, "commit", "-m", "remote update")
-	runTestGit(t, other, "push")
+	runRemoteTestGit(t, other, "add", "remote.txt")
+	runRemoteTestGit(t, other, "commit", "-m", "remote update")
+	runRemoteTestGit(t, other, "push")
 
 	fetch, err := FetchRemote(ctx, work, "origin")
 	if err != nil {
@@ -74,8 +74,8 @@ func TestFetchPullPushAndFirstPush(t *testing.T) {
 	}
 
 	writeFile(t, filepath.Join(work, "local.txt"), "local\n")
-	runTestGit(t, work, "add", "local.txt")
-	runTestGit(t, work, "commit", "-m", "local update")
+	runRemoteTestGit(t, work, "add", "local.txt")
+	runRemoteTestGit(t, work, "commit", "-m", "local update")
 	push, err := PushRemote(ctx, work)
 	if err != nil {
 		t.Fatalf("PushRemote: %v", err)
@@ -84,10 +84,10 @@ func TestFetchPullPushAndFirstPush(t *testing.T) {
 		t.Fatalf("push result = %+v", push)
 	}
 
-	runTestGit(t, work, "checkout", "-b", "feature/first-push")
+	runRemoteTestGit(t, work, "checkout", "-b", "feature/first-push")
 	writeFile(t, filepath.Join(work, "feature.txt"), "feature\n")
-	runTestGit(t, work, "add", "feature.txt")
-	runTestGit(t, work, "commit", "-m", "feature")
+	runRemoteTestGit(t, work, "add", "feature.txt")
+	runRemoteTestGit(t, work, "commit", "-m", "feature")
 	first, err := PushRemoteFirst(ctx, work, "origin", "feature/first-push")
 	if err != nil {
 		t.Fatalf("PushRemoteFirst: %v", err)
@@ -142,7 +142,7 @@ func TestCommitAndPushValidationAndSuccess(t *testing.T) {
 func TestCommitAndPushBlocksNoUpstreamBeforeCommit(t *testing.T) {
 	ctx := context.Background()
 	work, _ := setupRemoteRepo(t)
-	runTestGit(t, work, "checkout", "-b", "local-only")
+	runRemoteTestGit(t, work, "checkout", "-b", "local-only")
 	writeFile(t, filepath.Join(work, "local-only.txt"), "local\n")
 
 	result, err := CommitAndPush(ctx, work, CommitAndPushInput{Message: "local only", All: true, IncludeUntracked: true})
@@ -152,7 +152,7 @@ func TestCommitAndPushBlocksNoUpstreamBeforeCommit(t *testing.T) {
 	if result.Result != "blocked_no_upstream" {
 		t.Fatalf("no upstream result = %+v", result)
 	}
-	if got := strings.TrimSpace(runTestGit(t, work, "status", "--porcelain")); got == "" {
+	if got := strings.TrimSpace(runRemoteTestGit(t, work, "status", "--porcelain")); got == "" {
 		t.Fatalf("expected changes to remain uncommitted")
 	}
 }
@@ -162,9 +162,9 @@ func TestPullBlocksDirtyAndNonFastForward(t *testing.T) {
 	work, bare := setupRemoteRepo(t)
 	other := cloneRepo(t, bare)
 	writeFile(t, filepath.Join(other, "remote.txt"), "remote\n")
-	runTestGit(t, other, "add", "remote.txt")
-	runTestGit(t, other, "commit", "-m", "remote update")
-	runTestGit(t, other, "push")
+	runRemoteTestGit(t, other, "add", "remote.txt")
+	runRemoteTestGit(t, other, "commit", "-m", "remote update")
+	runRemoteTestGit(t, other, "push")
 
 	writeFile(t, filepath.Join(work, "dirty.txt"), "dirty\n")
 	dirty, err := PullRemote(ctx, work)
@@ -174,12 +174,12 @@ func TestPullBlocksDirtyAndNonFastForward(t *testing.T) {
 	if dirty.Result != "blocked_dirty" {
 		t.Fatalf("dirty pull result = %+v", dirty)
 	}
-	runTestGit(t, work, "reset", "--hard")
-	runTestGit(t, work, "clean", "-fd")
+	runRemoteTestGit(t, work, "reset", "--hard")
+	runRemoteTestGit(t, work, "clean", "-fd")
 
 	writeFile(t, filepath.Join(work, "local-diverge.txt"), "local\n")
-	runTestGit(t, work, "add", "local-diverge.txt")
-	runTestGit(t, work, "commit", "-m", "local diverge")
+	runRemoteTestGit(t, work, "add", "local-diverge.txt")
+	runRemoteTestGit(t, work, "commit", "-m", "local diverge")
 	diverged, err := PullRemote(ctx, work)
 	if err != nil {
 		t.Fatalf("PullRemote diverged: %v", err)
@@ -194,13 +194,13 @@ func TestPushRejectedAndCommitPushPartialFailure(t *testing.T) {
 	work, bare := setupRemoteRepo(t)
 	other := cloneRepo(t, bare)
 	writeFile(t, filepath.Join(other, "remote-only.txt"), "remote\n")
-	runTestGit(t, other, "add", "remote-only.txt")
-	runTestGit(t, other, "commit", "-m", "remote only")
-	runTestGit(t, other, "push")
+	runRemoteTestGit(t, other, "add", "remote-only.txt")
+	runRemoteTestGit(t, other, "commit", "-m", "remote only")
+	runRemoteTestGit(t, other, "push")
 
 	writeFile(t, filepath.Join(work, "local-only.txt"), "local\n")
-	runTestGit(t, work, "add", "local-only.txt")
-	runTestGit(t, work, "commit", "-m", "local only")
+	runRemoteTestGit(t, work, "add", "local-only.txt")
+	runRemoteTestGit(t, work, "commit", "-m", "local only")
 	rejected, err := PushRemote(ctx, work)
 	if err != nil {
 		t.Fatalf("PushRemote rejected: %v", err)
@@ -250,14 +250,14 @@ func setupRemoteRepo(t *testing.T) (work string, bare string) {
 	work = filepath.Join(root, "work")
 	runTestGitDir(t, "", "init", "--bare", bare)
 	runTestGitDir(t, "", "init", work)
-	runTestGit(t, work, "config", "user.name", "MindFS Test")
-	runTestGit(t, work, "config", "user.email", "mindfs@example.invalid")
+	runRemoteTestGit(t, work, "config", "user.name", "MindFS Test")
+	runRemoteTestGit(t, work, "config", "user.email", "mindfs@example.invalid")
 	writeFile(t, filepath.Join(work, "README.md"), "initial\n")
-	runTestGit(t, work, "add", "README.md")
-	runTestGit(t, work, "commit", "-m", "initial")
-	runTestGit(t, work, "branch", "-M", "main")
-	runTestGit(t, work, "remote", "add", "origin", bare)
-	runTestGit(t, work, "push", "-u", "origin", "main")
+	runRemoteTestGit(t, work, "add", "README.md")
+	runRemoteTestGit(t, work, "commit", "-m", "initial")
+	runRemoteTestGit(t, work, "branch", "-M", "main")
+	runRemoteTestGit(t, work, "remote", "add", "origin", bare)
+	runRemoteTestGit(t, work, "push", "-u", "origin", "main")
 	runTestGitDir(t, "", "--git-dir", bare, "symbolic-ref", "HEAD", "refs/heads/main")
 	return work, bare
 }
@@ -266,8 +266,8 @@ func cloneRepo(t *testing.T, bare string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "clone")
 	runTestGitDir(t, "", "clone", bare, path)
-	runTestGit(t, path, "config", "user.name", "MindFS Test")
-	runTestGit(t, path, "config", "user.email", "mindfs@example.invalid")
+	runRemoteTestGit(t, path, "config", "user.name", "MindFS Test")
+	runRemoteTestGit(t, path, "config", "user.email", "mindfs@example.invalid")
 	return path
 }
 
@@ -278,7 +278,7 @@ func writeFile(t *testing.T, path string, content string) {
 	}
 }
 
-func runTestGit(t *testing.T, dir string, args ...string) string {
+func runRemoteTestGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	return runTestGitDir(t, dir, args...)
 }

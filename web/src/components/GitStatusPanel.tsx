@@ -1,15 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   fetchGitBranches,
-  fetchGitRemoteSync,
-  runGitCommitAndPush,
-  runGitFetch,
-  runGitPull,
-  runGitPush,
-  runGitPushUpstream,
   type GitBranchItem,
-  type GitRemoteOperationPayload,
-  type GitRemoteSyncPayload,
   type GitStatusItem,
   type GitStatusPayload,
 } from "../services/git";
@@ -20,9 +12,19 @@ type GitStatusPanelProps = {
   loading?: boolean;
   isFiltered?: boolean;
   expanded?: boolean;
+  compact?: boolean;
+  showHeader?: boolean;
+  showHeaderActions?: boolean;
+  showExpandedToggle?: boolean;
+  enableBranchMenu?: boolean;
   onSelectItem?: (item: GitStatusItem) => void;
+  onOpenItem?: (item: GitStatusItem) => void;
+  onDiscardItem?: (item: GitStatusItem) => void | Promise<void>;
+  onStageItem?: (item: GitStatusItem) => void | Promise<void>;
+  onPull?: () => void | Promise<void>;
+  onPush?: () => void | Promise<void>;
+  onCommit?: (message: string) => void | Promise<void>;
   onSwitchBranch?: (branch: string) => void | Promise<void>;
-  onRepositoryChanged?: () => void | Promise<void>;
   onExpandedChange?: (expanded: boolean) => void;
 };
 
@@ -57,96 +59,166 @@ function renderStatusLabel(status: string): string {
   return status;
 }
 
-function operationLabel(result?: string): string {
-  switch (result) {
-    case "fetched":
-      return "已获取远端更新";
-    case "fast_forwarded":
-      return "已拉取";
-    case "up_to_date":
-      return "已是最新";
-    case "pushed":
-      return "已推送";
-    case "committed_and_pushed":
-      return "已提交并推送";
-    case "committed_push_failed":
-      return "已提交，推送失败";
-    case "blocked_dirty":
-      return "有未提交变更，无法拉取";
-    case "blocked_no_upstream":
-      return "未设置 upstream";
-    case "blocked_detached_head":
-      return "当前不是分支";
-    case "blocked_non_ff":
-    case "rejected_non_ff":
-      return "远端有新提交";
-    case "blocked_empty_message":
-      return "提交信息不能为空";
-    case "blocked_no_changes":
-      return "没有可提交变更";
-    case "blocked_invalid_paths":
-      return "提交范围无效";
-    case "failed_auth":
-      return "认证失败";
-    case "failed_network":
-      return "网络失败";
-    case "failed_remote":
-      return "远端不可用";
-    case "failed":
-      return "操作失败";
-    default:
-      return "";
-  }
+function compactPath(path: string): string {
+  const normalized = String(path || "").replace(/\\/g, "/").replace(/\/+$/g, "");
+  return normalized.split("/").filter(Boolean).pop() || normalized || path;
 }
 
-function shortHash(hash?: string): string {
-  return hash ? hash.slice(0, 8) : "";
+function GitPullIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M0 0h16v16H0z" fill="none" />
+      <g fill="currentColor">
+        <path d="M4.85 6.15a.48.48 0 0 0-.7 0a.48.48 0 0 0 0 .7l3 3a.48.48 0 0 0 .7 0l3-3a.48.48 0 0 0 0-.7a.48.48 0 0 0-.7 0L8 8.29V1.5c0-.28-.22-.5-.5-.5s-.5.22-.5.5v6.79z" />
+        <path fillRule="evenodd" d="M9.95 13h2.55c.28 0 .5.22.5.5s-.22.5-.5.5H9.95a2.5 2.5 0 0 1-4.9 0H2.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5h2.55a2.5 2.5 0 0 1 4.9 0m-3.86 1a1.495 1.495 0 0 0 2.82 0c.06-.16.09-.32.09-.5s-.03-.34-.09-.5a1.495 1.495 0 0 0-2.82 0c-.06.16-.09.32-.09.5s.03.34.09.5" clipRule="evenodd" />
+      </g>
+    </svg>
+  );
 }
 
-function IconButton({ title, disabled, busy, onClick, children }: { title: string; disabled?: boolean; busy?: boolean; onClick: () => void; children: React.ReactNode }) {
+function GitPushIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M0 0h16v16H0z" fill="none" />
+      <g fill="currentColor">
+        <path d="M4.85 4.85a.48.48 0 0 1-.7 0a.48.48 0 0 1 0-.7l3-3a.48.48 0 0 1 .7 0l3 3a.48.48 0 0 1 0 .7a.48.48 0 0 1-.7 0L8 2.71V9.5c0 .28-.22.5-.5.5S7 9.78 7 9.5V2.71z" />
+        <path fillRule="evenodd" d="M9.95 13h2.55c.28 0 .5.22.5.5s-.22.5-.5.5H9.95a2.5 2.5 0 0 1-4.9 0H2.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5h2.55a2.5 2.5 0 0 1 4.9 0m-3.86 1a1.495 1.495 0 0 0 2.82 0c.06-.16.09-.32.09-.5s-.03-.34-.09-.5a1.495 1.495 0 0 0-2.82 0c-.06.16-.09.32-.09.5s.03.34.09.5" clipRule="evenodd" />
+      </g>
+    </svg>
+  );
+}
+
+function GitCommitIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M0 0h24v24H0z" fill="none" />
+      <path fill="currentColor" d="M22 11h-6.141a3.981 3.981 0 0 0-7.718 0H2v2h6.141a3.981 3.981 0 0 0 7.718 0H22Z" />
+    </svg>
+  );
+}
+
+function CommitSubmitIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M0 0h24v24H0z" fill="none" />
+      <g fill="none" fillRule="evenodd">
+        <path d="m12.593 23.258l-.011.002l-.071.035l-.02.004l-.014-.004l-.071-.035q-.016-.005-.024.005l-.004.01l-.017.428l.005.02l.01.013l.104.074l.015.004l.012-.004l.104-.074l.012-.016l.004-.017l-.017-.427q-.004-.016-.017-.018m.265-.113l-.013.002l-.185.093l-.01.01l-.003.011l.018.43l.005.012l.008.007l.201.093q.019.005.029-.008l.004-.014l-.034-.614q-.005-.018-.02-.022m-.715.002a.02.02 0 0 0-.027.006l-.006.014l-.034.614q.001.018.017.024l.015-.002l.201-.093l.01-.008l.004-.011l.017-.43l-.003-.012l-.01-.01z" />
+        <path fill="currentColor" d="M21.546 5.111a1.5 1.5 0 0 1 0 2.121L10.303 18.475a1.6 1.6 0 0 1-2.263 0L2.454 12.89a1.5 1.5 0 1 1 2.121-2.121l4.596 4.596L19.424 5.111a1.5 1.5 0 0 1 2.122 0" />
+      </g>
+    </svg>
+  );
+}
+
+function OpenFileIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M0 0h24v24H0z" fill="none" />
+      <path fill="currentColor" d="M6.616 21q-.691 0-1.153-.462T5 19.385V4.615q0-.69.463-1.152T6.616 3H14.5L19 7.5v7h-1V8h-4V4H6.616q-.231 0-.424.192T6 4.615v14.77q0 .23.192.423t.423.192H15.5v1zm15.334.663l-3.45-3.45v2.956h-1V16.5h4.67v1h-2.982l3.45 3.45zM6 20V4z" />
+    </svg>
+  );
+}
+
+function UndoIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M0 0h16v16H0z" fill="none" />
+      <path fill="currentColor" d="M3.001 2.5a.5.5 0 1 1 1 0v3.843l3.171-3.171a4 4 0 0 1 5.657 5.656l-5.025 5.026a.5.5 0 0 1-.707-.708l5.025-5.025A3 3 0 0 0 7.879 3.88L4.758 7H8.5a.5.5 0 0 1 0 1H3.6a.6.6 0 0 1-.6-.6z" />
+    </svg>
+  );
+}
+
+function StageIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M0 0h24v24H0z" fill="none" />
+      <path fill="currentColor" d="M11 13H6q-.425 0-.712-.288T5 12t.288-.712T6 11h5V6q0-.425.288-.712T12 5t.713.288T13 6v5h5q.425 0 .713.288T19 12t-.288.713T18 13h-5v5q0 .425-.288.713T12 19t-.712-.288T11 18z" />
+    </svg>
+  );
+}
+
+function UnstageIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M0 0h24v24H0z" fill="none" />
+      <path fill="currentColor" d="M6 13q-.425 0-.712-.288T5 12t.288-.712T6 11h12q.425 0 .713.288T19 12t-.288.713T18 13z" />
+    </svg>
+  );
+}
+
+function GitIconButton({
+  title,
+  disabled,
+  children,
+  onClick,
+}: {
+  title: string;
+  disabled?: boolean;
+  children: React.ReactNode;
+  onClick?: () => void | Promise<void>;
+}) {
   return (
     <button
       type="button"
-      aria-label={title}
       title={title}
-      disabled={disabled || busy}
-      onClick={onClick}
+      aria-label={title}
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        void onClick?.();
+      }}
       style={{
-        width: "26px",
-        height: "26px",
-        border: "1px solid var(--border-color)",
-        borderRadius: "7px",
-        background: "var(--panel-bg)",
-        color: "var(--text-primary)",
+        width: "18px",
+        height: "18px",
+        border: "none",
+        borderRadius: "5px",
+        background: "transparent",
+        color: "var(--text-secondary)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        cursor: disabled || busy ? "default" : "pointer",
-        opacity: disabled ? 0.45 : 1,
+        cursor: disabled ? "not-allowed" : "pointer",
         padding: 0,
+        opacity: disabled ? 0.45 : 1,
+        fontSize: "13px",
+        flexShrink: 0,
       }}
     >
-      {busy ? <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>...</span> : children}
+      {children}
     </button>
   );
 }
 
-export function GitStatusPanel({ rootId, status, loading = false, isFiltered = false, expanded = true, onSelectItem, onSwitchBranch, onRepositoryChanged, onExpandedChange }: GitStatusPanelProps) {
+export function GitStatusPanel({
+  rootId,
+  status,
+  loading = false,
+  isFiltered = false,
+  expanded = true,
+  compact = false,
+  showHeader = true,
+  showHeaderActions = true,
+  showExpandedToggle = true,
+  enableBranchMenu = true,
+  onSelectItem,
+  onOpenItem,
+  onDiscardItem,
+  onStageItem,
+  onPull,
+  onPush,
+  onCommit,
+  onSwitchBranch,
+  onExpandedChange,
+}: GitStatusPanelProps) {
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branches, setBranches] = useState<GitBranchItem[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [switchingBranch, setSwitchingBranch] = useState("");
-  const [remoteSync, setRemoteSync] = useState<GitRemoteSyncPayload | null>(null);
-  const [remoteLoading, setRemoteLoading] = useState(false);
-  const [operation, setOperation] = useState("");
-  const [operationResult, setOperationResult] = useState<GitRemoteOperationPayload | null>(null);
-  const [upstreamRemote, setUpstreamRemote] = useState("");
-  const [upstreamBranch, setUpstreamBranch] = useState("");
+  const [commitOpen, setCommitOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
-  const [commitScope, setCommitScope] = useState<"all" | "selected">("all");
-  const [includeUntracked, setIncludeUntracked] = useState(true);
-  const [selectedPaths, setSelectedPaths] = useState<Record<string, boolean>>({});
+  const [actionBusy, setActionBusy] = useState("");
+  const [selectedActionPath, setSelectedActionPath] = useState("");
+  const [hoveredActionPath, setHoveredActionPath] = useState("");
 
   useEffect(() => {
     if (!branchMenuOpen) {
@@ -189,109 +261,48 @@ export function GitStatusPanel({ rootId, status, loading = false, isFiltered = f
     };
   }, [branchMenuOpen, rootId]);
 
-  useEffect(() => {
-    if (!rootId || status?.available !== true) {
-      setRemoteSync(null);
+  const runPanelAction = async (key: string, action?: () => void | Promise<void>) => {
+    if (!action || actionBusy) {
       return;
     }
-    let cancelled = false;
-    setRemoteLoading(true);
-    void fetchGitRemoteSync(rootId)
-      .then((payload) => {
-        if (!cancelled) {
-          setRemoteSync(payload);
-          const firstRemote = payload.remotes[0]?.name || "origin";
-          setUpstreamRemote((current) => current || payload.upstream_remote || firstRemote);
-          setUpstreamBranch((current) => current || payload.current_branch || status?.branch || "main");
-        }
-      })
-      .catch((err) => {
-        console.error("[git.remote.sync] failed", { rootId, err });
-        if (!cancelled) {
-          setRemoteSync(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setRemoteLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [rootId, status?.available, status?.branch, status?.dirty_count]);
-
-  useEffect(() => {
-    const next: Record<string, boolean> = {};
-    for (const item of status?.items || []) {
-      next[item.path] = selectedPaths[item.path] !== false;
+    setActionBusy(key);
+    try {
+      await action();
+    } catch {
+      // The caller owns user-facing error reporting; keep local button state consistent.
+    } finally {
+      setActionBusy("");
     }
-    setSelectedPaths(next);
-  }, [status?.items]);
+  };
+
+  const submitCommit = async () => {
+    const message = commitMessage.trim();
+    if (!message || !onCommit || actionBusy) {
+      return;
+    }
+    await runPanelAction("commit", async () => {
+      await onCommit(message);
+      setCommitMessage("");
+      setCommitOpen(false);
+    });
+  };
 
   if (!loading && (!status || status.available !== true)) {
     return null;
   }
 
   const items = status?.items || [];
-  const remotes = remoteSync?.remotes || [];
-  const upstreamMissing = remoteSync?.state === "no_upstream";
-  const remoteBusy = !!operation || remoteLoading;
-  const selectedCommitPaths = items.filter((item) => selectedPaths[item.path]).map((item) => item.path);
-  const refreshRemote = async () => {
-    if (!rootId) {
-      return;
-    }
-    const next = await fetchGitRemoteSync(rootId);
-    setRemoteSync(next);
-    if (next.upstream_remote) {
-      setUpstreamRemote(next.upstream_remote);
-    }
-    if (next.upstream_branch) {
-      setUpstreamBranch(next.upstream_branch);
-    }
-  };
-  const runOperation = async (name: string, action: () => Promise<GitRemoteOperationPayload>) => {
-    if (!rootId || operation) {
-      return;
-    }
-    setOperation(name);
-    setOperationResult(null);
-    try {
-      const result = await action();
-      setOperationResult(result);
-      if (result.state) {
-        setRemoteSync(result.state);
-      } else {
-        await refreshRemote();
-      }
-      if (["fetched", "fast_forwarded", "pushed", "committed_and_pushed", "committed_push_failed"].includes(result.result)) {
-        await onRepositoryChanged?.();
-        if (result.result === "committed_and_pushed") {
-          setCommitMessage("");
-        }
-      }
-    } catch (err) {
-      console.error("[git.remote.operation] failed", { rootId, name, err });
-      setOperationResult({ result: "failed", message: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setOperation("");
-    }
-  };
-  const canCommit = commitMessage.trim() !== "" && items.length > 0 && (commitScope === "all" || selectedCommitPaths.length > 0);
-  const commitTargetRemote = upstreamMissing ? upstreamRemote.trim() : "";
-  const commitTargetBranch = upstreamMissing ? upstreamBranch.trim() : "";
-  const resultText = operationLabel(operationResult?.result);
-  const resultDetail = operationResult?.commit_hash ? shortHash(operationResult.commit_hash) : operationResult?.message || "";
-  const remoteSummary = remoteSync?.upstream || remotes[0]?.name || "";
-  const aheadBehind = remoteSync ? `${remoteSync.ahead > 0 ? `↑${remoteSync.ahead}` : ""}${remoteSync.behind > 0 ? ` ↓${remoteSync.behind}` : ""}`.trim() : "";
-  if (!loading && items.length === 0 && !remoteSync && !remoteLoading) {
-    return null;
-  }
+  const hasStatusItems = items.length > 0;
+  const headerMarginBottom = commitOpen
+    ? "6px"
+    : expanded && (loading || hasStatusItems)
+      ? "10px"
+      : 0;
 
   return (
-    <section style={{ padding: 0, flexShrink: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "10px", padding: "0 10px" }}>
+    <section style={{ padding: 0, flexShrink: 0, minWidth: 0 }}>
+      {showHeader ? (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: compact ? "6px" : "12px", marginBottom: headerMarginBottom, padding: compact ? "0 4px 0 0" : "0 10px", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
           <span
             title="Git 变更"
@@ -317,8 +328,12 @@ export function GitStatusPanel({ rootId, status, loading = false, isFiltered = f
             <div ref={branchMenuRef} style={{ position: "relative", minWidth: 0 }}>
               <button
                 type="button"
-                onClick={() => setBranchMenuOpen((open) => !open)}
-                disabled={!rootId || !onSwitchBranch}
+                onClick={() => {
+                  if (enableBranchMenu && rootId && onSwitchBranch) {
+                    setBranchMenuOpen((open) => !open);
+                  }
+                }}
+                disabled={!enableBranchMenu || !rootId || !onSwitchBranch}
                 style={{
                   border: "none",
                   background: branchMenuOpen ? "rgba(15, 23, 42, 0.06)" : "transparent",
@@ -330,33 +345,35 @@ export function GitStatusPanel({ rootId, status, loading = false, isFiltered = f
                   gap: "4px",
                   minWidth: 0,
                   maxWidth: "180px",
-                  cursor: rootId && onSwitchBranch ? "pointer" : "default",
+                  cursor: enableBranchMenu && rootId && onSwitchBranch ? "pointer" : "default",
                 }}
               >
                 <span style={{ fontSize: "12px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {status.branch}
                 </span>
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  aria-hidden="true"
-                  style={{
-                    color: "var(--text-secondary)",
-                    flexShrink: 0,
-                    transform: branchMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
-                    transition: "transform 0.15s",
-                  }}
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06"
-                    clipRule="evenodd"
-                  />
-                </svg>
+                {enableBranchMenu && onSwitchBranch ? (
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    aria-hidden="true"
+                    style={{
+                      color: "var(--text-secondary)",
+                      flexShrink: 0,
+                      transform: branchMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+                      transition: "transform 0.15s",
+                    }}
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                ) : null}
               </button>
-              {branchMenuOpen ? (
+              {enableBranchMenu && branchMenuOpen ? (
                 <div
                   style={{
                     position: "absolute",
@@ -425,71 +442,47 @@ export function GitStatusPanel({ rootId, status, loading = false, isFiltered = f
               ) : null}
             </div>
           ) : null}
-          {remoteSummary ? (
-            <span
-              title={remoteSummary}
-              style={{
-                fontSize: "11px",
-                color: "var(--text-secondary)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                maxWidth: "160px",
-              }}
-            >
-              {remoteSummary}{aheadBehind ? ` ${aheadBehind}` : ""}
-            </span>
-          ) : remoteLoading ? (
-            <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>...</span>
-          ) : null}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
-          <IconButton
-            title="Fetch"
-            disabled={!rootId || !remoteSync?.available}
-            busy={operation === "fetch"}
-            onClick={() => void runOperation("fetch", () => runGitFetch(rootId || "", remoteSync?.upstream_remote || remotes[0]?.name || ""))}
-          >
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M10 3a1 1 0 0 1 1 1v7.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42L9 11.6V4a1 1 0 0 1 1-1Z" />
-              <path d="M4 15a1 1 0 0 1 1-1h10a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1Z" />
-            </svg>
-          </IconButton>
-          <IconButton
-            title="Pull"
-            disabled={!rootId || !remoteSync?.available || upstreamMissing || remoteSync?.dirty}
-            busy={operation === "pull"}
-            onClick={() => void runOperation("pull", () => runGitPull(rootId || ""))}
-          >
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M10 2a1 1 0 0 1 1 1v8.58l2.3-2.29a1 1 0 0 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42L9 11.6V3a1 1 0 0 1 1-1Z" />
-              <path d="M4 17a1 1 0 0 1 1-1h10a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1Z" />
-            </svg>
-          </IconButton>
-          <IconButton
-            title="Push"
-            disabled={!rootId || !remoteSync?.available || upstreamMissing || (remoteSync?.ahead || 0) <= 0}
-            busy={operation === "push"}
-            onClick={() => void runOperation("push", () => runGitPush(rootId || ""))}
-          >
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M10.7 4.29a1 1 0 0 0-1.4 0l-4 4a1 1 0 1 0 1.4 1.42L9 7.4V16a1 1 0 1 0 2 0V7.4l2.3 2.31a1 1 0 1 0 1.4-1.42l-4-4Z" />
-              <path d="M4 3a1 1 0 0 1 1-1h10a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1Z" />
-            </svg>
-          </IconButton>
+        <div style={{ display: "flex", alignItems: "center", gap: "1px", flexShrink: 0 }}>
+          {showHeaderActions ? (
+            <>
+              <GitIconButton
+                title={actionBusy === "pull" ? "pull 中" : "Git pull"}
+                disabled={!onPull || !!actionBusy}
+                onClick={() => runPanelAction("pull", onPull)}
+              >
+                <GitPullIcon />
+              </GitIconButton>
+              <GitIconButton
+                title={actionBusy === "push" ? "push 中" : "Git push"}
+                disabled={!onPush || !!actionBusy}
+                onClick={() => runPanelAction("push", onPush)}
+              >
+                <GitPushIcon />
+              </GitIconButton>
+              <GitIconButton
+                title="Git commit"
+                disabled={!onCommit || !!actionBusy}
+                onClick={() => setCommitOpen((open) => !open)}
+              >
+                <GitCommitIcon />
+              </GitIconButton>
+            </>
+          ) : null}
           <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)" }}>
             {loading ? "..." : items.length}
           </div>
+          {showExpandedToggle ? (
           <button
             type="button"
             aria-label={expanded ? "收起 Git 变更" : "展开 Git 变更"}
             title={expanded ? "收起" : "展开"}
             onClick={() => onExpandedChange?.(!expanded)}
             style={{
-              width: "22px",
-              height: "22px",
+              width: "20px",
+              height: "20px",
               border: "none",
-              borderRadius: "7px",
+              borderRadius: "5px",
               background: "transparent",
               color: "var(--text-secondary)",
               display: "inline-flex",
@@ -517,139 +510,192 @@ export function GitStatusPanel({ rootId, status, loading = false, isFiltered = f
               />
             </svg>
           </button>
+          ) : null}
         </div>
       </div>
+      ) : null}
+
+      {showHeaderActions && commitOpen ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            marginBottom: "10px",
+            padding: compact ? "0 4px 0 0" : "0 10px",
+          }}
+        >
+          <input
+            value={commitMessage}
+            disabled={actionBusy === "commit"}
+            autoFocus
+            placeholder="输入提交消息"
+            onChange={(event) => setCommitMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void submitCommit();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                setCommitOpen(false);
+              }
+            }}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              height: "26px",
+              border: "1px solid var(--border-color)",
+              borderRadius: "7px",
+              background: "transparent",
+              color: "var(--text-primary)",
+              padding: "0 8px",
+              fontSize: "12px",
+              outline: "none",
+            }}
+          />
+          <button
+            type="button"
+            title={actionBusy === "commit" ? "提交中" : "提交"}
+            aria-label={actionBusy === "commit" ? "提交中" : "提交"}
+            disabled={!commitMessage.trim() || actionBusy === "commit"}
+            onClick={() => void submitCommit()}
+            style={{
+              width: "26px",
+              height: "26px",
+              border: "none",
+              borderRadius: "7px",
+              background: "var(--accent-color)",
+              color: "#fff",
+              padding: 0,
+              fontSize: "15px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              cursor: !commitMessage.trim() || actionBusy === "commit" ? "not-allowed" : "pointer",
+              opacity: !commitMessage.trim() || actionBusy === "commit" ? 0.55 : 1,
+            }}
+          >
+            <CommitSubmitIcon />
+          </button>
+        </div>
+      ) : null}
 
       {!expanded ? null : loading ? (
         <div style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "6px 10px" }}>正在加载 git 变更...</div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px", paddingLeft: "14px" }}>
-          {operationResult ? (
-            <div style={{ fontSize: "12px", color: operationResult.result === "committed_push_failed" || operationResult.result.startsWith("failed") || operationResult.result.startsWith("blocked") || operationResult.result.startsWith("rejected") ? "#b91c1c" : "#15803d", padding: "0 10px" }}>
-              {resultText}{resultDetail ? ` · ${resultDetail}` : ""}
-            </div>
-          ) : null}
-          {upstreamMissing && remotes.length > 0 ? (
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto", gap: "6px", padding: "0 10px" }}>
-              <select
-                value={upstreamRemote}
-                onChange={(event) => setUpstreamRemote(event.target.value)}
-                disabled={remoteBusy}
-                style={{ minWidth: 0, height: "28px", border: "1px solid var(--border-color)", borderRadius: "7px", background: "var(--panel-bg)", color: "var(--text-primary)", fontSize: "12px" }}
+      ) : !hasStatusItems ? null : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px", paddingLeft: compact ? 0 : "14px", minWidth: 0 }}>
+          {items.map((item) => {
+            const actionKey = `${item.status}:${item.path}`;
+            const showActions = selectedActionPath === actionKey || hoveredActionPath === actionKey;
+            return (
+              <div
+                key={actionKey}
+                role="button"
+                tabIndex={item.is_dir === true ? -1 : 0}
+                onClick={() => {
+                  setSelectedActionPath(actionKey);
+                  if (item.is_dir !== true && !actionBusy) {
+                    onSelectItem?.(item);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if ((event.key === "Enter" || event.key === " ") && item.is_dir !== true && !actionBusy) {
+                    event.preventDefault();
+                    setSelectedActionPath(actionKey);
+                    onSelectItem?.(item);
+                  }
+                }}
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: compact ? "6px" : "10px",
+                  width: "100%",
+                  border: "none",
+                  background: selectedActionPath === actionKey
+                    ? "linear-gradient(180deg, rgba(59, 130, 246, 0.14), rgba(59, 130, 246, 0.06))"
+                    : "linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.03))",
+                  padding: compact ? "6px 7px" : "6px 10px",
+                  cursor: item.is_dir === true ? "default" : "pointer",
+                  textAlign: "left",
+                  borderRadius: "8px",
+                  transition: "background 0.15s",
+                  opacity: item.is_dir === true ? 0.72 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  setHoveredActionPath(actionKey);
+                  e.currentTarget.style.background = "linear-gradient(180deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.05))";
+                }}
+                onMouseLeave={(e) => {
+                  setHoveredActionPath((current) => current === actionKey ? "" : current);
+                  e.currentTarget.style.background = selectedActionPath === actionKey
+                    ? "linear-gradient(180deg, rgba(59, 130, 246, 0.14), rgba(59, 130, 246, 0.06))"
+                    : "linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.03))";
+                }}
               >
-                {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
-              </select>
-              <input
-                value={upstreamBranch}
-                onChange={(event) => setUpstreamBranch(event.target.value)}
-                disabled={remoteBusy}
-                placeholder={status?.branch || "branch"}
-                style={{ minWidth: 0, height: "28px", border: "1px solid var(--border-color)", borderRadius: "7px", background: "var(--panel-bg)", color: "var(--text-primary)", fontSize: "12px", padding: "0 8px" }}
-              />
-              <button
-                type="button"
-                disabled={remoteBusy || !upstreamRemote.trim() || !upstreamBranch.trim()}
-                onClick={() => void runOperation("upstream", () => runGitPushUpstream(rootId || "", upstreamRemote.trim(), upstreamBranch.trim()))}
-                style={{ height: "28px", border: "1px solid var(--border-color)", borderRadius: "7px", background: "var(--panel-bg)", color: "var(--text-primary)", fontSize: "12px", padding: "0 8px", cursor: remoteBusy ? "default" : "pointer" }}
-              >
-                发布
-              </button>
-            </div>
-          ) : null}
-          {items.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "0 10px" }}>
-              <input
-                value={commitMessage}
-                onChange={(event) => setCommitMessage(event.target.value)}
-                disabled={remoteBusy}
-                placeholder="Commit message"
-                style={{ height: "30px", border: "1px solid var(--border-color)", borderRadius: "7px", background: "var(--panel-bg)", color: "var(--text-primary)", fontSize: "12px", padding: "0 9px" }}
-              />
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                <div style={{ display: "inline-flex", border: "1px solid var(--border-color)", borderRadius: "7px", overflow: "hidden", flexShrink: 0 }}>
-                  {(["all", "selected"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setCommitScope(mode)}
-                      disabled={remoteBusy}
-                      style={{ border: "none", background: commitScope === mode ? "var(--selection-bg)" : "var(--panel-bg)", color: commitScope === mode ? "var(--accent-color)" : "var(--text-secondary)", fontSize: "11px", padding: "5px 8px", cursor: remoteBusy ? "default" : "pointer" }}
+                <span style={{ width: compact ? "18px" : "24px", color: renderStatusColor(item.status), fontSize: "12px", fontWeight: 700, flexShrink: 0 }}>
+                  {renderStatusLabel(item.status)}
+                </span>
+                <span title={item.display_path || item.path} style={{ flex: 1, minWidth: 0, fontSize: "12px", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {compactPath(item.display_path || item.path)}
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: compact ? "2px" : "8px", fontSize: "11px", color: "var(--text-secondary)", flexShrink: 0 }}>
+                  {renderLineStat(item.additions, "+")}
+                  {renderLineStat(item.deletions, "-")}
+                </span>
+                {showActions ? (
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: "50%",
+                      right: "4px",
+                      transform: "translateY(-50%)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 0,
+                      padding: "2px",
+                      borderRadius: "7px",
+                      border: "1px solid var(--border-color)",
+                      background: "var(--menu-bg)",
+                      boxShadow: "0 6px 16px rgba(15, 23, 42, 0.14)",
+                      zIndex: 3,
+                    }}
+                  >
+                    <GitIconButton
+                      title="打开文件"
+                      disabled={!onOpenItem || item.is_dir === true || !!actionBusy}
+                      onClick={() => onOpenItem?.(item)}
                     >
-                      {mode === "all" ? "全部" : "选择"}
-                    </button>
-                  ))}
-                </div>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "var(--text-secondary)", minWidth: 0 }}>
-                  <input type="checkbox" checked={includeUntracked} disabled={remoteBusy} onChange={(event) => setIncludeUntracked(event.target.checked)} />
-                  Untracked
-                </label>
-                <button
-                  type="button"
-                  disabled={remoteBusy || !canCommit || (upstreamMissing && (!commitTargetRemote || !commitTargetBranch))}
-                  onClick={() => void runOperation("commit-push", () => runGitCommitAndPush({
-                    rootId: rootId || "",
-                    message: commitMessage,
-                    all: commitScope === "all",
-                    paths: commitScope === "selected" ? selectedCommitPaths : [],
-                    includeUntracked,
-                    remote: commitTargetRemote,
-                    branch: commitTargetBranch,
-                  }))}
-                  style={{ height: "28px", border: "1px solid var(--border-color)", borderRadius: "7px", background: "var(--panel-bg)", color: "var(--text-primary)", fontSize: "12px", padding: "0 9px", cursor: remoteBusy || !canCommit ? "default" : "pointer", opacity: remoteBusy || !canCommit ? 0.55 : 1, flexShrink: 0 }}
-                >
-                  Commit & Push
-                </button>
+                      <OpenFileIcon />
+                    </GitIconButton>
+                    <GitIconButton
+                      title="撤销变更"
+                      disabled={!onDiscardItem || !!actionBusy}
+                      onClick={() => {
+                        if (item.status === "??") {
+                          const ok = window.confirm(`确认删除未跟踪文件“${item.path}”？`);
+                          if (!ok) {
+                            return;
+                          }
+                        }
+                        return runPanelAction(`discard:${item.path}`, () => onDiscardItem?.(item));
+                      }}
+                    >
+                      <UndoIcon />
+                    </GitIconButton>
+                    <GitIconButton
+                      title={item.staged === true ? "取消暂存" : "暂存变更"}
+                      disabled={!onStageItem || !!actionBusy}
+                      onClick={() => runPanelAction(`${item.staged === true ? "unstage" : "stage"}:${item.path}`, () => onStageItem?.(item))}
+                    >
+                      {item.staged === true ? <UnstageIcon /> : <StageIcon />}
+                    </GitIconButton>
+                  </span>
+                ) : null}
               </div>
-            </div>
-          ) : null}
-          {items.map((item) => (
-            <button
-              key={`${item.status}:${item.path}`}
-              type="button"
-              disabled={item.is_dir === true}
-              onClick={() => {
-                if (item.is_dir !== true) {
-                  onSelectItem?.(item);
-                }
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                width: "100%",
-                border: "none",
-                background: "linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.03))",
-                padding: "6px 10px",
-                cursor: item.is_dir === true ? "default" : "pointer",
-                textAlign: "left",
-                borderRadius: "8px",
-                transition: "background 0.15s",
-                opacity: item.is_dir === true ? 0.72 : 1,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "linear-gradient(180deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.05))"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.03))"; }}
-            >
-              <span style={{ width: "24px", color: renderStatusColor(item.status), fontSize: "12px", fontWeight: 700, flexShrink: 0 }}>
-                {renderStatusLabel(item.status)}
-              </span>
-              {commitScope === "selected" ? (
-                <input
-                  type="checkbox"
-                  checked={selectedPaths[item.path] !== false}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) => setSelectedPaths((prev) => ({ ...prev, [item.path]: event.target.checked }))}
-                  style={{ flexShrink: 0 }}
-                />
-              ) : null}
-              <span style={{ flex: 1, minWidth: 0, fontSize: "12px", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {item.display_path || item.path}
-              </span>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "11px", color: "var(--text-secondary)", flexShrink: 0 }}>
-                {renderLineStat(item.additions, "+")}
-                {renderLineStat(item.deletions, "-")}
-              </span>
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

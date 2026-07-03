@@ -83,7 +83,7 @@ export function getStoredLauncherNodes(): LauncherNode[] {
       return [];
     }
     return parsed
-      .map<LauncherNode | null>((item) => {
+      .map((item): LauncherNode | null => {
         if (!item || typeof item !== "object") {
           return null;
         }

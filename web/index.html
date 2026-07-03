@@ -16,6 +16,7 @@
             stored === "dark" ||
             stored === "light" ||
             stored === "system" ||
+            stored === "meadow" ||
             stored === "moss" ||
             stored === "mist" ||
             stored === "sakura" ||
@@ -35,7 +36,9 @@
         var themeColors = {
           dark: "#0f172a",
           light: "#f3f4f6",
-          moss: "#E8F0E4",
+          system: "#f3f4f6",
+          meadow: "#f4efe6",
+          moss: "#dfe5d4",
           mist: "#EAF2FA",
           sakura: "#F8EAF0",
           amber: "#F5EBDD",
@@ -44,7 +47,7 @@
         var color = themeColors[mode];
         if (!color) {
           var effective = mode;
-          if (effective !== "dark" && effective !== "light") {
+          if (effective !== "dark" && effective !== "light" && effective !== "meadow" && effective !== "moss") {
             effective = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
               ? "dark"
               : "light";
