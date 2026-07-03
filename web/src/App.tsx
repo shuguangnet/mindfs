@@ -18,7 +18,6 @@ import {
   type SyncSessionResult,
   type RelatedFile,
   type Session,
-  type QueuedUserMessage,
 } from "./services/session";
 import { buildClientContext } from "./services/context";
 import { e2eeService, type E2EEState } from "./services/e2ee";
@@ -71,7 +70,6 @@ import { uploadFiles } from "./services/upload";
 import {
   PluginManager,
   loadAllPlugins,
-  type PluginInput,
 } from "./plugins/manager";
 import { appPath, appURL, isRelayNodePage } from "./services/base";
 import { copyText } from "./services/clipboard";
@@ -107,207 +105,52 @@ import {
   type ProjectAddMode,
 } from "./components/ProjectAddPopover";
 import { fetchAgents, type AgentStatus } from "./services/agents";
-
-// 类型定义
-type SessionMode = "chat" | "plugin" | "command";
-type WSStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
+import {
+  isTopLevelSessionItem,
+  normalizeFastService,
+  normalizeMode,
+  type MultiProjectSessionGroup,
+  type SessionItem,
+  type SessionMode,
+  type SessionQueueItem,
+  type SlashCommandResult,
+  toSessionItem,
+  type WSStatus,
+} from "./app/sessionItems";
+import {
+  basenameOfPath,
+  buildDirectorySelectionKey,
+  buildFileScrollKey,
+  comparableManagedRootPath,
+  dirnameOfPath,
+  normalizePathForRoot,
+  parentDirsOfFile,
+  parseFileLocation,
+  trimGitPathPrefix,
+} from "./app/filePathHelpers";
+import {
+  buildMatchInputFromPath,
+  buildMessageWithViewContext,
+  inferReadModeFromPlugin,
+  loadPersistedPluginQuery,
+  parsePluginQuery,
+  persistPluginQuery,
+  PLUGIN_QUERY_STORAGE_PREFIX,
+  removeLocalStorageByPrefix,
+  toPluginInput,
+} from "./app/pluginHelpers";
+import {
+  normalizeUpdateState,
+  shouldShowUpdateButton,
+  updateButtonLabel,
+  updateSummaryText,
+} from "./app/updateHelpers";
 
 const CHILD_SESSION_PAGE_SIZE = 100;
 const MULTI_PROJECT_SESSION_LIMIT = 6;
 const SESSION_PAGE_SIZE = 50;
 const MULTI_PROJECT_SESSION_STORAGE_KEY = "mindfs-multi-project-session-list";
 
-function isTopLevelSessionItem(session: SessionItem): boolean {
-  return !String(session?.parent_session_key || "").trim();
-}
-
-function normalizeFastService(
-  value: unknown,
-): "" | "on" | "off" {
-  return value === "on" || value === "off" ? value : "";
-}
-
-export type SessionItem = {
-  key: string;
-  session_key: string;
-  root_id?: string;
-  name?: string;
-  type?: SessionMode;
-  parent_session_key?: string;
-  parent_tool_call_id?: string;
-  agent?: string;
-  model?: string;
-  shell?: string;
-  source?: string;
-  mode?: string;
-  effort?: string;
-  fast_service?: "" | "on" | "off";
-  plan_mode?: boolean;
-  scope?: string;
-  purpose?: string;
-  created_at?: string;
-  updated_at?: string;
-  closed_at?: string;
-  title?: string;
-  agent_session_id?: string;
-  context_window?: {
-    totalTokens: number;
-    modelContextWindow: number;
-  };
-  search_seq?: number;
-  search_target_id?: string;
-  search_snippet?: string;
-  search_match_type?: "name" | "user" | "reply";
-  related_files?: RelatedFile[];
-  exchanges?: Array<{
-    seq?: number;
-    role?: string;
-    agent?: string;
-    content?: string;
-    thought_id?: string;
-    timestamp?: string;
-    model?: string;
-    model_display_name?: string;
-	    mode?: string;
-	    effort?: string;
-	    fast_service?: "" | "on" | "off";
-	    context_window?: {
-      totalTokens: number;
-      modelContextWindow: number;
-    };
-  }>;
-  pending?: boolean;
-};
-
-type MultiProjectSessionGroup = {
-  rootId: string;
-  rootName: string;
-  latestSessionTime: string;
-  sessions: SessionItem[];
-  totalCount: number;
-};
-
-type SlashCommandResult = {
-  rootId: string;
-  sessionKey: string;
-  requestId: string;
-  command: string;
-  content: string;
-  status: "running" | "complete" | "failed";
-  error?: string;
-  createdAt?: number;
-  loginNotice?: {
-    status?: string;
-    loginId?: string;
-    verificationUrl?: string;
-    userCode?: string;
-    error?: string;
-    authMode?: string;
-    planType?: string;
-  };
-};
-
-function latestExchangeText(
-  exchanges: unknown,
-  field: "agent" | "mode" | "effort" | "fast_service",
-): string {
-  if (!Array.isArray(exchanges)) {
-    return "";
-  }
-  for (let i = exchanges.length - 1; i >= 0; i -= 1) {
-    const value = (exchanges[i] as Record<string, unknown> | null)?.[field];
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-  return "";
-}
-
-function toSessionItem(
-  rootID: string | null | undefined,
-  session: any,
-): SessionItem | null {
-  if (!session) {
-    return null;
-  }
-  const key = session?.key || session?.session_key || "";
-  const nextRoot =
-    (session?.root_id as string | undefined) || String(rootID || "");
-  if (!key || !nextRoot) {
-    return null;
-  }
-  return {
-    key,
-    session_key: key,
-    root_id: nextRoot,
-    name: typeof session?.name === "string" ? session.name : "",
-    type: normalizeMode(session?.type),
-    parent_session_key:
-      typeof session?.parent_session_key === "string"
-        ? session.parent_session_key
-        : undefined,
-    parent_tool_call_id:
-      typeof session?.parent_tool_call_id === "string"
-        ? session.parent_tool_call_id
-        : undefined,
-    source: typeof session?.source === "string" ? session.source : undefined,
-    agent:
-      typeof session?.agent === "string" && session.agent.trim()
-        ? session.agent
-        : latestExchangeText(session?.exchanges, "agent"),
-    model: typeof session?.model === "string" ? session.model : "",
-    shell: typeof session?.shell === "string" ? session.shell : "",
-    mode:
-      typeof session?.mode === "string" && session.mode.trim()
-        ? session.mode
-        : latestExchangeText(session?.exchanges, "mode"),
-    effort:
-      typeof session?.effort === "string" && session.effort.trim()
-        ? session.effort
-        : latestExchangeText(session?.exchanges, "effort"),
-    fast_service:
-      normalizeFastService(session?.fast_service) ||
-      normalizeFastService(latestExchangeText(session?.exchanges, "fast_service")),
-    plan_mode:
-      typeof session?.plan_mode === "boolean"
-        ? session.plan_mode
-        : false,
-    scope: typeof session?.scope === "string" ? session.scope : "",
-    purpose: typeof session?.purpose === "string" ? session.purpose : "",
-    created_at:
-      typeof session?.created_at === "string" ? session.created_at : undefined,
-    updated_at:
-      typeof session?.updated_at === "string" ? session.updated_at : undefined,
-    closed_at:
-      typeof session?.closed_at === "string" ? session.closed_at : undefined,
-    context_window:
-      session?.context_window &&
-      Number(session.context_window.totalTokens) > 0 &&
-      Number(session.context_window.modelContextWindow) > 0
-        ? {
-            totalTokens: Number(session.context_window.totalTokens),
-            modelContextWindow: Number(session.context_window.modelContextWindow),
-          }
-        : undefined,
-    search_seq:
-      typeof session?.search_seq === "number" ? session.search_seq : undefined,
-    search_target_id:
-      typeof session?.search_target_id === "string"
-        ? session.search_target_id
-        : undefined,
-    search_snippet:
-      typeof session?.search_snippet === "string"
-        ? session.search_snippet
-        : undefined,
-    search_match_type:
-      session?.search_match_type === "name" ||
-      session?.search_match_type === "user" ||
-      session?.search_match_type === "reply"
-        ? session.search_match_type
-        : undefined,
-    pending: typeof session?.pending === "boolean" ? session.pending : undefined,
-  };
-}
 type Exchange = {
   role: string;
   agent?: string;
@@ -344,7 +187,6 @@ type PendingSend = {
   sessionKey?: string;
   tempKey?: string;
 };
-type SessionQueueItem = QueuedUserMessage;
 type ViewerSelection = {
   filePath: string;
   text?: string;
@@ -403,7 +245,6 @@ function managedDirAddErrorMessage(error: unknown, fallback: string): string {
 }
 
 const RELAY_LAST_NODE_ID_STORAGE_KEY = "mindfs.relay.last_node_id";
-const PLUGIN_QUERY_STORAGE_PREFIX = "vp-progress:";
 const TREE_SORT_STORAGE_KEY = "mindfs-tree-sort-mode";
 const DIRECTORY_SORT_OVERRIDES_STORAGE_KEY = "mindfs-directory-sort-overrides";
 const FILE_SCROLL_STORAGE_KEY = "mindfs-file-scroll-positions";
@@ -412,99 +253,6 @@ const SHOW_GIT_HISTORY_BY_ROOT_STORAGE_KEY = "mindfs-show-git-history-by-root";
 const GIT_STATUS_EXPANDED_STORAGE_KEY = "mindfs-git-status-expanded";
 const GIT_HISTORY_EXPANDED_STORAGE_KEY = "mindfs-git-history-expanded";
 const READ_FILE_TOKEN_PATTERN = /\[read file:\s*[^\]]+\]/i;
-
-function normalizeUpdateState(
-  input: UpdateState | null | undefined,
-): UpdateState {
-  return {
-    current_version: input?.current_version || "",
-    latest_version: input?.latest_version || "",
-    has_update: input?.has_update === true,
-    status: input?.status || "idle",
-    message: input?.message || "",
-    release_name: input?.release_name || "",
-    release_body: input?.release_body || "",
-    release_url: input?.release_url || "",
-    published_at: input?.published_at || "",
-    last_checked_at: input?.last_checked_at || "",
-    auto_update_supported: input?.auto_update_supported === true,
-  };
-}
-
-function updateButtonLabel(state: UpdateState): string {
-  const status = (state.status || "idle").toLowerCase();
-  switch (status) {
-    case "available":
-      if (state.current_version && state.latest_version) {
-        return `更新 ${state.current_version} → ${state.latest_version}`;
-      }
-      return state.latest_version ? `更新到 ${state.latest_version}` : "新版本";
-    case "downloading":
-      return "下载中...";
-    case "installing":
-      return "安装中...";
-    case "restarting":
-      return "重启中...";
-    case "failed":
-      return "更新失败";
-    default:
-      return "已是最新";
-  }
-}
-
-function updateSummaryText(state: UpdateState): string {
-  const body = String(state.release_body || "").trim();
-  if (body) {
-    return body;
-  }
-  const name = String(state.release_name || "").trim();
-  if (name) {
-    return name;
-  }
-  if (state.latest_version) {
-    return `发现 v${state.latest_version} 新版本`;
-  }
-  return "";
-}
-
-function shouldShowUpdateButton(state: UpdateState): boolean {
-  const status = (state.status || "idle").toLowerCase();
-  if (
-    status === "downloading" ||
-    status === "installing" ||
-    status === "restarting" ||
-    status === "failed"
-  ) {
-    return true;
-  }
-  return state.auto_update_supported === true && state.has_update === true;
-}
-
-function buildFileScrollKey(
-  rootId: string | null | undefined,
-  path: string | null | undefined,
-): string {
-  if (!rootId || !path) {
-    return "";
-  }
-  return `${rootId}::${path}`;
-}
-
-function trimGitPathPrefix(path: string, prefix: string): string {
-  const normalizedPath = String(path || "").replace(/^\/+|\/+$/g, "");
-  const normalizedPrefix = String(prefix || "").replace(/^\/+|\/+$/g, "");
-  if (!normalizedPrefix) {
-    return normalizedPath;
-  }
-  if (normalizedPath === normalizedPrefix) {
-    return ".";
-  }
-  const matchPrefix = `${normalizedPrefix}/`;
-  if (normalizedPath.startsWith(matchPrefix)) {
-    return normalizedPath.slice(matchPrefix.length);
-  }
-  return normalizedPath;
-}
 
 function hasSessionExchanges(session: Session | null | undefined): boolean {
   return Array.isArray(session?.exchanges) && session.exchanges.length > 0;
@@ -660,23 +408,6 @@ function persistFileScrollPositions(positions: Record<string, number>): void {
   } catch {}
 }
 
-function normalizeMode(mode: SessionMode | undefined): SessionMode {
-  if (mode === "plugin") return mode;
-  if (mode === "command") return mode;
-  return "chat";
-}
-
-function parsePluginQuery(search: string): Record<string, string> {
-  const params = new URLSearchParams(search);
-  const query: Record<string, string> = {};
-  params.forEach((value, key) => {
-    if (key.startsWith("vp_")) {
-      query[key.slice("vp_".length)] = value;
-    }
-  });
-  return query;
-}
-
 function waitForNextPaint(): Promise<void> {
   if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
     return new Promise((resolve) => setTimeout(resolve, 0));
@@ -744,216 +475,6 @@ function buildURLSearch(next: URLState): string {
   return encoded ? `?${encoded}` : "";
 }
 
-function pluginQueryStorageKey(root: string, file: string): string {
-  return `${PLUGIN_QUERY_STORAGE_PREFIX}${root}:${file}`;
-}
-
-function loadPersistedPluginQuery(
-  root: string,
-  file: string,
-): Record<string, string> {
-  if (!root || !file) return {};
-  try {
-    const raw = window.localStorage.getItem(pluginQueryStorageKey(root, file));
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return {};
-    const next: Record<string, string> = {};
-    Object.entries(parsed as Record<string, unknown>).forEach(
-      ([key, value]) => {
-        if (!key) return;
-        next[key] = String(value);
-      },
-    );
-    return next;
-  } catch {
-    return {};
-  }
-}
-
-function persistPluginQuery(
-  root: string,
-  file: string,
-  query: Record<string, string>,
-): void {
-  if (!root || !file) return;
-  try {
-    window.localStorage.setItem(
-      pluginQueryStorageKey(root, file),
-      JSON.stringify(query || {}),
-    );
-  } catch {}
-}
-
-function removeLocalStorageByPrefix(prefix: string): void {
-  if (typeof window === "undefined" || !prefix) {
-    return;
-  }
-  try {
-    for (const key of Array.from(
-      { length: window.localStorage.length },
-      (_, index) => window.localStorage.key(index),
-    ).filter(Boolean) as string[]) {
-      if (key.startsWith(prefix)) {
-        window.localStorage.removeItem(key);
-      }
-    }
-  } catch {}
-}
-
-function toPluginInput(
-  file: FilePayload,
-  query: Record<string, string>,
-): PluginInput {
-  return {
-    name: file.name,
-    path: file.path,
-    content: file.content,
-    ext: file.ext || "",
-    mime: file.mime || "",
-    size: typeof file.size === "number" ? file.size : 0,
-    truncated: !!file.truncated,
-    next_cursor:
-      typeof file.next_cursor === "number" ? file.next_cursor : undefined,
-    query,
-  };
-}
-
-function inferReadModeFromPlugin(plugin: any): "incremental" | "full" {
-  if (!plugin) return "incremental";
-  if (plugin?.fileLoadMode === "full") return "full";
-  if (plugin?.fileLoadMode === "incremental") return "incremental";
-  return "incremental";
-}
-
-function buildMatchInputFromPath(
-  path: string,
-  query: Record<string, string>,
-): PluginInput {
-  const normalized = (path || "").replace(/\\/g, "/");
-  const name = normalized.split("/").pop() || normalized;
-  const dot = name.lastIndexOf(".");
-  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : "";
-  return {
-    name,
-    path: normalized,
-    content: "",
-    ext,
-    mime: "",
-    size: 0,
-    truncated: false,
-    query,
-  };
-}
-
-function formatPluginViewContext(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  if (value == null) return "";
-  try {
-    return JSON.stringify(value, null, 2).trim();
-  } catch {
-    return String(value).trim();
-  }
-}
-
-function buildMessageWithViewContext(
-  message: string,
-  viewContext: unknown,
-): string {
-  const contextText = formatPluginViewContext(viewContext);
-  if (!contextText) return message;
-  return [contextText, "", message].join("\n");
-}
-
-function normalizePath(value: string): string {
-  return String(value || "")
-    .replace(/\\/g, "/")
-    .replace(/^\/+|\/+$/g, "");
-}
-
-function normalizePathForRoot(value: string, rootPath?: string): string {
-  const normalized = normalizePath(value);
-  if (!normalized) return "";
-  const normalizedRoot = normalizePath(rootPath || "");
-  if (!normalizedRoot) return normalized;
-  if (normalized === normalizedRoot) return "";
-  if (normalized.startsWith(`${normalizedRoot}/`)) {
-    return normalized.slice(normalizedRoot.length + 1);
-  }
-  return normalized;
-}
-
-function parseFileLocation(path: string): {
-  path: string;
-  targetLine?: number;
-  targetColumn?: number;
-} {
-  const raw = String(path || "");
-  const [base, fragment = ""] = raw.split("#", 2);
-  if (fragment) {
-    const match = /^L(\d+)(?:C(\d+))?$/i.exec(fragment.trim());
-    if (match) {
-      const targetLine = Number.parseInt(match[1], 10);
-      const targetColumn = match[2] ? Number.parseInt(match[2], 10) : undefined;
-      return {
-        path: base,
-        targetLine:
-          Number.isFinite(targetLine) && targetLine > 0 ? targetLine : undefined,
-        targetColumn:
-          targetColumn && Number.isFinite(targetColumn) && targetColumn > 0
-            ? targetColumn
-            : undefined,
-      };
-    }
-  }
-
-  const colonMatch = /^(.*):(\d+)(?::(\d+))?$/.exec(base.trim());
-  if (!colonMatch) {
-    return { path: base };
-  }
-  const targetLine = Number.parseInt(colonMatch[2], 10);
-  const targetColumn = colonMatch[3]
-    ? Number.parseInt(colonMatch[3], 10)
-    : undefined;
-  return {
-    path: colonMatch[1],
-    targetLine:
-      Number.isFinite(targetLine) && targetLine > 0 ? targetLine : undefined,
-    targetColumn:
-      targetColumn && Number.isFinite(targetColumn) && targetColumn > 0
-        ? targetColumn
-        : undefined,
-  };
-}
-
-function parentDirsOfFile(path: string): string[] {
-  const normalized = normalizePath(path);
-  if (!normalized) return [];
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length <= 1) return [];
-  const dirs: string[] = [];
-  for (let i = 1; i < parts.length; i++) {
-    dirs.push(parts.slice(0, i).join("/"));
-  }
-  return dirs;
-}
-
-function dirnameOfPath(path: string): string {
-  const normalized = normalizePath(path);
-  if (!normalized) return ".";
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length <= 1) return ".";
-  return parts.slice(0, -1).join("/");
-}
-
-function basenameOfPath(path: string): string {
-  const normalized = normalizePath(path);
-  if (!normalized) return "";
-  const parts = normalized.split("/").filter(Boolean);
-  return parts[parts.length - 1] || normalized;
-}
-
 function mapManagedRootsToEntries(dirs: ManagedRootPayload[]): FileEntry[] {
   return dirs.map((dir) => ({
     name: dir.display_name || dir.id.split("/").filter(Boolean).pop() || dir.id,
@@ -963,18 +484,6 @@ function mapManagedRootsToEntries(dirs: ManagedRootPayload[]): FileEntry[] {
     size: typeof dir.size === "number" ? dir.size : undefined,
     mtime: typeof dir.mtime === "string" ? dir.mtime : undefined,
   }));
-}
-
-function comparableManagedRootPath(value: string | undefined): string {
-  return String(value || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
-}
-
-function buildDirectorySelectionKey(
-  root: string,
-  path: string,
-  isRoot: boolean,
-): string {
-  return isRoot ? root : `${root}:${path}`;
 }
 
 function loadLastRootId(): string {
