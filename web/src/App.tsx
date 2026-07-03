@@ -8849,7 +8849,7 @@ export function App({ onGoHome }: AppProps) {
   const shouldRenderGitPanel =
     showGitStatusPanel &&
     gitStatusAvailable &&
-    (gitStatusLoading || (filteredGitStatus?.items.length || 0) > 0);
+    (gitStatusLoading || (filteredGitStatus?.items.length || 0) > 0 || isRootDirectoryView);
   const shouldRenderGitHistoryPanel =
     showGitStatusPanel &&
     isRootDirectoryView &&
@@ -8885,6 +8885,16 @@ export function App({ onGoHome }: AppProps) {
                 return;
               }
               return switchGitBranch(root, branch);
+            }}
+            onRepositoryChanged={async () => {
+              const root = currentRootIdRef.current;
+              if (!root) {
+                return;
+              }
+              clearGitHistoryCache(root);
+              await refreshGitStatus(root);
+              await refreshGitHistory(root, { force: true });
+              await refreshTreeDir(root, selectedDir || ".", true);
             }}
           />
         ) : null}

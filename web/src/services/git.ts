@@ -73,6 +73,59 @@ export type GitWorktreesPayload = {
   items: GitWorktreeItem[];
 };
 
+export type GitRemoteBranchInfo = {
+  name: string;
+  hash?: string;
+};
+
+export type GitRemoteInfo = {
+  name: string;
+  fetch_url?: string;
+  push_url?: string;
+  status: string;
+  reason?: string;
+  default_branch?: string;
+  branches?: GitRemoteBranchInfo[];
+};
+
+export type GitRemoteDiscoveryPayload = {
+  available: boolean;
+  status: string;
+  remotes: GitRemoteInfo[];
+};
+
+export type GitRemoteSyncPayload = {
+  available: boolean;
+  state: string;
+  current_branch?: string;
+  upstream?: string;
+  upstream_remote?: string;
+  upstream_branch?: string;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  dirty_count: number;
+  remotes: GitRemoteInfo[];
+};
+
+export type GitRemoteOperationPayload = {
+  result: string;
+  message?: string;
+  commit_hash?: string;
+  push_result?: string;
+  state?: GitRemoteSyncPayload;
+};
+
+export type GitCommitAndPushInput = {
+  rootId: string;
+  message: string;
+  all: boolean;
+  paths?: string[];
+  includeUntracked?: boolean;
+  remote?: string;
+  branch?: string;
+};
+
 export async function fetchGitStatus(rootId: string): Promise<GitStatusPayload> {
   const payload = await protectedJSON<any>(appURL("/api/git/status", new URLSearchParams({ root: rootId })));
   return {
@@ -81,6 +134,122 @@ export async function fetchGitStatus(rootId: string): Promise<GitStatusPayload> 
     dirty_count: Number(payload?.dirty_count) || 0,
     items: Array.isArray(payload?.items) ? payload.items as GitStatusItem[] : [],
   };
+}
+
+function normalizeGitRemoteInfo(item: any): GitRemoteInfo {
+  return {
+    name: typeof item?.name === "string" ? item.name : "",
+    fetch_url: typeof item?.fetch_url === "string" ? item.fetch_url : undefined,
+    push_url: typeof item?.push_url === "string" ? item.push_url : undefined,
+    status: typeof item?.status === "string" ? item.status : "unknown",
+    reason: typeof item?.reason === "string" ? item.reason : undefined,
+    default_branch: typeof item?.default_branch === "string" ? item.default_branch : undefined,
+    branches: Array.isArray(item?.branches)
+      ? item.branches
+          .map((branch: any) => ({
+            name: typeof branch?.name === "string" ? branch.name : "",
+            hash: typeof branch?.hash === "string" ? branch.hash : undefined,
+          }))
+          .filter((branch: GitRemoteBranchInfo) => !!branch.name)
+      : [],
+  };
+}
+
+function normalizeGitRemoteSync(payload: any): GitRemoteSyncPayload {
+  return {
+    available: payload?.available === true,
+    state: typeof payload?.state === "string" ? payload.state : "unknown",
+    current_branch: typeof payload?.current_branch === "string" ? payload.current_branch : undefined,
+    upstream: typeof payload?.upstream === "string" ? payload.upstream : undefined,
+    upstream_remote: typeof payload?.upstream_remote === "string" ? payload.upstream_remote : undefined,
+    upstream_branch: typeof payload?.upstream_branch === "string" ? payload.upstream_branch : undefined,
+    ahead: Number(payload?.ahead) || 0,
+    behind: Number(payload?.behind) || 0,
+    dirty: payload?.dirty === true,
+    dirty_count: Number(payload?.dirty_count) || 0,
+    remotes: Array.isArray(payload?.remotes)
+      ? payload.remotes.map(normalizeGitRemoteInfo).filter((item: GitRemoteInfo) => !!item.name)
+      : [],
+  };
+}
+
+function normalizeGitRemoteOperation(payload: any): GitRemoteOperationPayload {
+  return {
+    result: typeof payload?.result === "string" ? payload.result : "failed",
+    message: typeof payload?.message === "string" ? payload.message : undefined,
+    commit_hash: typeof payload?.commit_hash === "string" ? payload.commit_hash : undefined,
+    push_result: typeof payload?.push_result === "string" ? payload.push_result : undefined,
+    state: payload?.state ? normalizeGitRemoteSync(payload.state) : undefined,
+  };
+}
+
+export async function fetchGitRemotes(rootId: string): Promise<GitRemoteDiscoveryPayload> {
+  const payload = await protectedJSON<any>(appURL("/api/git/remotes", new URLSearchParams({ root: rootId })));
+  return {
+    available: payload?.available === true,
+    status: typeof payload?.status === "string" ? payload.status : "unknown",
+    remotes: Array.isArray(payload?.remotes)
+      ? payload.remotes.map(normalizeGitRemoteInfo).filter((item: GitRemoteInfo) => !!item.name)
+      : [],
+  };
+}
+
+export async function fetchGitRemoteSync(rootId: string): Promise<GitRemoteSyncPayload> {
+  const payload = await protectedJSON<any>(appURL("/api/git/remote/sync", new URLSearchParams({ root: rootId })));
+  return normalizeGitRemoteSync(payload);
+}
+
+export async function runGitFetch(rootId: string, remote?: string): Promise<GitRemoteOperationPayload> {
+  const payload = await protectedJSON<any>(appURL("/api/git/fetch"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ root: rootId, remote: remote || "" }),
+  });
+  return normalizeGitRemoteOperation(payload);
+}
+
+export async function runGitPull(rootId: string): Promise<GitRemoteOperationPayload> {
+  const payload = await protectedJSON<any>(appURL("/api/git/pull"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ root: rootId }),
+  });
+  return normalizeGitRemoteOperation(payload);
+}
+
+export async function runGitPush(rootId: string): Promise<GitRemoteOperationPayload> {
+  const payload = await protectedJSON<any>(appURL("/api/git/push"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ root: rootId }),
+  });
+  return normalizeGitRemoteOperation(payload);
+}
+
+export async function runGitPushUpstream(rootId: string, remote: string, branch: string): Promise<GitRemoteOperationPayload> {
+  const payload = await protectedJSON<any>(appURL("/api/git/push/upstream"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ root: rootId, remote, branch }),
+  });
+  return normalizeGitRemoteOperation(payload);
+}
+
+export async function runGitCommitAndPush(input: GitCommitAndPushInput): Promise<GitRemoteOperationPayload> {
+  const payload = await protectedJSON<any>(appURL("/api/git/commit-and-push"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      root: input.rootId,
+      message: input.message,
+      all: input.all,
+      paths: input.paths || [],
+      include_untracked: input.includeUntracked === true,
+      remote: input.remote || "",
+      branch: input.branch || "",
+    }),
+  });
+  return normalizeGitRemoteOperation(payload);
 }
 
 const DEFAULT_HISTORY_LIMIT = 10;

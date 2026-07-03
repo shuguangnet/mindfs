@@ -274,9 +274,16 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/git/history", h.protectedEndpoint(h.handleGitHistory))
 	r.Get("/api/git/commit/files", h.protectedEndpoint(h.handleGitCommitFiles))
 	r.Get("/api/git/commit/diff", h.protectedEndpoint(h.handleGitCommitDiff))
+	r.Get("/api/git/remotes", h.protectedEndpoint(h.handleGitRemotes))
+	r.Get("/api/git/remote/sync", h.protectedEndpoint(h.handleGitRemoteSync))
 	r.Get("/api/git/branches", h.protectedEndpoint(h.handleGitBranches))
 	r.Get("/api/git/worktrees", h.protectedEndpoint(h.handleGitWorktreeList))
 	r.Post("/api/git/checkout", h.protectedEndpoint(h.handleGitCheckout))
+	r.Post("/api/git/fetch", h.protectedEndpoint(h.handleGitFetch))
+	r.Post("/api/git/pull", h.protectedEndpoint(h.handleGitPull))
+	r.Post("/api/git/push", h.protectedEndpoint(h.handleGitPush))
+	r.Post("/api/git/push/upstream", h.protectedEndpoint(h.handleGitPushUpstream))
+	r.Post("/api/git/commit-and-push", h.protectedEndpoint(h.handleGitCommitAndPush))
 	r.Post("/api/git/worktrees", h.protectedEndpoint(h.handleGitWorktreeCreate))
 	r.Delete("/api/git/worktrees", h.protectedEndpoint(h.handleGitWorktreeRemove))
 	r.Post("/api/upload", h.handleUpload)
@@ -1591,6 +1598,170 @@ func (h *HTTPHandler) handleGitCommitDiff(w http.ResponseWriter, r *http.Request
 		return
 	}
 	respondJSON(w, http.StatusOK, out.Diff)
+}
+
+func (h *HTTPHandler) handleGitRemotes(w http.ResponseWriter, r *http.Request) {
+	rootID := strings.TrimSpace(r.URL.Query().Get("root"))
+	if rootID == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root required"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.GetGitRemoteInfo(r.Context(), usecase.GitRemoteInfoInput{RootID: rootID})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, out.Info)
+}
+
+func (h *HTTPHandler) handleGitRemoteSync(w http.ResponseWriter, r *http.Request) {
+	rootID := strings.TrimSpace(r.URL.Query().Get("root"))
+	if rootID == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root required"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.GetGitRemoteSync(r.Context(), usecase.GitRemoteSyncInput{RootID: rootID})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, out.State)
+}
+
+func (h *HTTPHandler) handleGitFetch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RootID string `json:"root"`
+		Remote string `json:"remote"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json body"))
+		return
+	}
+	req.RootID = strings.TrimSpace(req.RootID)
+	req.Remote = strings.TrimSpace(req.Remote)
+	if req.RootID == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root required"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.FetchGitRemote(r.Context(), usecase.GitRemoteFetchInput{RootID: req.RootID, Remote: req.Remote})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, out.Operation)
+}
+
+func (h *HTTPHandler) handleGitPull(w http.ResponseWriter, r *http.Request) {
+	rootID, ok := decodeGitRootRequest(w, r)
+	if !ok {
+		return
+	}
+	uc := h.service()
+	out, err := uc.PullGitRemote(r.Context(), usecase.GitRemoteSyncInput{RootID: rootID})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, out.Operation)
+}
+
+func (h *HTTPHandler) handleGitPush(w http.ResponseWriter, r *http.Request) {
+	rootID, ok := decodeGitRootRequest(w, r)
+	if !ok {
+		return
+	}
+	uc := h.service()
+	out, err := uc.PushGitRemote(r.Context(), usecase.GitRemoteSyncInput{RootID: rootID})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, out.Operation)
+}
+
+func (h *HTTPHandler) handleGitPushUpstream(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RootID string `json:"root"`
+		Remote string `json:"remote"`
+		Branch string `json:"branch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json body"))
+		return
+	}
+	req.RootID = strings.TrimSpace(req.RootID)
+	req.Remote = strings.TrimSpace(req.Remote)
+	req.Branch = strings.TrimSpace(req.Branch)
+	if req.RootID == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root required"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.PushGitRemoteUpstream(r.Context(), usecase.GitRemotePushUpstreamInput{
+		RootID: req.RootID,
+		Remote: req.Remote,
+		Branch: req.Branch,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, out.Operation)
+}
+
+func (h *HTTPHandler) handleGitCommitAndPush(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RootID           string   `json:"root"`
+		Message          string   `json:"message"`
+		All              bool     `json:"all"`
+		Paths            []string `json:"paths"`
+		IncludeUntracked bool     `json:"include_untracked"`
+		Remote           string   `json:"remote"`
+		Branch           string   `json:"branch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json body"))
+		return
+	}
+	req.RootID = strings.TrimSpace(req.RootID)
+	if req.RootID == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root required"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.CommitAndPushGitRemote(r.Context(), usecase.GitCommitAndPushInput{
+		RootID:           req.RootID,
+		Message:          req.Message,
+		All:              req.All,
+		Paths:            req.Paths,
+		IncludeUntracked: req.IncludeUntracked,
+		Remote:           req.Remote,
+		Branch:           req.Branch,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, out.Operation)
+}
+
+func decodeGitRootRequest(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var req struct {
+		RootID string `json:"root"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json body"))
+		return "", false
+	}
+	rootID := strings.TrimSpace(req.RootID)
+	if rootID == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root required"))
+		return "", false
+	}
+	return rootID, true
 }
 
 func (h *HTTPHandler) handleGitBranches(w http.ResponseWriter, r *http.Request) {

@@ -1,3 +1,16 @@
+# MindFS v0.3.13
+
+## 新功能
+- Git 面板新增远程仓库工作流，可查看 upstream、ahead/behind、远端摘要和工作区阻塞状态
+- 支持在 MindFS 内一键执行 fetch、安全 pull、push 和首次设置 upstream 后发布分支
+- 新增 Commit & Push 工作流，支持选择提交范围、包含 untracked 文件，并在提交成功但推送失败时保留本地 commit 信息
+
+## 优化和修复
+- Git 远端 URL 在 API 返回前会脱敏，避免泄露 token 或账号凭据
+- 后端 Git 操作返回稳定的结构化结果码，前端不再依赖解析 Git 输出
+- 使用本地 bare remote 测试覆盖远端发现、pull/push、push rejected、无 upstream、脏工作区阻塞和 commit-and-push 部分成功场景
+
+
 # MindFS v0.3.12
 
 ## 新功能
