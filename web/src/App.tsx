@@ -78,8 +78,6 @@ import {
   cancelScheduledWebViewCacheClear,
   scheduleWebViewCacheClearOnNextLaunch,
 } from "./services/nativeCacheControl";
-import { storeRelayNodes } from "./services/launcherNodeSync";
-import { isNativeShellRuntime } from "./services/runtime";
 // 直接导入标准组件
 import { AppShell } from "./layout/AppShell";
 import { ModeIcon } from "./components/ModeIcon";
@@ -145,6 +143,21 @@ import {
   updateButtonLabel,
   updateSummaryText,
 } from "./app/updateHelpers";
+import {
+  isRelayNodesPage,
+  isRelayPWAContext,
+  relayNodeIdFromPathname,
+  syncRelayNodesToNative,
+} from "./app/relayHelpers";
+import {
+  loadBooleanRecord,
+  loadLastRootId,
+  loadPersistedFileScrollPositions,
+  loadStoredBoolean,
+  loadStringBooleanRecord,
+  persistFileScrollPositions,
+} from "./app/storageHelpers";
+import { useResponsive } from "./hooks/useResponsive";
 
 const CHILD_SESSION_PAGE_SIZE = 100;
 const MULTI_PROJECT_SESSION_LIMIT = 6;
@@ -289,74 +302,6 @@ function navigatePopup(popup: Window | null, url: string): void {
   }
 }
 
-function relayNodeIdFromPathname(pathname: string): string {
-  const match = /^\/n\/([^/]+)/.exec(String(pathname || ""));
-  return match?.[1] || "";
-}
-
-function isStandaloneDisplayMode(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const navigatorWithStandalone = navigator as Navigator & {
-    standalone?: boolean;
-  };
-  return (
-    window.matchMedia?.("(display-mode: standalone)")?.matches === true ||
-    navigatorWithStandalone.standalone === true
-  );
-}
-
-function isRelayPWAContext(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  return (
-    isStandaloneDisplayMode() &&
-    (/^\/n\/[^/]+/.test(window.location.pathname) ||
-      window.location.pathname === "/nodes" ||
-      window.location.pathname === "/login")
-  );
-}
-
-function isRelayNodesPage(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  return (window.location.pathname.replace(/\/+$/, "") || "/") === "/nodes";
-}
-
-function relayNodeURL(rootID: string): string {
-  if (typeof window === "undefined") {
-    return "";
-  }
-  const trimmed = String(rootID || "").trim();
-  if (!trimmed) {
-    return "";
-  }
-  return new URL(`/n/${encodeURIComponent(trimmed)}/`, window.location.origin).toString();
-}
-
-function syncRelayNodesToNative(dirs: ManagedRootPayload[]): void {
-  if ((!isNativeShellRuntime() && !isRelayPWAContext()) || !isRelayNodesPage()) {
-    return;
-  }
-  const nodes = dirs
-    .map((dir) => {
-      const id = String(dir.id || "").trim();
-      const url = relayNodeURL(id);
-      const name = String(
-        dir.display_name || dir.root_path?.split("/").filter(Boolean).pop() || id,
-      ).trim();
-      if (!id || !url || !name) {
-        return null;
-      }
-      return { name, url };
-    })
-    .filter((node): node is { name: string; url: string } => node !== null);
-  void storeRelayNodes(nodes);
-}
-
 function extractHTTPStatusFromErrorMessage(message: string): number | null {
   const match = /status=(\d{3})|(?:^|:\s)(\d{3})\s[A-Z]/.exec(
     String(message || ""),
@@ -367,45 +312,6 @@ function extractHTTPStatusFromErrorMessage(message: string): number | null {
   }
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function loadPersistedFileScrollPositions(): Record<string, number> {
-  if (typeof window === "undefined") {
-    return {};
-  }
-  try {
-    const raw = window.localStorage.getItem(FILE_SCROLL_STORAGE_KEY);
-    if (!raw) {
-      return {};
-    }
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    const next: Record<string, number> = {};
-    Object.entries(parsed).forEach(([key, value]) => {
-      const scrollTop = Number(value);
-      if (!key || !Number.isFinite(scrollTop) || scrollTop < 0) {
-        return;
-      }
-      next[key] = scrollTop;
-    });
-    return next;
-  } catch {
-    return {};
-  }
-}
-
-function persistFileScrollPositions(positions: Record<string, number>): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.setItem(
-      FILE_SCROLL_STORAGE_KEY,
-      JSON.stringify(positions),
-    );
-  } catch {}
 }
 
 function waitForNextPaint(): Promise<void> {
@@ -486,65 +392,8 @@ function mapManagedRootsToEntries(dirs: ManagedRootPayload[]): FileEntry[] {
   }));
 }
 
-function loadLastRootId(): string {
-  if (typeof window === "undefined") {
-    return "";
-  }
-  return window.localStorage.getItem(LAST_ROOT_STORAGE_KEY) || "";
-}
-
-function loadBooleanRecord(key: string): Record<string, boolean> {
-  if (typeof window === "undefined") {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) || "{}") as Record<string, unknown>;
-    return Object.fromEntries(
-      Object.entries(parsed).filter(([, value]) => typeof value === "boolean"),
-    ) as Record<string, boolean>;
-  } catch {
-    return {};
-  }
-}
-
-function loadStringBooleanRecord(key: string): Record<string, Record<string, boolean>> {
-  if (typeof window === "undefined") {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) || "{}") as Record<string, unknown>;
-    return Object.fromEntries(
-      Object.entries(parsed).map(([root, value]) => [
-        root,
-        value && typeof value === "object"
-          ? Object.fromEntries(
-              Object.entries(value as Record<string, unknown>).filter(([, expanded]) => typeof expanded === "boolean"),
-            )
-          : {},
-      ]),
-    ) as Record<string, Record<string, boolean>>;
-  } catch {
-    return {};
-  }
-}
-
 function hasExplicitFileContext(message: string): boolean {
   return READ_FILE_TOKEN_PATTERN.test(message);
-}
-
-// Hook for responsive detection
-function useResponsive() {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const checkSize = () => {
-      const width = window.innerWidth;
-      setIsMobile(width < 768);
-    };
-    checkSize();
-    window.addEventListener("resize", checkSize);
-    return () => window.removeEventListener("resize", checkSize);
-  }, []);
-  return { isMobile };
 }
 
 type AppProps = {
@@ -553,28 +402,6 @@ type AppProps = {
 
 const MOBILE_ENTER_KEY_SEND_STORAGE_KEY = "mindfs-mobile-enter-key-sends";
 const SIDEBARS_SWAPPED_STORAGE_KEY = "mindfs-sidebars-swapped";
-
-function loadMobileEnterKeySends(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  try {
-    return window.localStorage.getItem(MOBILE_ENTER_KEY_SEND_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function loadSidebarsSwapped(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  try {
-    return window.localStorage.getItem(SIDEBARS_SWAPPED_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
 
 export function App({ onGoHome }: AppProps) {
   const pluginManagerRef = useRef<PluginManager>(new PluginManager());
@@ -610,7 +437,7 @@ export function App({ onGoHome }: AppProps) {
   const drawerOpenByRootRef = useRef<Record<string, boolean>>({});
   const fileCursorRef = useRef<number>(0);
   const fileScrollPositionsRef = useRef<Record<string, number>>(
-    loadPersistedFileScrollPositions(),
+    loadPersistedFileScrollPositions(FILE_SCROLL_STORAGE_KEY),
   );
   const pluginContentRef = useRef<HTMLDivElement | null>(null);
   const lastPluginChapterRef = useRef<string>("");
@@ -701,8 +528,12 @@ export function App({ onGoHome }: AppProps) {
   const [agentsVersion, setAgentsVersion] = useState(0);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const { isMobile } = useResponsive();
-  const [mobileEnterKeySends, setMobileEnterKeySends] = useState(loadMobileEnterKeySends);
-  const [sidebarsSwapped, setSidebarsSwapped] = useState(loadSidebarsSwapped);
+  const [mobileEnterKeySends, setMobileEnterKeySends] = useState(() =>
+    loadStoredBoolean(MOBILE_ENTER_KEY_SEND_STORAGE_KEY),
+  );
+  const [sidebarsSwapped, setSidebarsSwapped] = useState(() =>
+    loadStoredBoolean(SIDEBARS_SWAPPED_STORAGE_KEY),
+  );
   const [isLeftOpen, setIsLeftOpen] = useState(() => window.innerWidth >= 768);
   const [isRightOpen, setIsRightOpen] = useState(
     () => window.innerWidth >= 768,
@@ -1445,7 +1276,7 @@ export function App({ onGoHome }: AppProps) {
     });
 
     deleteRecordKeys(fileScrollPositionsRef.current, (key) => key.startsWith(sessionPrefix));
-    persistFileScrollPositions(fileScrollPositionsRef.current);
+    persistFileScrollPositions(FILE_SCROLL_STORAGE_KEY, fileScrollPositionsRef.current);
     removeLocalStorageByPrefix(`${PLUGIN_QUERY_STORAGE_PREFIX}${root}:`);
     if (
       options?.removeLastRoot === true &&
@@ -4923,7 +4754,7 @@ export function App({ onGoHome }: AppProps) {
     if (!key) return;
     if (!(key in fileScrollPositionsRef.current)) {
       fileScrollPositionsRef.current[key] = 0;
-      persistFileScrollPositions(fileScrollPositionsRef.current);
+      persistFileScrollPositions(FILE_SCROLL_STORAGE_KEY, fileScrollPositionsRef.current);
     }
   }, []);
 
@@ -5405,7 +5236,7 @@ export function App({ onGoHome }: AppProps) {
       return;
     }
 
-    const lastRoot = loadLastRootId();
+    const lastRoot = loadLastRootId(LAST_ROOT_STORAGE_KEY);
     const nextRoot =
       lastRoot && nextRootIds.includes(lastRoot) ? lastRoot : nextRootIds[0];
     await actionHandlersRef.current.open_dir({
@@ -7968,7 +7799,7 @@ export function App({ onGoHome }: AppProps) {
         setManagedRootIds(ids);
         setRootEntries(mapManagedRootsToEntries(nextDirs));
         const urlState = readURLState();
-        const lastRoot = loadLastRootId();
+        const lastRoot = loadLastRootId(LAST_ROOT_STORAGE_KEY);
         const preferredRoot =
           urlState.root && ids.includes(urlState.root)
             ? urlState.root
@@ -9262,7 +9093,7 @@ export function App({ onGoHome }: AppProps) {
             onScrollTopChange={(scrollTop) => {
               if (!currentFileScrollKey) return;
               fileScrollPositionsRef.current[currentFileScrollKey] = scrollTop;
-              persistFileScrollPositions(fileScrollPositionsRef.current);
+              persistFileScrollPositions(FILE_SCROLL_STORAGE_KEY, fileScrollPositionsRef.current);
             }}
             onSessionClick={(sessionKey) =>
               handleSessionChipClick(
