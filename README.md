@@ -37,6 +37,12 @@ Access your personal AI agents and workstation data anywhere, anytime through Mi
 - **Scheduled tasks**: Trigger agents to run tasks at specified times.
 - **Codex Remote Login**: Login to Codex remotely via the /login command.
 
+### Task Board
+- **Concurrent Execution**: Run multiple tasks in parallel, with each task isolated via its own worktree.
+- **Task Templates**: Customize task stages within templates. Each stage supports configuration of the agent, model, planning mode toggle, preset prompts, and more.
+- **Deep Linking**: Dynamic, interactive associations between tasks, worktrees, sessions, and files.
+- **Quick Creation**: Instantly spin up tasks from templates, with support for file uploads, images, and skill inputs.
+
 ### File Access
 
 - **Multiple projects**: Manage several directories at once; sessions are organized per project and stay independent.
