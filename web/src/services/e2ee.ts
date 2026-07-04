@@ -331,7 +331,9 @@ class E2EEService {
   async protectedJSON<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
     const response = await this.protectedFetch(input, init);
     if (!response.ok) {
-      const payload = await this.parseProtectedJSONResponse<{ error?: string; message?: string }>(response.clone()).catch((): { error?: string; message?: string } => ({}));
+      const payload: { error?: string; message?: string } = await this
+        .parseProtectedJSONResponse<{ error?: string; message?: string }>(response.clone())
+        .catch(() => ({}));
       throw new Error(String(payload.message || payload.error || `request failed: ${response.status}`));
     }
     return this.parseProtectedJSONResponse<T>(response);
@@ -560,7 +562,7 @@ async function hkdfBytes(secret: Uint8Array, salt: Uint8Array | ArrayBuffer | nu
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: salt ? toArrayBuffer(toUint8Array(salt)) : new Uint8Array(),
+      salt: salt ? toArrayBuffer(toUint8Array(salt)) : new ArrayBuffer(0),
       info: toArrayBuffer(toUint8Array(info)),
     },
     baseKey,

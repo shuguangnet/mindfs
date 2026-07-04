@@ -93,10 +93,10 @@ func TestFetchAndVerifyManifest(t *testing.T) {
 	}
 	restoreReleasePublicKey(t, base64.StdEncoding.EncodeToString(publicKey))
 
-	payload := []byte(`{"version":"v1.2.3","repo":"a9gent/mindfs","artifacts":[{"name":"mindfs_v1.2.3_linux_amd64.tar.gz","sha256":"` + strings.Repeat("a", 64) + `","size":123}]}` + "\n")
+	payload := []byte(`{"version":"v1.2.3","repo":"shuguangnet/mindfs","artifacts":[{"name":"mindfs_v1.2.3_linux_amd64.tar.gz","sha256":"` + strings.Repeat("a", 64) + `","size":123}]}` + "\n")
 	body := signedManifestBody(t, payload, ed25519.Sign(privateKey, payload))
-	manifestURL := "https://github.com/a9gent/mindfs/releases/download/v1.2.3/mindfs_v1.2.3_manifest.json"
-	service := NewService("a9gent/mindfs", "v1.2.2", "/tmp/bin/mindfs", nil, time.Hour)
+	manifestURL := "https://github.com/shuguangnet/mindfs/releases/download/v1.2.3/mindfs_v1.2.3_manifest.json"
+	service := NewService("shuguangnet/mindfs", "v1.2.2", "/tmp/bin/mindfs", nil, time.Hour)
 	service.client = &http.Client{Transport: staticTransport{
 		manifestURL: body,
 	}}
@@ -119,8 +119,8 @@ func TestFetchAndVerifyManifestRejectsBadSignature(t *testing.T) {
 
 	payload := []byte(`{"version":"v1.2.3","artifacts":[]}` + "\n")
 	body := signedManifestBody(t, payload, make([]byte, ed25519.SignatureSize))
-	manifestURL := "https://github.com/a9gent/mindfs/releases/download/v1.2.3/mindfs_v1.2.3_manifest.json"
-	service := NewService("a9gent/mindfs", "v1.2.2", "/tmp/bin/mindfs", nil, time.Hour)
+	manifestURL := "https://github.com/shuguangnet/mindfs/releases/download/v1.2.3/mindfs_v1.2.3_manifest.json"
+	service := NewService("shuguangnet/mindfs", "v1.2.2", "/tmp/bin/mindfs", nil, time.Hour)
 	service.client = &http.Client{Transport: staticTransport{
 		manifestURL: body,
 	}}
@@ -146,21 +146,8 @@ func TestVerifyFileSHA256(t *testing.T) {
 	}
 }
 
-func TestRelayAssetURL(t *testing.T) {
-	name := "mindfs_v0.3.4_windows_amd64.zip"
-	want := "https://relay.a9gent.com/mindfs-downloads/mindfs_v0.3.4_windows_amd64.zip"
-	if got := relayAssetURL(name); got != want {
-		t.Fatalf("relayAssetURL() = %q, want %q", got, want)
-	}
-	for _, name := range []string{"", "../mindfs.zip", `dir\mindfs.zip`} {
-		if got := relayAssetURL(name); got != "" {
-			t.Fatalf("relayAssetURL(%q) = %q, want empty", name, got)
-		}
-	}
-}
-
 func TestInstallLayoutInstalled(t *testing.T) {
-	service := NewService("a9gent/mindfs", "v1.2.2", filepath.Join("opt", "mindfs", "bin", "mindfs"), nil, time.Hour)
+	service := NewService("shuguangnet/mindfs", "v1.2.2", filepath.Join("opt", "mindfs", "bin", "mindfs"), nil, time.Hour)
 	layout, err := service.installLayout()
 	if err != nil {
 		t.Fatalf("installLayout() error = %v", err)
@@ -184,7 +171,7 @@ func TestInstallLayoutInstalled(t *testing.T) {
 }
 
 func TestInstallLayoutPortable(t *testing.T) {
-	service := NewService("a9gent/mindfs", "v1.2.2", filepath.Join("tmp", "mindfs_v1.2.2_linux_amd64", "mindfs"), nil, time.Hour)
+	service := NewService("shuguangnet/mindfs", "v1.2.2", filepath.Join("tmp", "mindfs_v1.2.2_linux_amd64", "mindfs"), nil, time.Hour)
 	layout, err := service.installLayout()
 	if err != nil {
 		t.Fatalf("installLayout() error = %v", err)

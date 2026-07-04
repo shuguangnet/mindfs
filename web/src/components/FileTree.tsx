@@ -54,6 +54,10 @@ const APPEARANCE_OPTIONS: Array<{ value: AppearanceMode; label: string }> = [
   { value: "light", label: "浅色模式" },
   { value: "meadow", label: "翠谷金光" },
   { value: "moss", label: "苔痕绿影" },
+  { value: "mist", label: "雾蓝晨光" },
+  { value: "sakura", label: "胭脂薄雾" },
+  { value: "amber", label: "暖砂纸页" },
+  { value: "graphite", label: "石墨夜航" },
   { value: "system", label: "跟随系统" },
 ];
 

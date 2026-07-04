@@ -1,4 +1,4 @@
-.PHONY: help dev dev-backend dev-web build-web build build-android build-harmony install uninstall build-all start start-server test dist-clean publish-release-notes verify-release release tag
+.PHONY: help dev dev-backend dev-web build-web build build-android build-harmony install uninstall build-all deploy-release start start-server test dist-clean publish-release-notes verify-release release tag
 
 GO ?= go
 NPM ?= npm
@@ -22,6 +22,7 @@ help:
 		"  make install      # install binary and built static assets into $(PREFIX)" \
 		"  make uninstall    # remove installed binary and static assets from $(PREFIX)" \
 		"  make build-all    # cross-compile for all platforms into dist/" \
+		"  make deploy-release ARCHIVE=dist/mindfs_v1.2.3_linux_amd64.tar.gz  # deploy a Linux release archive with systemd" \
 		"  make dist-clean   # remove dist/ directory" \
 		"  make start        # run mindfs on $(ADDR) with built static assets" \
 		"  make start-server # backend entrypoint serving built static assets" \
@@ -85,6 +86,8 @@ HARMONY_HAP ?= $(HARMONY_DIR)/entry/build/default/outputs/default/entry-default-
 HARMONY_DIST_HAP ?= $(DIST_DIR)/mindfs_$(VERSION)_harmony_$(HARMONY_BUILD_MODE).hap
 RELEASE_ANDROID ?= 0
 RELEASE_UPLOAD_JOBS ?= 4
+RELEASE_REPO ?= shuguangnet/mindfs
+RELEASE_REMOTE ?= fork
 ANDROID_JAVA_HOME ?= $(shell if command -v /usr/libexec/java_home >/dev/null 2>&1; then /usr/libexec/java_home -v 21 2>/dev/null; fi)
 ANDROID_GRADLE_ENV :=
 ifneq ($(strip $(ANDROID_JAVA_HOME)),)
@@ -107,6 +110,15 @@ PLATFORMS := \
 
 build-all: build-web
 	@bash scripts/build-all.sh "$(VERSION)" "$(DIST_DIR)"
+
+deploy-release:
+	@test -n "$(ARCHIVE)" || (echo "Usage: make deploy-release ARCHIVE=dist/mindfs_v1.2.3_linux_amd64.tar.gz [SERVICE_NAME=mindfs] [ADDR=127.0.0.1:7331] [ROOT=/path] [AGENT_CONFIG=/path/to/agents.json]" >&2; exit 1)
+	@bash scripts/deploy-release.sh \
+		--archive "$(ARCHIVE)" \
+		--service-name "$(SERVICE_NAME)" \
+		--addr "$(ADDR)" \
+		$(if $(ROOT),--root "$(ROOT)") \
+		$(if $(AGENT_CONFIG),--agent-config "$(AGENT_CONFIG)")
 
 build-android:
 	cd $(WEB_DIR) && $(NPM) run build:android
@@ -134,9 +146,9 @@ dist-clean:
 tag:
 	@test -n "$(TAG)" || (echo "Usage: make tag TAG=v1.2.3" >&2; exit 1)
 	@echo "Tagging $(TAG)"
-	git push origin main
+	git push $(RELEASE_REMOTE) main
 	git tag $(TAG)
-	git push origin $(TAG)
+	git push $(RELEASE_REMOTE) $(TAG)
 
 # Usage: make publish-release-notes TAG=v1.2.3
 publish-release-notes:
@@ -149,14 +161,14 @@ publish-release-notes:
 		echo "No release notes changes to commit."; \
 	else \
 		git commit -m "update release notes"; \
-		git push origin main; \
+		git push $(RELEASE_REMOTE) main; \
 	fi
 
 # Usage: make verify-release TAG=v1.2.3
 verify-release:
 	@test -n "$(TAG)" || (echo "Usage: make verify-release TAG=v1.2.3" >&2; exit 1)
 	@test -n "$(MINDFS_RELEASE_PUBLIC_KEY)" || (echo "Error: MINDFS_RELEASE_PUBLIC_KEY is required to verify release manifests." >&2; exit 1)
-	@$(GO) run scripts/sign-release-manifest.go -verify -version "$(TAG)" -dist "$(DIST_DIR)" -repo "a9gent/mindfs" -public-key "$(MINDFS_RELEASE_PUBLIC_KEY)"
+	@$(GO) run scripts/sign-release-manifest.go -verify -version "$(TAG)" -dist "$(DIST_DIR)" -repo "$(RELEASE_REPO)" -public-key "$(MINDFS_RELEASE_PUBLIC_KEY)"
 
 # Usage: make release TAG=v1.2.3 [RELEASE_ANDROID=1]
 # Builds desktop/server platforms and creates a GitHub release.
@@ -180,7 +192,7 @@ release:
 	else \
 		echo "Skipping Android release. Use RELEASE_ANDROID=1 to include the APK."; \
 	fi
-	@$(GO) run scripts/sign-release-manifest.go -version "$(TAG)" -dist "$(DIST_DIR)" -repo "a9gent/mindfs"
+	@$(GO) run scripts/sign-release-manifest.go -version "$(TAG)" -dist "$(DIST_DIR)" -repo "$(RELEASE_REPO)"
 	$(MAKE) verify-release TAG="$(TAG)" MINDFS_RELEASE_PUBLIC_KEY="$(MINDFS_RELEASE_PUBLIC_KEY)"
 	@echo "Creating draft GitHub release $(TAG)"
 	gh release create $(TAG) \

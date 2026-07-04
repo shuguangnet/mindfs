@@ -37,7 +37,6 @@ type LoginProps = {
   onOpenNode: (nodeURL: string) => void;
 };
 
-const RELAY_URL = "https://relay.a9gent.com/nodes";
 const LAUNCHER_BG =
   "radial-gradient(circle at top left, rgba(91, 125, 184, 0.07), transparent 22%), radial-gradient(circle at right 18%, rgba(148, 163, 184, 0.18), transparent 24%), linear-gradient(180deg, #f8fafc 0%, #edf2f7 100%)";
 const SURFACE = "var(--mindfs-launcher-surface)";
@@ -409,14 +408,10 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
         }}
       >
         <Card
-          hoverable
-          onClick={() => onOpenNode(RELAY_URL)}
           style={{
             width: "100%",
-            textAlign: "left",
             border: `1px solid ${BORDER}`,
             background: SURFACE_STRONG,
-            cursor: "pointer",
             boxShadow: SHADOW,
             backdropFilter: "blur(20px)",
           }}
@@ -424,7 +419,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
         >
           <div style={{ minWidth: 0, display: "grid", gap: "4px" }}>
             <Title level={4} style={{ margin: 0, color: TEXT, lineHeight: 1.2 }}>
-              mindfs relayer
+              本地直连
             </Title>
             <Text
               style={{
@@ -434,7 +429,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                 wordBreak: "break-word",
               }}
             >
-              {RELAY_URL}
+              不再内置中转，请添加你自己的 MindFS 节点地址。
             </Text>
           </div>
         </Card>

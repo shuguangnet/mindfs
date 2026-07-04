@@ -1,3 +1,15 @@
+# MindFS v0.4.1
+
+## 新功能
+- 合并上游 v0.4.0，包含任务看板、任务模板、worktree 侧边栏、关联文件和双栏 git diff 等功能
+- 保留 fork 版本的 Git 远端工作流、服务器部署脚本和多套自定义外观主题
+
+## 优化和修复
+- 修复合并后 Git API 路由冲突，普通 Git 操作和远端同步工作流可并存
+- 修复合并后 gitview 测试 helper 重名导致的编译问题
+- 前端类型检查和生产构建已通过
+
+
 # MindFS v0.4.0
 
 ## 新功能
@@ -19,6 +31,45 @@
 - 优化 acp 会话加载速度
 - 优化会话卡片展示
 - claude 会话导入忽略 subagent
+
+
+# MindFS v0.3.13
+
+## 新功能
+- Git 面板新增远程仓库工作流，可查看 upstream、ahead/behind、远端摘要和工作区阻塞状态
+- 支持在 MindFS 内一键执行 fetch、安全 pull、push 和首次设置 upstream 后发布分支
+- 新增 Commit & Push 工作流，支持选择提交范围、包含 untracked 文件，并在提交成功但推送失败时保留本地 commit 信息
+
+## 优化和修复
+- Git 远端 URL 在 API 返回前会脱敏，避免泄露 token 或账号凭据
+- 后端 Git 操作返回稳定的结构化结果码，前端不再依赖解析 Git 输出
+- 使用本地 bare remote 测试覆盖远端发现、pull/push、push rejected、无 upstream、脏工作区阻塞和 commit-and-push 部分成功场景
+
+
+# MindFS v0.3.12
+
+## 新功能
+- 新增 `雾蓝晨光`、`胭脂薄雾`、`暖砂纸页`、`石墨夜航` 四套外观皮肤
+- 外观选择在页面启动阶段即可识别新皮肤，减少刷新时的主题闪烁
+
+
+# MindFS v0.3.11
+
+## 优化和修复
+- `deploy-release.sh` 生成的 systemd service 现在会带常见用户级二进制目录 PATH，避免 `codex`、`gemini`、`reasonix` 等 agent 已安装但 MindFS 误判为未安装
+- README 补充服务器上一键部署和 agent 自动检测 PATH 说明
+
+
+# MindFS v0.3.9
+
+## 新功能
+- release 包中增加 `scripts/deploy-release.sh`，Linux 服务器可直接一键部署
+- `make deploy-release`，可用本地 Linux release 包快速部署并写入 systemd service
+- 支持空白 Linux 服务器通过 `curl | bash` 直接部署最新 release
+
+## 优化和修复
+- `build-all` 产出的 release 包现在内置 `install.sh` 和 `deploy-release.sh`
+- 修复更新器中 `downloadReleaseAsset` 缺少返回值导致的编译失败
 
 
 # MindFS v0.3.8
