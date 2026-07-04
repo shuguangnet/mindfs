@@ -1,4 +1,8 @@
 import React from "react";
+import { Layout, Typography } from "antd";
+
+const { Content, Header } = Layout;
+const { Text } = Typography;
 
 type RightSidebarProps = {
   children?: React.ReactNode;
@@ -6,8 +10,8 @@ type RightSidebarProps = {
 
 export function RightSidebar({ children }: RightSidebarProps) {
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      <div
+    <Layout style={{ flex: 1, minHeight: 0, background: "transparent" }}>
+      <Header
         style={{
           height: "36px",
           padding: "0 16px",
@@ -23,7 +27,7 @@ export function RightSidebar({ children }: RightSidebarProps) {
           boxSizing: "border-box",
         }}
       >
-        <div
+        <Text
           style={{
             fontSize: "11px",
             fontWeight: 600,
@@ -32,9 +36,11 @@ export function RightSidebar({ children }: RightSidebarProps) {
           }}
         >
           会话
-        </div>
-      </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "12px 12px 16px" }}>{children}</div>
-    </div>
+        </Text>
+      </Header>
+      <Content style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "12px 12px 16px" }}>
+        {children}
+      </Content>
+    </Layout>
   );
 }

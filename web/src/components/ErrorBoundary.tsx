@@ -1,4 +1,5 @@
 import React, { Component, type ReactNode } from "react";
+import { Button, Card, Result } from "antd";
 
 type ErrorBoundaryProps = {
   children: ReactNode;
@@ -46,64 +47,25 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       }
 
       return (
-        <div
+        <Card
+          bordered
           style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "40px 20px",
-            textAlign: "center",
-            background: "rgba(239, 68, 68, 0.05)",
-            borderRadius: "12px",
-            margin: "20px",
+            margin: 20,
+            background: "var(--panel-bg)",
+            borderColor: "var(--panel-border)",
           }}
         >
-          <div
-            style={{
-              fontSize: "48px",
-              marginBottom: "16px",
-            }}
-          >
-            ⚠️
-          </div>
-          <div
-            style={{
-              fontSize: "16px",
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              marginBottom: "8px",
-            }}
-          >
-            {name ? `${name} 出错了` : "出错了"}
-          </div>
-          <div
-            style={{
-              fontSize: "13px",
-              color: "var(--text-secondary)",
-              marginBottom: "20px",
-              maxWidth: "400px",
-            }}
-          >
-            {error?.message || "发生了未知错误"}
-          </div>
-          <button
-            type="button"
-            onClick={this.handleRetry}
-            style={{
-              padding: "10px 20px",
-              borderRadius: "8px",
-              border: "none",
-              background: "#3b82f6",
-              color: "#fff",
-              fontSize: "13px",
-              fontWeight: 500,
-              cursor: "pointer",
-            }}
-          >
-            重试
-          </button>
-        </div>
+          <Result
+            status="error"
+            title={name ? `${name} 出错了` : "出错了"}
+            subTitle={error?.message || "发生了未知错误"}
+            extra={[
+              <Button key="retry" type="primary" onClick={this.handleRetry}>
+                重试
+              </Button>,
+            ]}
+          />
+        </Card>
       );
     }
 

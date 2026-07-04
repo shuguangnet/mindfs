@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { Alert, Button, Input, Modal, Space } from "antd";
 import { getViewModeSystemPrompt } from "./renderer/viewCatalog";
 import { Renderer } from "./renderer/Renderer";
 import {
@@ -119,7 +120,7 @@ import {
   ProjectAddPopover,
   type ProjectAddMode,
 } from "./components/ProjectAddPopover";
-import { fetchAgents, type AgentStatus } from "./services/agents";
+import { fetchAgents, runAgentLifecycle, type AgentStatus } from "./services/agents";
 import { fetchCandidates, type CandidateItem } from "./services/candidates";
 import {
   createTask,
@@ -6150,40 +6151,21 @@ export function App({ onGoHome }: AppProps) {
   );
 
   const handleRunAgentLifecycleCommand = useCallback(
-    async (agentName: string, action: "install" | "update", commands: string[]) => {
-      const activeRoot = currentRootIdRef.current;
-      if (!activeRoot) {
-        throw new Error("当前未选择项目，无法执行命令");
+    async (agentName: string, action: "install" | "update") => {
+      const result = await runAgentLifecycle(agentName, action);
+      if (!result.success) {
+        throw new Error(result.error || result.output || "Agent 更新失败");
       }
-      const script = commands.map((command) => command.trim()).filter(Boolean).join("\n");
-      if (!script) {
-        throw new Error("agents.json 未配置命令");
-      }
-      const previousBoundKey = boundSessionByRootRef.current[activeRoot];
-      if (previousBoundKey && !previousBoundKey.startsWith("pending-")) {
-        suppressedAutoBindSessionByRootRef.current[activeRoot] = previousBoundKey;
-      }
-      selectedSessionRef.current = null;
-      currentSessionRef.current = null;
-      setSelectedSession(null);
-      selectedSessionByRootRef.current[activeRoot] = null;
-      setBoundSessionForRoot(activeRoot, null);
-      setDrawerSessionForRoot(activeRoot, null);
-      setInteractionMode("drawer");
-      setDrawerOpenForRoot(activeRoot, true);
-      await handleSendMessage(script, "command", "");
+      fetchAgents(true).then(setAvailableAgents).catch((error) => {
+        console.warn("[agent/lifecycle] refresh failed", error);
+      });
       console.info("[agent/lifecycle] command dispatched", {
         agent: agentName,
         action,
-        commandCount: commands.length,
+        exitCode: result.exit_code,
       });
     },
-    [
-      handleSendMessage,
-      setBoundSessionForRoot,
-      setDrawerOpenForRoot,
-      setDrawerSessionForRoot,
-    ],
+    [],
   );
 
   const handleCancelCurrentTurn = useCallback(
@@ -13248,35 +13230,38 @@ export function App({ onGoHome }: AppProps) {
       {bootstrapState.phase === "needs_pairing" &&
         e2eeState.required &&
         !e2eeState.unlocked ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15, 23, 42, 0.46)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "24px",
-            zIndex: 2000,
+        <Modal
+          open
+          centered
+          closable={false}
+          maskClosable={false}
+          title="端到端配对码"
+          footer={
+            <Space style={{ width: "100%", justifyContent: "space-between" }}>
+              <Button
+                type="text"
+                onClick={() => {
+                  setE2eeSecretInput("");
+                  setE2eePromptError("");
+                }}
+              >
+                清空
+              </Button>
+              <Button
+                type="primary"
+                onClick={() => void submitE2EESecret()}
+                loading={e2eePromptBusy}
+              >
+                继续
+              </Button>
+            </Space>
+          }
+          styles={{
+            mask: { background: "rgba(15, 23, 42, 0.46)" },
           }}
         >
-          <div
-            style={{
-              width: "min(460px, 100%)",
-              background: "#fff",
-              borderRadius: "20px",
-              padding: "24px",
-              boxShadow: "0 28px 80px rgba(15, 23, 42, 0.22)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "14px",
-            }}
-	          >
-	            <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>
-	              端到端配对码
-	            </div>
-	            <input
-	              type="text"
+            <Input
+              type="text"
               value={e2eeSecretInput}
               onChange={(event) => {
                 setE2eeSecretInput(event.target.value);
@@ -13292,56 +13277,17 @@ export function App({ onGoHome }: AppProps) {
 	              placeholder="输入终端中显示的端到端配对码"
               autoFocus
               spellCheck={false}
-              style={{
-                width: "100%",
-                borderRadius: "14px",
-                border: "1px solid rgba(148, 163, 184, 0.4)",
-                padding: "14px 16px",
-                fontSize: "14px",
-                outline: "none",
-              }}
+              status={e2eePromptError ? "error" : undefined}
             />
             {e2eePromptError ? (
-              <div style={{ color: "#dc2626", fontSize: "13px" }}>
-                {e2eePromptError}
-              </div>
+              <Alert
+                type="error"
+                showIcon
+                message={e2eePromptError}
+                style={{ marginTop: 12 }}
+              />
             ) : null}
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setE2eeSecretInput("");
-                  setE2eePromptError("");
-                }}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  color: "#64748b",
-                  padding: 0,
-                  cursor: "pointer",
-                }}
-              >
-                清空
-              </button>
-              <button
-                type="button"
-                onClick={() => void submitE2EESecret()}
-                disabled={e2eePromptBusy}
-                style={{
-                  border: "none",
-                  borderRadius: "999px",
-                  background: e2eePromptBusy ? "#94a3b8" : "#0f172a",
-                  color: "#fff",
-                  padding: "10px 18px",
-                  cursor: e2eePromptBusy ? "not-allowed" : "pointer",
-                  fontWeight: 600,
-                }}
-              >
-                {e2eePromptBusy ? "验证中..." : "继续"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       ) : null}
       {taskInlineEdit ? (
 	        (() => {
@@ -13754,78 +13700,44 @@ export function App({ onGoHome }: AppProps) {
         })()
       ) : null}
       {taskSessionErrorDialog ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 96,
-            background: "rgba(15, 23, 42, 0.28)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "24px",
-          }}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setTaskSessionErrorDialog(null);
-            }
+        <Modal
+          open
+          title={taskSessionErrorDialog.title}
+          centered
+          footer={null}
+          onCancel={() => setTaskSessionErrorDialog(null)}
+          width={460}
+          styles={{
+            mask: { background: "rgba(15, 23, 42, 0.28)" },
           }}
         >
-          <section
-            style={{
-              width: "min(460px, 100%)",
-              borderRadius: "10px",
-              border: "1px solid rgba(217, 119, 6, 0.22)",
-              background: "var(--menu-bg)",
-              boxShadow: "0 24px 60px rgba(15, 23, 42, 0.24)",
-              overflow: "hidden",
-            }}
-          >
-            <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
-              <div style={{ minWidth: 0, fontSize: "13px", fontWeight: 800, color: "var(--text-color)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {taskSessionErrorDialog.title}
-              </div>
-              <button type="button" aria-label="关闭错误信息" onClick={() => setTaskSessionErrorDialog(null)} style={taskCardIconButtonStyle()}>
-                ×
-              </button>
-            </div>
-            <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <Alert
+              type="warning"
+              showIcon
+              message={taskSessionErrorDialog.message}
+              style={{ overflowWrap: "anywhere" }}
+            />
+            {taskSessionErrorDialog.details.map((detail) => (
               <div
+                key={detail}
                 style={{
                   padding: "10px 12px",
                   borderRadius: "8px",
-                  background: "rgba(217, 119, 6, 0.08)",
-                  border: "1px solid rgba(217, 119, 6, 0.18)",
-                  color: "var(--text-color)",
+                  background: "rgba(100, 116, 139, 0.08)",
+                  border: "1px solid var(--border-color)",
+                  color: "var(--text-secondary)",
                   fontSize: "12px",
                   lineHeight: 1.5,
                   whiteSpace: "pre-wrap",
                   overflowWrap: "anywhere",
                 }}
               >
-                {taskSessionErrorDialog.message}
+                {detail}
               </div>
-              {taskSessionErrorDialog.details.map((detail) => (
-                <div
-                  key={detail}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    background: "rgba(100, 116, 139, 0.08)",
-                    border: "1px solid var(--border-color)",
-                    color: "var(--text-secondary)",
-                    fontSize: "12px",
-                    lineHeight: 1.5,
-                    whiteSpace: "pre-wrap",
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  {detail}
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
+            ))}
+          </div>
+        </Modal>
       ) : null}
       <ScheduledAgentTaskDialog
         open={scheduledAgentDialogOpen}

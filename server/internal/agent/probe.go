@@ -19,31 +19,34 @@ import (
 )
 
 type Status struct {
-	Name                string                   `json:"name"`
-	Protocol            Protocol                 `json:"protocol,omitempty"`
-	Installed           bool                     `json:"installed"`
-	Available           bool                     `json:"available"`
-	Version             string                   `json:"version,omitempty"`
-	Error               string                   `json:"error,omitempty"`
-	RuntimeError        string                   `json:"-"`
-	ProbeError          string                   `json:"-"`
-	LastProbe           time.Time                `json:"last_probe"`
-	CurrentModelID      string                   `json:"current_model_id,omitempty"`
-	CurrentModeID       string                   `json:"current_mode_id,omitempty"`
-	DefaultModelID      string                   `json:"default_model_id,omitempty"`
-	DefaultEffort       string                   `json:"default_effort,omitempty"`
-	DefaultFastService  string                   `json:"default_fast_service,omitempty"`
-	SupportsFastService bool                     `json:"supports_fast_service"`
-	Models              []agenttypes.ModelInfo   `json:"models,omitempty"`
-	Modes               []agenttypes.ModeInfo    `json:"modes"`
-	Efforts             []string                 `json:"efforts,omitempty"`
-	ModelsError         string                   `json:"models_error,omitempty"`
-	ModesError          string                   `json:"modes_error,omitempty"`
-	Commands            []agenttypes.CommandInfo `json:"commands,omitempty"`
-	CommandsError       string                   `json:"commands_error,omitempty"`
-	Brief               string                   `json:"brief,omitempty"`
-	InstallCommands     []string                 `json:"install_commands,omitempty"`
-	UpdateCommands      []string                 `json:"update_commands,omitempty"`
+	Name                 string                   `json:"name"`
+	Protocol             Protocol                 `json:"protocol,omitempty"`
+	Installed            bool                     `json:"installed"`
+	Available            bool                     `json:"available"`
+	Version              string                   `json:"version,omitempty"`
+	Error                string                   `json:"error,omitempty"`
+	RuntimeError         string                   `json:"-"`
+	ProbeError           string                   `json:"-"`
+	LastProbe            time.Time                `json:"last_probe"`
+	CurrentModelID       string                   `json:"current_model_id,omitempty"`
+	CurrentModeID        string                   `json:"current_mode_id,omitempty"`
+	DefaultModelID       string                   `json:"default_model_id,omitempty"`
+	DefaultEffort        string                   `json:"default_effort,omitempty"`
+	DefaultFastService   string                   `json:"default_fast_service,omitempty"`
+	SupportsFastService  bool                     `json:"supports_fast_service"`
+	Models               []agenttypes.ModelInfo   `json:"models,omitempty"`
+	Modes                []agenttypes.ModeInfo    `json:"modes"`
+	Efforts              []string                 `json:"efforts,omitempty"`
+	ModelsError          string                   `json:"models_error,omitempty"`
+	ModesError           string                   `json:"modes_error,omitempty"`
+	Commands             []agenttypes.CommandInfo `json:"commands,omitempty"`
+	CommandsError        string                   `json:"commands_error,omitempty"`
+	Brief                string                   `json:"brief,omitempty"`
+	Capabilities         []string                 `json:"capabilities,omitempty"`
+	SupportsDockerBackup bool                     `json:"supports_docker_backup"`
+	SupportsOnlineUpdate bool                     `json:"supports_online_update"`
+	InstallCommands      []string                 `json:"install_commands,omitempty"`
+	UpdateCommands       []string                 `json:"update_commands,omitempty"`
 }
 
 const (
@@ -665,6 +668,20 @@ func statusChanged(prev Status, next Status) bool {
 	if prev.SupportsFastService != next.SupportsFastService {
 		return true
 	}
+	if prev.SupportsDockerBackup != next.SupportsDockerBackup {
+		return true
+	}
+	if prev.SupportsOnlineUpdate != next.SupportsOnlineUpdate {
+		return true
+	}
+	if len(prev.Capabilities) != len(next.Capabilities) {
+		return true
+	}
+	for i := range prev.Capabilities {
+		if prev.Capabilities[i] != next.Capabilities[i] {
+			return true
+		}
+	}
 	if len(prev.Efforts) != len(next.Efforts) {
 		return true
 	}
@@ -768,6 +785,9 @@ func probeInstallStatus(name string, def Definition, ts time.Time) Status {
 	status.Brief = strings.TrimSpace(def.Brief)
 	status.InstallCommands = append([]string(nil), def.InstallCommands...)
 	status.UpdateCommands = append([]string(nil), def.UpdateCommands...)
+	status.Capabilities = definitionCapabilities(def)
+	status.SupportsDockerBackup = hasCapability(status.Capabilities, "docker_backup")
+	status.SupportsOnlineUpdate = len(status.UpdateCommands) > 0
 	if def.Command == "" {
 		status.ProbeError = "command required"
 		return status
@@ -779,6 +799,31 @@ func probeInstallStatus(name string, def Definition, ts time.Time) Status {
 	status.Installed = true
 	status.ProbeError = "probe pending"
 	return status
+}
+
+func definitionCapabilities(def Definition) []string {
+	capabilities := append([]string(nil), def.Capabilities...)
+	capabilities = append(capabilities, "docker_backup")
+	if len(def.ConfigBackup.FileSources) > 0 || len(def.ConfigBackup.EnvKeys) > 0 {
+		capabilities = append(capabilities, "config_backup")
+	}
+	if len(def.InstallCommands) > 0 {
+		capabilities = append(capabilities, "online_install")
+	}
+	if len(def.UpdateCommands) > 0 {
+		capabilities = append(capabilities, "online_update")
+	}
+	return normalizeCapabilities(capabilities)
+}
+
+func hasCapability(capabilities []string, capability string) bool {
+	capability = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(capability)), "-", "_")
+	for _, item := range capabilities {
+		if item == capability {
+			return true
+		}
+	}
+	return false
 }
 
 func agentDefinitionProtocol(name string, def Definition) Protocol {
@@ -917,6 +962,15 @@ func preserveKnownCapabilities(prev Status, next Status) Status {
 	}
 	if next.Brief == "" {
 		next.Brief = prev.Brief
+	}
+	if len(next.Capabilities) == 0 {
+		next.Capabilities = prev.Capabilities
+	}
+	if !next.SupportsDockerBackup {
+		next.SupportsDockerBackup = prev.SupportsDockerBackup
+	}
+	if !next.SupportsOnlineUpdate {
+		next.SupportsOnlineUpdate = prev.SupportsOnlineUpdate
 	}
 	if len(next.InstallCommands) == 0 {
 		next.InstallCommands = prev.InstallCommands

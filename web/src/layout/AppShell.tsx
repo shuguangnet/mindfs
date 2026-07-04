@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from "react";
+import { Button, Drawer, Layout, Tooltip } from "antd";
+
+const { Content, Footer, Sider } = Layout;
 
 type AppShellProps = {
   sidebar: React.ReactNode;
@@ -138,16 +141,11 @@ export function AppShell({
     "--mindfs-actionbar-bottom-padding": "calc(env(safe-area-inset-bottom, 0px) + 2px)",
   };
 
-  const mobileSidebarStyle = (side: 'left' | 'right'): React.CSSProperties => ({
-    position: "fixed",
+  const mobileDrawerContentStyle = (side: 'left' | 'right'): React.CSSProperties => ({
     top: "var(--mindfs-safe-area-top, env(safe-area-inset-top, 0px))",
     bottom: 0,
-    [side]: 0,
-    width: "75vw",
-    zIndex: 2000,
     background: "var(--mindfs-topbar-bg, var(--mobile-sidebar-bg, var(--sidebar-bg)))",
     boxShadow: side === 'left' ? "4px 0 24px rgba(0,0,0,0.15)" : "-4px 0 24px rgba(0,0,0,0.15)",
-    transition: "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)",
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
@@ -155,9 +153,7 @@ export function AppShell({
     borderBottomRightRadius: side === 'left' ? "14px" : undefined,
     borderTopLeftRadius: side === 'right' ? "14px" : undefined,
     borderBottomLeftRadius: side === 'right' ? "14px" : undefined,
-    willChange: "transform",
     backfaceVisibility: "hidden",
-    transform: "translateX(0) translateZ(0)",
   });
 
   const overlayStyle: React.CSSProperties = {
@@ -179,26 +175,72 @@ export function AppShell({
   };
 
   return (
-    <div style={shellStyle}>
+    <Layout className="mindfs-enterprise-shell" style={shellStyle}>
       {isMobile && <div style={overlayStyle} onClick={() => { onCloseLeft?.(); onCloseRight?.(); }} />}
 
-      {(!isMobile || physicalLeftOpen) && physicalLeftContent ? (
-        <aside
-          style={
-            isMobile
-              ? mobileSidebarStyle('left')
-              : {
-                  ...sidebarStyle,
-                  overflow: physicalLeftOpen ? "auto" : "hidden",
-                  pointerEvents: physicalLeftOpen ? "auto" : "none",
-                }
-          }
+      {isMobile ? (
+        <>
+          <Drawer
+            open={physicalLeftOpen && !!physicalLeftContent}
+            onClose={physicalLeftClose}
+            placement="left"
+            size="75vw"
+            closable={false}
+            mask={false}
+            styles={{
+              wrapper: {
+                top: "var(--mindfs-safe-area-top, env(safe-area-inset-top, 0px))",
+                bottom: 0,
+              },
+              body: {
+                padding: 0,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              },
+              section: mobileDrawerContentStyle("left"),
+            }}
+          >
+            {physicalLeftContent}
+          </Drawer>
+          <Drawer
+            open={physicalRightOpen && !!physicalRightContent}
+            onClose={physicalRightClose}
+            placement="right"
+            size="75vw"
+            closable={false}
+            mask={false}
+            styles={{
+              wrapper: {
+                top: "var(--mindfs-safe-area-top, env(safe-area-inset-top, 0px))",
+                bottom: 0,
+              },
+              body: {
+                padding: 0,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              },
+              section: mobileDrawerContentStyle("right"),
+            }}
+          >
+            {physicalRightContent}
+          </Drawer>
+        </>
+      ) : physicalLeftContent ? (
+        <Sider
+          width={physicalLeftOpen ? physicalLeftWidth : 0}
+          style={{
+            ...sidebarStyle,
+            overflow: physicalLeftOpen ? "auto" : "hidden",
+            pointerEvents: physicalLeftOpen ? "auto" : "none",
+          }}
         >
           {physicalLeftContent}
-        </aside>
+        </Sider>
       ) : null}
 
-      <main
+      <Content
         style={
           isMobile
             ? {
@@ -213,54 +255,63 @@ export function AppShell({
         {main}
         {/* 将抽屉层放入主视图内部，确保绝对定位时能精准对齐主视图宽度 */}
         {drawer}
-      </main>
+      </Content>
 
-      {(!isMobile || physicalRightOpen) && physicalRightContent ? (
-        <aside
-          style={
-            isMobile
-              ? mobileSidebarStyle('right')
-              : {
-                  ...rightStyle,
-                  overflow: physicalRightOpen ? "auto" : "hidden",
-                  pointerEvents: physicalRightOpen ? "auto" : "none",
-                }
-          }
+      {!isMobile && physicalRightContent ? (
+        <Sider
+          width={physicalRightOpen ? physicalRightWidth : 0}
+          style={{
+            ...rightStyle,
+            overflow: physicalRightOpen ? "auto" : "hidden",
+            pointerEvents: physicalRightOpen ? "auto" : "none",
+          }}
         >
           {physicalRightContent}
-        </aside>
+        </Sider>
       ) : null}
 
       {!isMobile ? (
         <>
-          <button
-            type="button"
-            className={`mindfs-sidebar-resize-rail mindfs-sidebar-resize-rail--left${physicalLeftOpen ? " is-open" : " is-closed"}`}
-            onClick={physicalLeftOpen ? physicalLeftClose : physicalLeftOpenHandler}
-            aria-label={physicalLeftOpen ? `收起${physicalLeftLabel}` : `展开${physicalLeftLabel}`}
+          <Tooltip
             title={physicalLeftOpen ? `收起${physicalLeftLabel}` : `展开${physicalLeftLabel}`}
-            style={{
-              left: physicalLeftOpen ? `calc(${physicalLeftWidth} - 6px)` : 0,
-              cursor: physicalLeftOpen ? "w-resize" : "e-resize",
-            }}
-          />
-          {physicalRightContent ? (
-            <button
-              type="button"
-              className={`mindfs-sidebar-resize-rail mindfs-sidebar-resize-rail--right${physicalRightOpen ? " is-open" : " is-closed"}`}
-              onClick={physicalRightOpen ? physicalRightClose : physicalRightOpenHandler}
-              aria-label={physicalRightOpen ? `收起${physicalRightLabel}` : `展开${physicalRightLabel}`}
-              title={physicalRightOpen ? `收起${physicalRightLabel}` : `展开${physicalRightLabel}`}
+            placement="right"
+          >
+            <Button
+              type="text"
+              htmlType="button"
+              className={`mindfs-sidebar-resize-rail mindfs-sidebar-resize-rail--left${physicalLeftOpen ? " is-open" : " is-closed"}`}
+              onClick={physicalLeftOpen ? physicalLeftClose : physicalLeftOpenHandler}
+              aria-label={physicalLeftOpen ? `收起${physicalLeftLabel}` : `展开${physicalLeftLabel}`}
+              title={physicalLeftOpen ? `收起${physicalLeftLabel}` : `展开${physicalLeftLabel}`}
               style={{
-                right: physicalRightOpen ? `calc(${physicalRightWidth} - 6px)` : 0,
-                cursor: physicalRightOpen ? "e-resize" : "w-resize",
+                left: physicalLeftOpen ? `calc(${physicalLeftWidth} - 6px)` : 0,
+                cursor: physicalLeftOpen ? "w-resize" : "e-resize",
               }}
             />
+          </Tooltip>
+          {physicalRightContent ? (
+            <Tooltip
+              title={physicalRightOpen ? `收起${physicalRightLabel}` : `展开${physicalRightLabel}`}
+              placement="left"
+            >
+              <Button
+                type="text"
+                htmlType="button"
+                className={`mindfs-sidebar-resize-rail mindfs-sidebar-resize-rail--right${physicalRightOpen ? " is-open" : " is-closed"}`}
+                onClick={physicalRightOpen ? physicalRightClose : physicalRightOpenHandler}
+                aria-label={physicalRightOpen ? `收起${physicalRightLabel}` : `展开${physicalRightLabel}`}
+                title={physicalRightOpen ? `收起${physicalRightLabel}` : `展开${physicalRightLabel}`}
+                style={{
+                  right: physicalRightOpen ? `calc(${physicalRightWidth} - 6px)` : 0,
+                  cursor: physicalRightOpen ? "e-resize" : "w-resize",
+                }}
+              />
+            </Tooltip>
           ) : null}
         </>
       ) : null}
 
-      <footer
+      <Footer
         style={
           isMobile
             ? mobileFooterStyle
@@ -268,7 +319,7 @@ export function AppShell({
         }
       >
         {footer}
-      </footer>
-    </div>
+      </Footer>
+    </Layout>
   );
 }

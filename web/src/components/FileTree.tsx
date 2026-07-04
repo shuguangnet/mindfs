@@ -1,4 +1,6 @@
 import React from "react";
+import { Button, Segmented, Tooltip } from "antd";
+import { MoreOutlined } from "@ant-design/icons";
 import { rootBadgeStyle } from "./rootBadgeStyle";
 import { openExternalURL } from "../services/platformNavigation";
 import { isNativeShellRuntime, shouldEnablePWAInstall } from "../services/runtime";
@@ -141,7 +143,7 @@ type FileTreeProps = {
   onGitDiffSideBySideChange?: (enabled: boolean) => void;
   multiProjectSessionsEnabled?: boolean;
   onMultiProjectSessionsChange?: (enabled: boolean) => void;
-  onRunAgentLifecycleCommand?: (agentName: string, action: "install" | "update", commands: string[]) => void | Promise<void>;
+  onRunAgentLifecycleCommand?: (agentName: string, action: "install" | "update") => void | Promise<void>;
   onGoHome?: () => void;
 };
 
@@ -1637,7 +1639,7 @@ export function FileTree({
     setAgentLifecycleRunningAgent(agent.name);
     setAgentLifecycleError("");
     try {
-      await onRunAgentLifecycleCommand?.(agent.name, action, commands);
+      await onRunAgentLifecycleCommand?.(agent.name, action);
       closeAgentLifecycleFlow();
     } catch (error) {
       setAgentLifecycleError(error instanceof Error ? error.message : "发起命令失败");
@@ -2028,101 +2030,46 @@ export function FileTree({
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ position: "relative", height: "36px", padding: "0 3px", borderBottom: "1px solid var(--border-color)", display: "flex", justifyContent: "flex-end", alignItems: "center", background: "var(--mindfs-topbar-bg, transparent)", boxSizing: "border-box", flexShrink: 0, gap: 12, overflow: "visible" }}>
         <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", display: "flex", alignItems: "center", minWidth: 0, maxWidth: "calc(100% - 42px)" }}>
-          <div
-            role="tablist"
+          <Segmented<ProjectTreeTab>
             aria-label="项目展开内容"
+            size="small"
+            value={projectTreeTab}
+            onChange={setProjectTreeTab}
+            options={[
+              { value: "files", label: "文件" },
+              { value: "git", label: "git" },
+              { value: "worktrees", label: "工作树" },
+              { value: "related", label: "关联文件" },
+            ]}
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 0,
-              padding: "2px",
-              borderRadius: "8px",
-              border: "1px solid rgba(100, 116, 139, 0.36)",
+              maxWidth: "100%",
               background: "rgba(148, 163, 184, 0.10)",
-              minWidth: 0,
+              border: "1px solid rgba(100, 116, 139, 0.22)",
+              fontSize: 11,
+              fontWeight: 700,
             }}
-          >
-            {([
-              ["files", "文件"],
-              ["git", "git"],
-              ["worktrees", "工作树"],
-              ["related", "关联文件"],
-            ] as const).map(([value, label], index) => {
-              const active = projectTreeTab === value;
-              return (
-                <React.Fragment key={value}>
-                  {index > 0 ? (
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        width: "1px",
-                        height: "16px",
-                        background: "rgba(100, 116, 139, 0.32)",
-                        margin: "0 1px",
-                        flexShrink: 0,
-                      }}
-                    />
-                  ) : null}
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setProjectTreeTab(value)}
-                    style={{
-                      border: "none",
-                      borderRadius: "6px",
-                      background: active ? "var(--accent-color)" : "transparent",
-                      color: active ? "#fff" : "var(--text-secondary)",
-                      padding: "3px 7px",
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      lineHeight: "14px",
-                      cursor: "pointer",
-                      whiteSpace: "nowrap",
-                      boxShadow: active ? "0 1px 3px rgba(37, 99, 235, 0.28)" : "none",
-                    }}
-                  >
-                    {label}
-                  </button>
-                </React.Fragment>
-              );
-            })}
-          </div>
+          />
         </div>
         <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
-          <button
-            type="button"
-            onClick={() => {
-              setIsMenuOpen((open) => {
-                const nextOpen = !open;
-                if (nextOpen) {
-                  setIsAppearanceMenuOpen(false);
-                  setIsSortMenuOpen(false);
-                }
-                return nextOpen;
-              });
-            }}
-            aria-label="打开文件树菜单"
-            style={{
-              width: "28px",
-              height: "28px",
-              borderRadius: "8px",
-              border: "none",
-              background: isMenuOpen ? "rgba(0, 0, 0, 0.06)" : "transparent",
-              color: "var(--text-secondary)",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              outline: "none",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <circle cx="12" cy="5" r="1.8" />
-              <circle cx="12" cy="12" r="1.8" />
-              <circle cx="12" cy="19" r="1.8" />
-            </svg>
-          </button>
+          <Tooltip title="打开文件树菜单" placement="bottomRight">
+            <Button
+              type={isMenuOpen ? "default" : "text"}
+              size="small"
+              icon={<MoreOutlined />}
+              onClick={() => {
+                setIsMenuOpen((open) => {
+                  const nextOpen = !open;
+                  if (nextOpen) {
+                    setIsAppearanceMenuOpen(false);
+                    setIsSortMenuOpen(false);
+                  }
+                  return nextOpen;
+                });
+              }}
+              aria-label="打开文件树菜单"
+              style={{ color: "var(--text-secondary)" }}
+            />
+          </Tooltip>
           {isMenuOpen ? (
             <div
               style={{

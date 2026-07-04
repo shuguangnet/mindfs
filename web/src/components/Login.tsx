@@ -1,5 +1,20 @@
 import React, { useEffect, useState, type ReactElement } from "react";
 import {
+  Alert,
+  Button,
+  Card,
+  Input,
+  Modal,
+  Popconfirm,
+  Space,
+  Typography,
+} from "antd";
+import {
+  DeleteOutlined,
+  EditOutlined,
+  PlusOutlined,
+} from "@ant-design/icons";
+import {
   getStoredLauncherNodes,
   setStoredLauncherNodes,
   type LauncherNode,
@@ -33,6 +48,7 @@ const TEXT = "var(--mindfs-launcher-text)";
 const MUTED = "var(--mindfs-launcher-muted)";
 const ACCENT = "var(--mindfs-launcher-accent)";
 const SHADOW = "var(--mindfs-launcher-shadow)";
+const { Text, Title } = Typography;
 
 function normalizeNodeURL(value: string): string {
   const trimmed = value.trim();
@@ -392,36 +408,25 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
           gap: "8px",
         }}
       >
-        <button
-          type="button"
+        <Card
+          hoverable
           onClick={() => onOpenNode(RELAY_URL)}
           style={{
             width: "100%",
             textAlign: "left",
             border: `1px solid ${BORDER}`,
-            borderRadius: "20px",
             background: SURFACE_STRONG,
-            padding: "18px",
-            fontSize: "18px",
-            fontWeight: 500,
-            color: TEXT,
             cursor: "pointer",
             boxShadow: SHADOW,
             backdropFilter: "blur(20px)",
           }}
+          styles={{ body: { padding: 18 } }}
         >
           <div style={{ minWidth: 0, display: "grid", gap: "4px" }}>
-            <div
-              style={{
-                fontSize: "18px",
-                fontWeight: 500,
-                color: TEXT,
-                lineHeight: 1.2,
-              }}
-            >
+            <Title level={4} style={{ margin: 0, color: TEXT, lineHeight: 1.2 }}>
               mindfs relayer
-            </div>
-            <div
+            </Title>
+            <Text
               style={{
                 fontSize: "12px",
                 lineHeight: 1.5,
@@ -430,38 +435,35 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
               }}
             >
               {RELAY_URL}
-            </div>
+            </Text>
           </div>
-        </button>
+        </Card>
 
         {nodes.map((node) => (
-          <div
+          <Card
+            hoverable={editingNodeID !== node.id}
             key={node.id}
+            onClick={() => {
+              if (editingNodeID !== node.id) {
+                openNode(node);
+              }
+            }}
             style={{
               width: "100%",
-              borderRadius: "20px",
               border: `1px solid ${BORDER}`,
               background: SURFACE,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "16px",
               boxShadow: SHADOW,
               backdropFilter: "blur(20px)",
+              cursor: editingNodeID === node.id ? "default" : "pointer",
             }}
+            styles={{ body: { padding: "14px 14px 14px 18px" } }}
           >
             <div
-              onClick={() => {
-                if (editingNodeID !== node.id) {
-                  openNode(node);
-                }
-              }}
               style={{
-                flex: 1,
-                minWidth: 0,
-                textAlign: "left",
-                padding: "16px 0 16px 18px",
-                cursor: editingNodeID === node.id ? "default" : "pointer",
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) auto",
+                alignItems: "center",
+                gap: "16px",
               }}
             >
               <div style={{ minWidth: 0, display: "grid", gap: "4px" }}>
@@ -474,7 +476,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                   }}
                 >
                   {editingNodeID === node.id ? (
-                    <input
+                    <Input
                       type="text"
                       value={editingNodeName}
                       autoFocus
@@ -494,60 +496,43 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                       style={{
                         flex: 1,
                         minWidth: 0,
-                        borderRadius: "10px",
-                        border: `1px solid ${BORDER_STRONG}`,
                         background: "var(--mindfs-launcher-input-bg)",
-                        padding: "6px 10px",
                         fontSize: "17px",
                         fontWeight: 500,
                         color: TEXT,
-                        lineHeight: 1.2,
-                        outline: "none",
                       }}
                     />
                   ) : (
                     <>
-                      <div
+                      <Text
+                        strong
                         style={{
                           fontSize: "17px",
-                          fontWeight: 500,
                           color: TEXT,
                           lineHeight: 1.2,
                           wordBreak: "break-word",
                         }}
                       >
                         {node.name}
-                      </div>
-                      <button
-                        type="button"
+                      </Text>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<EditOutlined />}
                         aria-label={`重命名 ${node.name}`}
                         onClick={(event) => {
                           event.stopPropagation();
                           handleStartRename(node);
                         }}
                         style={{
-                          border: "none",
-                          background: "transparent",
                           color: MUTED,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          width: "22px",
-                          height: "22px",
-                          padding: 0,
-                          cursor: "pointer",
                           flex: "0 0 auto",
                         }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M12 20h9" />
-                          <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
-                        </svg>
-                      </button>
+                      />
                     </>
                   )}
                 </div>
-                <div
+                <Text
                   style={{
                     fontSize: "12px",
                     lineHeight: 1.5,
@@ -556,55 +541,46 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                   }}
                 >
                   {node.url}
-                </div>
+                </Text>
               </div>
+              <Popconfirm
+                title="删除节点"
+                description={`确认删除 ${node.name}？`}
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={(event) => {
+                  event?.stopPropagation();
+                  handleDeleteNode(node.id);
+                }}
+                onCancel={(event) => event?.stopPropagation()}
+              >
+                <Button
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  aria-label={`删除 ${node.name}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  style={{ flex: "0 0 auto" }}
+                />
+              </Popconfirm>
             </div>
-            <button
-              type="button"
-              aria-label={`删除 ${node.name}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                handleDeleteNode(node.id);
-              }}
-              style={{
-                border: "none",
-                background: "transparent",
-                color: ACCENT,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "48px",
-                height: "100%",
-                minHeight: "72px",
-                padding: "0 14px 0 0",
-                cursor: "pointer",
-                flex: "0 0 auto",
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3 6h18" />
-                <path d="M8 6V4h8v2" />
-                <path d="M19 6l-1 14H6L5 6" />
-                <path d="M10 11v6" />
-                <path d="M14 11v6" />
-              </svg>
-            </button>
-          </div>
+          </Card>
         ))}
 
         {showAppUpdate ? (
-          <div
+          <Card
             style={{
               border: `1px solid ${BORDER}`,
-              borderRadius: "20px",
               background: SURFACE_STRONG,
-              padding: "14px",
               boxShadow: SHADOW,
               backdropFilter: "blur(20px)",
-              display: "grid",
-              gap: "10px",
               marginTop: "auto",
             }}
+            styles={{ body: { padding: 14, display: "grid", gap: 10 } }}
           >
             <div
               style={{
@@ -615,18 +591,18 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
               }}
             >
               <div style={{ minWidth: 0, display: "grid", gap: "3px" }}>
-                <div
+                <Text
+                  strong
                   style={{
                     fontSize: "15px",
-                    fontWeight: 600,
                     color: TEXT,
                     lineHeight: 1.25,
                   }}
                 >
                   新版本
-                </div>
+                </Text>
                 {appUpdateHelp ? (
-                  <div
+                  <Text
                     style={{
                       fontSize: "12px",
                       color: MUTED,
@@ -635,30 +611,24 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                     }}
                   >
                     {appUpdateHelp}
-                  </div>
+                  </Text>
                 ) : null}
               </div>
-              <button
-                type="button"
+              <Button
+                type="primary"
                 disabled={appUpdateDisabled}
+                loading={appUpdateBusy || appUpdateStatus === "downloading"}
                 onClick={() => {
                   void handleDownloadAppUpdate();
                 }}
                 style={{
-                  border: "none",
-                  borderRadius: "14px",
-                  background: appUpdateDisabled ? "rgba(148, 163, 184, 0.35)" : ACCENT,
-                  color: appUpdateDisabled ? MUTED : "#fff8f2",
-                  padding: "10px 14px",
-                  fontSize: "13px",
-                  fontWeight: 600,
                   cursor: appUpdateDisabled ? "not-allowed" : "pointer",
                   flexShrink: 0,
                   minWidth: "86px",
                 }}
               >
                 {appUpdateText}
-              </button>
+              </Button>
             </div>
             {appUpdateNotes ? (
               <>
@@ -670,32 +640,24 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                     flexWrap: "wrap",
                   }}
                 >
-                  <button
-                    type="button"
+                  <Button
+                    type="link"
+                    size="small"
                     onClick={() => setAppUpdateNotesOpen((open) => !open)}
                     style={{
-                      border: "none",
-                      background: "transparent",
                       color: ACCENT,
                       padding: 0,
                       justifySelf: "start",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
                     }}
                   >
                     {appUpdateNotesOpen ? "收起更新说明" : "查看更新说明"}
-                  </button>
-                  <span
-                    style={{
-                      color: "#dc2626",
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      lineHeight: 1.35,
-                    }}
-                  >
-                    请先将 mindfs 后端升级到最新版本
-                  </span>
+                  </Button>
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="请先将 mindfs 后端升级到最新版本"
+                    style={{ padding: "4px 8px", fontSize: 12 }}
+                  />
                 </div>
                 {appUpdateNotesOpen ? (
                   <div
@@ -716,11 +678,13 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
                 ) : null}
               </>
             ) : null}
-          </div>
+          </Card>
         ) : null}
 
-        <button
-          type="button"
+        <Button
+          block
+          icon={<PlusOutlined />}
+          aria-label="新增节点"
           onClick={() => {
             setComposerOpen(true);
             setFormError("");
@@ -729,135 +693,88 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
             width: "100%",
             textAlign: "center",
             border: `1px dashed ${BORDER_STRONG}`,
-            borderRadius: "20px",
             background: "var(--mindfs-launcher-surface-soft)",
-            padding: "18px",
-            fontSize: "24px",
-            fontWeight: 500,
+            height: "60px",
+            fontSize: "18px",
             color: MUTED,
-            cursor: "pointer",
             boxShadow: SHADOW,
             backdropFilter: "blur(20px)",
             marginTop: showAppUpdate ? 0 : "auto",
           }}
         >
-          +
-        </button>
+          新增节点
+        </Button>
       </div>
 
-      {composerOpen ? (
-        <div
+      <Modal
+        open={composerOpen}
+        title="新增节点"
+        centered
+        footer={null}
+        onCancel={() => {
+          setComposerOpen(false);
+          setFormError("");
+        }}
+        className="mindfs-launcher-modal"
+      >
+        <form
+          onSubmit={handleSaveNode}
           style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(17, 24, 39, 0.18)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-            zIndex: 40,
+            width: "100%",
+            display: "grid",
+            gap: "12px",
           }}
         >
-          <form
-            onSubmit={handleSaveNode}
+          <Input
+            type="text"
+            value={nodeName}
+            onChange={(event) => setNodeName(event.target.value)}
+            placeholder="节点名称"
+            autoFocus
             style={{
-              width: "100%",
-              maxWidth: "420px",
-              borderRadius: "22px",
-              background: SURFACE_STRONG,
-              border: `1px solid var(--mindfs-launcher-modal-border)`,
-              boxShadow: SHADOW,
-              padding: "18px",
-              backdropFilter: "blur(20px)",
-              display: "grid",
-              gap: "12px",
+              background: "var(--mindfs-launcher-input-bg)",
+              fontSize: "15px",
+              color: TEXT,
             }}
-          >
-            <input
-              type="text"
-              value={nodeName}
-              onChange={(event) => setNodeName(event.target.value)}
-              placeholder="节点名称"
-              autoFocus
-              style={{
-                width: "100%",
-                borderRadius: "14px",
-                border: `1px solid ${formError ? "var(--mindfs-launcher-error-text)" : BORDER_STRONG}`,
-                background: "var(--mindfs-launcher-input-bg)",
-                padding: "14px 15px",
-                fontSize: "15px",
-                color: TEXT,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
+            status={formError ? "error" : undefined}
+          />
 
-            <input
-              type="text"
-              value={nodeURL}
-              onChange={(event) => setNodeURL(event.target.value)}
-              placeholder="节点 url：http(s)://ip:port"
-              spellCheck={false}
-              style={{
-                width: "100%",
-                borderRadius: "14px",
-                border: `1px solid ${formError ? "var(--mindfs-launcher-error-text)" : BORDER_STRONG}`,
-                background: "var(--mindfs-launcher-input-bg)",
-                padding: "14px 15px",
-                fontSize: "15px",
-                color: TEXT,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
+          <Input
+            type="text"
+            value={nodeURL}
+            onChange={(event) => setNodeURL(event.target.value)}
+            placeholder="节点 url：http(s)://ip:port"
+            spellCheck={false}
+            style={{
+              background: "var(--mindfs-launcher-input-bg)",
+              fontSize: "15px",
+              color: TEXT,
+            }}
+            status={formError ? "error" : undefined}
+          />
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "10px",
+          {formError ? <Alert type="error" showIcon message={formError} /> : null}
+
+          <Space.Compact block>
+            <Button
+              onClick={() => {
+                setComposerOpen(false);
+                setFormError("");
               }}
+              style={{ width: "50%" }}
             >
-              <button
-                type="button"
-                onClick={() => {
-                  setComposerOpen(false);
-                  setFormError("");
-                }}
-                style={{
-                  border: `1px solid ${BORDER_STRONG}`,
-                  borderRadius: "14px",
-                  padding: "12px 16px",
-                  background: "transparent",
-                  color: MUTED,
-                  fontSize: "14px",
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  width: "100%",
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="submit"
-                style={{
-                  border: "none",
-                  borderRadius: "14px",
-                  padding: "12px 16px",
-                  background: ACCENT,
-                  color: "#fff8f2",
-                  fontSize: "14px",
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  width: "100%",
-                }}
-              >
-                保存
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+              取消
+            </Button>
+            <Button
+              type="primary"
+              htmlType="submit"
+              style={{ width: "50%" }}
+            >
+              保存
+            </Button>
+          </Space.Compact>
+        </form>
+      </Modal>
     </div>
   );
 }

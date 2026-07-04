@@ -73,6 +73,17 @@
   }
 }
 
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes mindfs-bound-pulse {
   0%, 100% {
     opacity: 1;
@@ -589,6 +600,36 @@ html {
 .language-css .token.string,
 .style .token.string {
   background: transparent !important;
+}
+
+.mindfs-enterprise-shell .ant-layout-sider-children {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mindfs-launcher-modal .ant-modal-content {
+  border: 1px solid var(--mindfs-launcher-modal-border);
+  background: var(--mindfs-launcher-surface-strong);
+  box-shadow: var(--mindfs-launcher-shadow);
+  backdrop-filter: blur(20px);
+}
+
+.mindfs-launcher-modal .ant-modal-header,
+.mindfs-launcher-modal .ant-modal-title {
+  background: transparent;
+  color: var(--mindfs-launcher-text);
+}
+
+.mindfs-launcher-modal .ant-modal-close {
+  color: var(--mindfs-launcher-muted);
+}
+
+.ant-card,
+.ant-modal-content,
+.ant-drawer-content,
+.ant-alert {
+  color: var(--text-primary);
 }
 
 body {

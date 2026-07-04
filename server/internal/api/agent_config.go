@@ -16,6 +16,7 @@ import (
 
 	"mindfs/server/internal/agent"
 	"mindfs/server/internal/apperr"
+	"mindfs/server/internal/commandexec"
 	configpkg "mindfs/server/internal/config"
 )
 
@@ -51,7 +52,27 @@ type agentRestartRequest struct {
 	Agent string `json:"agent"`
 }
 
+type agentLifecycleRequest struct {
+	Agent  string `json:"agent"`
+	Action string `json:"action"`
+}
+
+type agentLifecycleResponse struct {
+	Agent       string `json:"agent"`
+	Action      string `json:"action"`
+	Success     bool   `json:"success"`
+	ExitCode    int    `json:"exit_code"`
+	Output      string `json:"output,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Interrupted bool   `json:"interrupted,omitempty"`
+}
+
 var agentConfigNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+const (
+	agentLifecycleTimeout        = 15 * time.Minute
+	agentLifecycleMaxOutputBytes = 128 * 1024
+)
 
 func (h *HTTPHandler) handleAgentConfigDefaults(w http.ResponseWriter, r *http.Request) {
 	agentName := strings.TrimSpace(r.URL.Query().Get("agent"))
@@ -167,6 +188,25 @@ func (h *HTTPHandler) handleAgentRestart(w http.ResponseWriter, r *http.Request)
 		"restarting": true,
 		"agent":      strings.TrimSpace(req.Agent),
 	})
+}
+
+func (h *HTTPHandler) handleAgentLifecycle(w http.ResponseWriter, r *http.Request) {
+	var req agentLifecycleRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxUploadRequestBytes)).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid request body"))
+		return
+	}
+	resp, err := h.runAgentLifecycle(r.Context(), req)
+	if err != nil {
+		status := http.StatusBadRequest
+		if resp != nil && resp.Output != "" {
+			respondJSON(w, http.StatusInternalServerError, resp)
+			return
+		}
+		respondError(w, status, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 var errAgentConfigConflict = errors.New("backup already exists")
@@ -412,6 +452,175 @@ func restartAgent(agentName string, app *AppContext) error {
 	app.GetAgentPool().KillAgentProcess(agentName, 0)
 	triggerAgentConfigSwitchProbe(app, agentName)
 	return nil
+}
+
+func (h *HTTPHandler) runAgentLifecycle(ctx context.Context, req agentLifecycleRequest) (*agentLifecycleResponse, error) {
+	agentName, action, commands, err := h.resolveAgentLifecycle(req)
+	if err != nil {
+		return nil, err
+	}
+	cwd, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(cwd) == "" {
+		cwd, err = os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+	}
+	execCtx, cancel := context.WithTimeout(ctx, agentLifecycleTimeout)
+	defer cancel()
+
+	var output strings.Builder
+	result := commandexec.Result{ExitCode: 0}
+	for _, command := range commands {
+		commandOutput, commandResult, commandErr := h.runAgentLifecycleCommand(execCtx, command, cwd)
+		if commandOutput != "" {
+			if output.Len() > 0 {
+				output.WriteString("\n")
+			}
+			output.WriteString(commandOutput)
+		}
+		result = commandResult
+		if commandErr != nil || commandResult.Err != nil || commandResult.ExitCode != 0 || execCtx.Err() != nil {
+			if commandErr != nil {
+				result.Err = commandErr
+			}
+			break
+		}
+	}
+
+	resp := &agentLifecycleResponse{
+		Agent:       agentName,
+		Action:      action,
+		Success:     result.ExitCode == 0 && result.Err == nil && execCtx.Err() == nil,
+		ExitCode:    result.ExitCode,
+		Output:      output.String(),
+		Interrupted: execCtx.Err() != nil,
+	}
+	if execCtx.Err() != nil {
+		resp.Error = execCtx.Err().Error()
+		return resp, fmt.Errorf("agent %s %s timed out: %w", agentName, action, execCtx.Err())
+	}
+	if result.Err != nil {
+		resp.Error = result.Err.Error()
+		return resp, fmt.Errorf("agent %s %s failed: %w", agentName, action, result.Err)
+	}
+	if result.ExitCode != 0 {
+		resp.Error = fmt.Sprintf("command exited with code %d", result.ExitCode)
+		return resp, fmt.Errorf("agent %s %s failed: %s", agentName, action, resp.Error)
+	}
+	if h != nil && h.AppContext != nil && h.AppContext.GetAgentPool() != nil {
+		h.AppContext.GetAgentPool().KillAgentProcess(agentName, 0)
+	}
+	triggerAgentConfigSwitchProbe(h.appContext(), agentName)
+	return resp, nil
+}
+
+func (h *HTTPHandler) runAgentLifecycleCommand(ctx context.Context, command, cwd string) (string, commandexec.Result, error) {
+	proc, err := commandexec.Start(ctx, commandexec.Options{
+		Command:      command,
+		Cwd:          cwd,
+		Shells:       h.configuredShells(),
+		TerminalCols: 120,
+	})
+	if err != nil {
+		return "", commandexec.Result{ExitCode: -1, Err: err}, err
+	}
+	outputDone := collectAgentLifecycleOutput(proc.Output())
+	result := proc.Wait()
+	if ctx.Err() != nil {
+		_ = proc.KillTree()
+	}
+	output := <-outputDone
+	return output, result, nil
+}
+
+func (h *HTTPHandler) resolveAgentLifecycle(req agentLifecycleRequest) (string, string, []string, error) {
+	agentName := strings.TrimSpace(req.Agent)
+	if agentName == "" {
+		return "", "", nil, errors.New("agent required")
+	}
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action != "install" && action != "update" {
+		return "", "", nil, errors.New("action must be install or update")
+	}
+	def, ok := h.agentDefinition(agentName)
+	if !ok {
+		return "", "", nil, fmt.Errorf("agent not configured: %s", agentName)
+	}
+	commands := lifecycleCommandsForAction(def, action)
+	if len(commands) == 0 {
+		return "", "", nil, fmt.Errorf("agent %s has no %s commands configured", agentName, action)
+	}
+	return agentName, action, commands, nil
+}
+
+func (h *HTTPHandler) agentDefinition(agentName string) (agent.Definition, bool) {
+	if h != nil && h.AppContext != nil && h.AppContext.GetAgentPool() != nil {
+		if def, ok := h.AppContext.GetAgentPool().Config().GetAgent(agentName); ok {
+			return def, true
+		}
+	}
+	cfg, err := agent.LoadConfig("")
+	if err != nil {
+		return agent.Definition{}, false
+	}
+	return cfg.GetAgent(agentName)
+}
+
+func (h *HTTPHandler) appContext() *AppContext {
+	if h == nil {
+		return nil
+	}
+	return h.AppContext
+}
+
+func lifecycleCommandsForAction(def agent.Definition, action string) []string {
+	var commands agent.LifecycleCommands
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "install":
+		commands = def.InstallCommands
+	case "update":
+		commands = def.UpdateCommands
+	default:
+		return nil
+	}
+	result := make([]string, 0, len(commands))
+	for _, command := range commands {
+		if trimmed := strings.TrimSpace(command); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func collectAgentLifecycleOutput(output <-chan []byte) <-chan string {
+	done := make(chan string, 1)
+	go func() {
+		var builder strings.Builder
+		truncated := false
+		for chunk := range output {
+			if len(chunk) == 0 {
+				continue
+			}
+			remaining := agentLifecycleMaxOutputBytes - builder.Len()
+			if remaining <= 0 {
+				truncated = true
+				continue
+			}
+			if len(chunk) > remaining {
+				builder.Write(chunk[:remaining])
+				truncated = true
+				continue
+			}
+			builder.Write(chunk)
+		}
+		text := builder.String()
+		if truncated {
+			text += "\n[output truncated]"
+		}
+		done <- text
+	}()
+	return done
 }
 
 func triggerAgentConfigSwitchProbe(app *AppContext, agentName string) {

@@ -81,6 +81,9 @@ type Definition struct {
 	// ConfigBackup stores default inputs for config backup flows.
 	ConfigBackup ConfigBackupDefaults `json:"configBackup,omitempty"`
 
+	// Capabilities are controller-managed feature flags for this agent.
+	Capabilities []string `json:"capabilities,omitempty"`
+
 	// InstallCommands are shell commands used to install this agent.
 	InstallCommands LifecycleCommands `json:"installCommands,omitempty"`
 
@@ -234,10 +237,32 @@ func normalizeConfig(cfg Config) (Config, error) {
 		if cfg.Agents[i].Protocol == "" {
 			cfg.Agents[i].Protocol = DefaultProtocol(name)
 		}
+		cfg.Agents[i].Capabilities = normalizeCapabilities(cfg.Agents[i].Capabilities)
 		cfg.Agents[i].InstallCommands = normalizeCommandList(cfg.Agents[i].InstallCommands)
 		cfg.Agents[i].UpdateCommands = normalizeCommandList(cfg.Agents[i].UpdateCommands)
 	}
 	return cfg, nil
+}
+
+func normalizeCapabilities(capabilities []string) []string {
+	seen := make(map[string]struct{}, len(capabilities))
+	normalized := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		value := strings.ToLower(strings.TrimSpace(capability))
+		value = strings.ReplaceAll(value, "-", "_")
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func normalizeCommandList(commands LifecycleCommands) LifecycleCommands {
@@ -297,6 +322,9 @@ func mergeAgentDefinition(base Definition, override Definition) Definition {
 	}
 	if len(merged.ConfigBackup.EnvKeys) == 0 {
 		merged.ConfigBackup.EnvKeys = append([]string(nil), base.ConfigBackup.EnvKeys...)
+	}
+	if len(merged.Capabilities) == 0 {
+		merged.Capabilities = append([]string(nil), base.Capabilities...)
 	}
 	if merged.CwdTemplate == "" {
 		merged.CwdTemplate = base.CwdTemplate

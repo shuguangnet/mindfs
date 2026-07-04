@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import "antd/dist/reset.css";
 import "./index.css";
 import { App } from "./App";
 import { registerServiceWorker } from "./registerServiceWorker";
 import { applyAppearanceMode, getAppearanceMode } from "./services/appearance";
 import { isHarmonyRuntime, isNativeShellRuntime } from "./services/runtime";
 import { Login } from "./components/Login";
+import { MindFSAntdProvider } from "./theme/AntdProvider";
 
 applyAppearanceMode();
 if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
@@ -603,9 +605,17 @@ function AppRoot() {
   }, []);
 
   if (!ready) {
-    return <Login onOpenNode={(nodeURL) => window.location.assign(nodeURL)} />;
+    return (
+      <MindFSAntdProvider>
+        <Login onOpenNode={(nodeURL) => window.location.assign(nodeURL)} />
+      </MindFSAntdProvider>
+    );
   }
-  return <App onGoHome={goToLauncher} />;
+  return (
+    <MindFSAntdProvider>
+      <App onGoHome={goToLauncher} />
+    </MindFSAntdProvider>
+  );
 }
 
 const container = document.getElementById("root");

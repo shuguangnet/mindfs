@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"mindfs/server/internal/agent"
 	"mindfs/server/internal/apperr"
 	rootfs "mindfs/server/internal/fs"
 )
@@ -57,6 +58,37 @@ func TestEnsureTaskWorktreeExcluded(t *testing.T) {
 	}
 	if got := strings.Count(string(data), "/.worktree/"); got != 1 {
 		t.Fatalf("exclude entry count=%d, want 1; content=%q", got, string(data))
+	}
+}
+
+func TestRunAgentLifecycleUsesConfiguredCommands(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+	pool := agent.NewPool(agent.Config{
+		Shells: []agent.Shell{{Command: "sh", Args: []string{"-lc"}}},
+		Agents: []agent.Definition{
+			{
+				Name:           "test-agent",
+				Command:        "sh",
+				UpdateCommands: agent.LifecycleCommands{"printf lifecycle-ok"},
+			},
+		},
+	})
+	handler := &HTTPHandler{AppContext: &AppContext{Agents: pool}}
+
+	resp, err := handler.runAgentLifecycle(context.Background(), agentLifecycleRequest{
+		Agent:  "test-agent",
+		Action: "update",
+	})
+	if err != nil {
+		t.Fatalf("runAgentLifecycle returned error: %v", err)
+	}
+	if resp == nil || !resp.Success || resp.ExitCode != 0 {
+		t.Fatalf("unexpected lifecycle response: %+v", resp)
+	}
+	if !strings.Contains(resp.Output, "lifecycle-ok") {
+		t.Fatalf("output = %q, want lifecycle-ok", resp.Output)
 	}
 }
 

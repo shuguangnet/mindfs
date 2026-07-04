@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { Alert, Button, Space } from "antd";
 import { errorService, type AppError } from "../services/error";
 
 type ToastItem = {
@@ -71,7 +72,7 @@ export function ToastContainer(): React.ReactElement {
         display: "flex",
         flexDirection: "column",
         gap: "8px",
-        zIndex: 1000,
+        zIndex: 2100,
         maxWidth: "640px",
         width: "100%",
         padding: "0 16px",
@@ -96,102 +97,36 @@ type ToastProps = {
 };
 
 function Toast({ error, onClose, onRetry }: ToastProps): React.ReactElement {
-  const bgColor =
+  const type =
     error.severity === "error"
-      ? "rgba(239, 68, 68, 0.95)"
+      ? "error"
       : error.severity === "warning"
-      ? "rgba(245, 158, 11, 0.95)"
-      : "rgba(59, 130, 246, 0.95)";
+        ? "warning"
+        : "info";
 
   return (
-    <div
+    <Alert
+      type={type}
+      showIcon
+      closable
+      onClose={onClose}
+      message={error.message}
+      description={error.code || undefined}
+      action={
+        onRetry ? (
+          <Space size={8}>
+            <Button size="small" onClick={onRetry}>
+              重试
+            </Button>
+          </Space>
+        ) : undefined
+      }
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "12px",
-        padding: "12px 16px",
-        background: bgColor,
-        borderRadius: "10px",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-        color: "#fff",
+        borderRadius: "8px",
+        boxShadow: "0 12px 32px rgba(15, 23, 42, 0.16)",
         animation: "toastSlideIn 0.2s ease-out",
+        overflowWrap: "anywhere",
       }}
-    >
-      <style>
-        {`
-          @keyframes toastSlideIn {
-            from {
-              opacity: 0;
-              transform: translateY(20px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-        `}
-      </style>
-
-      {/* Icon */}
-      <span style={{ fontSize: "18px" }}>
-        {error.severity === "error" ? "❌" : error.severity === "warning" ? "⚠️" : "ℹ️"}
-      </span>
-
-      {/* Message */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: "13px",
-            fontWeight: 500,
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-            lineHeight: 1.45,
-          }}
-          title={error.message}
-        >
-          {error.message}
-        </div>
-        {error.code && (
-          <div style={{ fontSize: "11px", opacity: 0.8 }}>{error.code}</div>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div style={{ display: "flex", gap: "8px" }}>
-        {onRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: "1px solid rgba(255,255,255,0.3)",
-              background: "rgba(255,255,255,0.1)",
-              color: "#fff",
-              fontSize: "12px",
-              cursor: "pointer",
-            }}
-          >
-            重试
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            padding: "4px 8px",
-            borderRadius: "6px",
-            border: "none",
-            background: "transparent",
-            color: "#fff",
-            fontSize: "14px",
-            cursor: "pointer",
-            opacity: 0.8,
-          }}
-        >
-          ✕
-        </button>
-      </div>
-    </div>
+    />
   );
 }

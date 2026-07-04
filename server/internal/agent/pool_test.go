@@ -266,6 +266,7 @@ func TestMergeConfigsKeepsBundledAgentsAndAppliesUserOverrides(t *testing.T) {
 				InstallCommands: LifecycleCommands{"install codex"},
 				UpdateCommands:  LifecycleCommands{"update codex"},
 				ConfigBackup:    ConfigBackupDefaults{FileSources: []string{"~/.codex/auth.json"}, EnvKeys: []string{"CODEX_HOME"}},
+				Capabilities:    []string{"docker_backup", "custom_capability"},
 			},
 			{Name: "new-agent", Command: "new-agent", Protocol: ProtocolACP},
 		},
@@ -316,6 +317,9 @@ func TestMergeConfigsKeepsBundledAgentsAndAppliesUserOverrides(t *testing.T) {
 	if !reflect.DeepEqual(codex.ConfigBackup.EnvKeys, []string{"CODEX_HOME"}) {
 		t.Fatalf("codex config backup env keys = %#v", codex.ConfigBackup.EnvKeys)
 	}
+	if !reflect.DeepEqual(codex.Capabilities, []string{"docker_backup", "custom_capability"}) {
+		t.Fatalf("codex capabilities = %#v", codex.Capabilities)
+	}
 	if _, ok := cfg.GetAgent("new-agent"); !ok {
 		t.Fatalf("expected bundled new-agent to be preserved")
 	}
@@ -364,6 +368,29 @@ func TestLoadConfigFiltersLifecycleCommandsByOS(t *testing.T) {
 	}
 	if !reflect.DeepEqual(def.UpdateCommands, LifecycleCommands{"current update"}) {
 		t.Fatalf("update commands = %#v", def.UpdateCommands)
+	}
+}
+
+func TestProbeInstallStatusReportsControllerCapabilities(t *testing.T) {
+	def := Definition{
+		Name:           "codex",
+		Command:        "mindfs-test-agent-command-that-does-not-exist",
+		UpdateCommands: LifecycleCommands{"update codex"},
+		ConfigBackup:   ConfigBackupDefaults{FileSources: []string{"~/.codex/auth.json"}},
+		Capabilities:   []string{"custom-capability"},
+	}
+
+	status := probeInstallStatus(def.Name, def, time.Now().UTC())
+
+	if !status.SupportsDockerBackup {
+		t.Fatalf("expected docker backup capability in status: %+v", status)
+	}
+	if !status.SupportsOnlineUpdate {
+		t.Fatalf("expected online update capability in status: %+v", status)
+	}
+	wantCapabilities := []string{"custom_capability", "docker_backup", "config_backup", "online_update"}
+	if !reflect.DeepEqual(status.Capabilities, wantCapabilities) {
+		t.Fatalf("capabilities = %#v, want %#v", status.Capabilities, wantCapabilities)
 	}
 }
 

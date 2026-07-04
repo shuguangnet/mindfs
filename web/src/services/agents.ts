@@ -25,6 +25,9 @@ export type AgentStatus = {
   modes_error?: string;
   commands?: AgentCommandInfo[];
   commands_error?: string;
+  capabilities?: string[];
+  supports_docker_backup?: boolean;
+  supports_online_update?: boolean;
   install_commands?: string[];
   update_commands?: string[];
 };
@@ -93,6 +96,9 @@ function normalizeAgentStatus(input: unknown): AgentStatus | null {
         ? agent.default_fast_service
         : "",
     supports_fast_service: !!agent.supports_fast_service,
+    capabilities: Array.isArray(agent.capabilities) ? agent.capabilities.map((item) => String(item)) : undefined,
+    supports_docker_backup: !!agent.supports_docker_backup,
+    supports_online_update: !!agent.supports_online_update,
   };
 }
 
@@ -196,6 +202,31 @@ export async function restartAgent(agent: string): Promise<{ restarting: boolean
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ agent }),
   });
+}
+
+export type AgentLifecycleAction = "install" | "update";
+
+export type AgentLifecycleResult = {
+  agent: string;
+  action: AgentLifecycleAction;
+  success: boolean;
+  exit_code: number;
+  output?: string;
+  error?: string;
+  interrupted?: boolean;
+};
+
+export async function runAgentLifecycle(agent: string, action: AgentLifecycleAction): Promise<AgentLifecycleResult> {
+  const result = await protectedJSON<AgentLifecycleResult>(appPath("/api/agents/lifecycle"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent, action }),
+  });
+  cachedAgents = [];
+  cachedAgentCatalog = [];
+  lastFetch = 0;
+  lastCatalogFetch = 0;
+  return result;
 }
 
 export async function fetchShells(force = false): Promise<ShellStatus[]> {
