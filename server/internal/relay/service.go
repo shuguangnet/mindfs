@@ -57,6 +57,41 @@ type BindPollResult struct {
 	Credentials   RelayCredentials
 }
 
+type relayDialError struct {
+	statusCode int
+	status     string
+	errorCode  string
+	err        error
+}
+
+func (e *relayDialError) Error() string {
+	if e == nil {
+		return ""
+	}
+	status := strings.TrimSpace(e.status)
+	if status == "" && e.statusCode > 0 {
+		status = fmt.Sprintf("HTTP %d", e.statusCode)
+	}
+	message := "relay websocket dial failed"
+	if status != "" {
+		message += ": " + status
+	}
+	if e.errorCode != "" {
+		message += ": " + e.errorCode
+	}
+	if e.err != nil {
+		message += ": " + e.err.Error()
+	}
+	return message
+}
+
+func (e *relayDialError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
 func NewService(localAddr string, useTLS bool) (*Service, error) {
 	store, err := NewCredentialsStore()
 	if err != nil {
@@ -223,8 +258,8 @@ func (s *Service) runSession(ctx context.Context, creds RelayCredentials) error 
 	headers.Set("Authorization", "Bearer "+creds.DeviceToken)
 	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, creds.Endpoint, headers)
 	if err != nil {
-		if resp != nil && strings.TrimSpace(resp.Status) != "" {
-			return fmt.Errorf("relay websocket dial failed: %s: %w", resp.Status, err)
+		if resp != nil {
+			return newRelayDialError(resp, err)
 		}
 		return err
 	}
@@ -570,10 +605,42 @@ func cloneHeader(header http.Header) http.Header {
 	return clone
 }
 
+func newRelayDialError(resp *http.Response, err error) error {
+	dialErr := &relayDialError{err: err}
+	if resp == nil {
+		return dialErr
+	}
+	dialErr.statusCode = resp.StatusCode
+	dialErr.status = resp.Status
+	dialErr.errorCode = readRelayErrorCode(resp)
+	return dialErr
+}
+
+func readRelayErrorCode(resp *http.Response) string {
+	if resp == nil || resp.Body == nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	if err != nil {
+		return ""
+	}
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(payload, &out); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.Error)
+}
+
 func isPermanentRelayError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "401") || strings.Contains(msg, "403") || strings.Contains(msg, "404")
+	var dialErr *relayDialError
+	if !errors.As(err, &dialErr) {
+		return false
+	}
+	return dialErr.statusCode == http.StatusUnauthorized && dialErr.errorCode == "device_token_invalid"
 }

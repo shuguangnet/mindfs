@@ -438,7 +438,12 @@ func TestManagerPermanentRelayErrorClearsCredentialsAndWaitsForExplicitRebind(t 
 		}),
 	}
 
-	manager.handlePermanentRelayError(errors.New("websocket: bad handshake (404 Not Found)"))
+	manager.handlePermanentRelayError(&relayDialError{
+		statusCode: http.StatusUnauthorized,
+		status:     "401 Unauthorized",
+		errorCode:  "device_token_invalid",
+		err:        errors.New("websocket: bad handshake"),
+	})
 
 	status := manager.Status()
 	if status.Bound {
@@ -447,7 +452,7 @@ func TestManagerPermanentRelayErrorClearsCredentialsAndWaitsForExplicitRebind(t 
 	if status.PendingCode != "" {
 		t.Fatalf("expected no pending code before explicit rebind, got %q", status.PendingCode)
 	}
-	if !strings.Contains(status.LastError, "404") {
+	if !strings.Contains(status.LastError, "device_token_invalid") {
 		t.Fatalf("last error = %q", status.LastError)
 	}
 	creds, err := manager.service.store.Load()
@@ -505,14 +510,44 @@ func TestManagerStartClearsCredentialsWhenRelayBaseChanges(t *testing.T) {
 }
 
 func TestIsPermanentRelayErrorDetectsHandshakeStatus(t *testing.T) {
-	if !isPermanentRelayError(errors.New("relay websocket dial failed: 404 Not Found: websocket: bad handshake")) {
-		t.Fatal("expected 404 handshake to be treated as permanent")
+	if !isPermanentRelayError(&relayDialError{
+		statusCode: http.StatusUnauthorized,
+		status:     "401 Unauthorized",
+		errorCode:  "device_token_invalid",
+		err:        errors.New("websocket: bad handshake"),
+	}) {
+		t.Fatal("expected device_token_invalid to be treated as permanent")
 	}
-	if !isPermanentRelayError(errors.New("relay websocket dial failed: 401 Unauthorized: websocket: bad handshake")) {
-		t.Fatal("expected 401 handshake to be treated as permanent")
+	if isPermanentRelayError(&relayDialError{
+		statusCode: http.StatusUnauthorized,
+		status:     "401 Unauthorized",
+		errorCode:  "device_token_required",
+		err:        errors.New("websocket: bad handshake"),
+	}) {
+		t.Fatal("device_token_required should not be treated as permanent")
+	}
+	if isPermanentRelayError(&relayDialError{
+		statusCode: http.StatusNotFound,
+		status:     "404 Not Found",
+		errorCode:  "not_found",
+		err:        errors.New("websocket: bad handshake"),
+	}) {
+		t.Fatal("404 handshake should not be treated as permanent")
 	}
 	if isPermanentRelayError(errors.New("websocket: bad handshake")) {
 		t.Fatal("plain bad handshake without status should not be treated as permanent")
+	}
+}
+
+func TestNewRelayDialErrorReadsErrorCode(t *testing.T) {
+	err := newRelayDialError(&http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Status:     "401 Unauthorized",
+		Body:       io.NopCloser(strings.NewReader(`{"error":"device_token_invalid"}`)),
+	}, errors.New("websocket: bad handshake"))
+
+	if !isPermanentRelayError(err) {
+		t.Fatalf("expected parsed device_token_invalid to be permanent, got %v", err)
 	}
 }
 
