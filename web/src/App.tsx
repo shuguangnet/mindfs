@@ -6740,7 +6740,7 @@ export function App({ onGoHome }: AppProps) {
             setSelectedSessionLoading(false);
             fileCursorRef.current = 0;
             setDrawerOpenForRoot(root, false);
-            if (isMobile) setIsLeftOpen(false);
+            if (!isToggle && isMobile) setIsLeftOpen(false);
             return;
           }
           try {
@@ -6764,7 +6764,7 @@ export function App({ onGoHome }: AppProps) {
             setSelectedSessionLoading(false);
             fileCursorRef.current = 0;
             setDrawerOpenForRoot(root, false);
-            if (isMobile) setIsLeftOpen(false);
+            if (!isToggle && isMobile) setIsLeftOpen(false);
           } catch (error) {
             if (error instanceof ProtectedAPIError) {
               if (
@@ -6820,7 +6820,7 @@ export function App({ onGoHome }: AppProps) {
           if (!forceDirectory) {
             const restored = await tryShowBoundSessionForRoot(path, {
               pluginQuery: nextPluginQuery,
-              closeLeftSidebar: true,
+              closeLeftSidebar: !isToggle,
             });
             if (restored) {
               void loadSessionsForRoot(path, { replace: true, force: true });
