@@ -708,6 +708,7 @@ func (s *session) ListModels(ctx context.Context) (types.ModelList, error) {
 			Description:   model.Description,
 			Hidden:        model.Hidden,
 			SupportEffort: true,
+			Efforts:       codexModelEfforts(model.SupportedReasoningEfforts),
 		})
 		if model.IsDefault && currentModelID == "" {
 			currentModelID = model.Model
@@ -720,6 +721,23 @@ func (s *session) ListModels(ctx context.Context) (types.ModelList, error) {
 		CurrentModelID: currentModelID,
 		Models:         models,
 	}, nil
+}
+
+func codexModelEfforts(options []codexsdk.ReasoningEffortOption) []string {
+	efforts := make([]string, 0, len(options))
+	seen := make(map[string]struct{}, len(options))
+	for _, option := range options {
+		effort := strings.TrimSpace(string(option.ReasoningEffort))
+		if effort == "" || effort == "none" {
+			continue
+		}
+		if _, ok := seen[effort]; ok {
+			continue
+		}
+		seen[effort] = struct{}{}
+		efforts = append(efforts, effort)
+	}
+	return efforts
 }
 
 func (s *session) RuntimeDefaults(ctx context.Context) (types.RuntimeDefaults, error) {

@@ -565,7 +565,7 @@ export function ActionBar({
     || (selectedAgent?.models ?? []).find(
       (item) => item.id === (selectedAgent?.default_model_id || selectedAgent?.current_model_id),
     );
-  const availableEfforts = selectedAgent?.efforts ?? [];
+  const availableEfforts = selectedModelInfo?.efforts ?? selectedAgent?.efforts ?? [];
   const isCodexEffortAgent = selectedAgent?.name === "codex";
   const supportsEffort =
     availableEfforts.length > 0 && !!selectedModelInfo?.supportEffort;

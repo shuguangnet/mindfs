@@ -933,11 +933,27 @@ func preserveKnownCapabilities(prev Status, next Status) Status {
 func inferAgentEfforts(models []agenttypes.ModelInfo) []string {
 	hasSupport := false
 	looksLikeClaude := false
+	efforts := make([]string, 0)
+	seenEfforts := map[string]struct{}{}
+	appendEffort := func(effort string) {
+		effort = strings.TrimSpace(effort)
+		if effort == "" {
+			return
+		}
+		if _, ok := seenEfforts[effort]; ok {
+			return
+		}
+		seenEfforts[effort] = struct{}{}
+		efforts = append(efforts, effort)
+	}
 	for _, model := range models {
 		if !model.SupportEffort {
 			continue
 		}
 		hasSupport = true
+		for _, effort := range model.Efforts {
+			appendEffort(effort)
+		}
 		joined := strings.ToLower(strings.TrimSpace(model.ID) + " " + strings.TrimSpace(model.Name))
 		if strings.Contains(joined, "sonnet") || strings.Contains(joined, "opus") {
 			looksLikeClaude = true
@@ -945,6 +961,9 @@ func inferAgentEfforts(models []agenttypes.ModelInfo) []string {
 	}
 	if !hasSupport {
 		return nil
+	}
+	if len(efforts) > 0 {
+		return efforts
 	}
 	if looksLikeClaude {
 		return []string{"low", "medium", "high", "xhigh", "max"}

@@ -166,8 +166,8 @@ export function AgentSelector({
     );
   }, [submenuAgentStatus, agent, model]);
   const submenuEfforts = useMemo(
-    () => submenuAgentStatus?.efforts ?? [],
-    [submenuAgentStatus],
+    () => submenuSelectedModel?.efforts ?? submenuAgentStatus?.efforts ?? [],
+    [submenuAgentStatus, submenuSelectedModel],
   );
   const submenuModes = useMemo(
     () => submenuAgentStatus?.modes ?? [],
