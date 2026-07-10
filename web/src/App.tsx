@@ -2181,6 +2181,10 @@ export function App({ onGoHome }: AppProps) {
   const [gitHistory, setGitHistory] = useState<GitHistoryPayload | null>(null);
   const [gitHistoryLoading, setGitHistoryLoading] = useState(false);
   const [gitHistoryLoadingMore, setGitHistoryLoadingMore] = useState(false);
+  const [gitStatusByRoot, setGitStatusByRoot] = useState<Record<string, GitStatusPayload | null>>({});
+  const [gitStatusLoadingByRoot, setGitStatusLoadingByRoot] = useState<Record<string, boolean>>({});
+  const [gitHistoryByRoot, setGitHistoryByRoot] = useState<Record<string, GitHistoryPayload | null>>({});
+  const [gitHistoryLoadingByRoot, setGitHistoryLoadingByRoot] = useState<Record<string, boolean>>({});
   const [gitStatusExpandedByRoot, setGitStatusExpandedByRoot] = useState<Record<string, boolean>>(() =>
     loadBooleanRecord(GIT_STATUS_EXPANDED_STORAGE_KEY),
   );
@@ -4254,17 +4258,21 @@ export function App({ onGoHome }: AppProps) {
         dirty_count: 0,
         items: [],
       } as GitStatusPayload;
+      setGitStatusByRoot((prev) => ({ ...prev, [rootID]: fallback }));
+      setGitStatusLoadingByRoot((prev) => ({ ...prev, [rootID]: false }));
       if (shouldApply()) {
         setGitStatus(fallback);
         setGitStatusLoading(false);
       }
       return fallback;
     }
+    setGitStatusLoadingByRoot((prev) => ({ ...prev, [rootID]: true }));
     if (shouldApply()) {
       setGitStatusLoading(true);
     }
     try {
       const next = await fetchGitStatus(rootID);
+      setGitStatusByRoot((prev) => ({ ...prev, [rootID]: next }));
       if (shouldApply()) {
         setGitStatus(next);
       }
@@ -4276,11 +4284,13 @@ export function App({ onGoHome }: AppProps) {
         dirty_count: 0,
         items: [],
       } as GitStatusPayload;
+      setGitStatusByRoot((prev) => ({ ...prev, [rootID]: fallback }));
       if (shouldApply()) {
         setGitStatus(fallback);
       }
       return fallback;
     } finally {
+      setGitStatusLoadingByRoot((prev) => ({ ...prev, [rootID]: false }));
       if (shouldApply()) {
         setGitStatusLoading(false);
       }
@@ -4296,7 +4306,10 @@ export function App({ onGoHome }: AppProps) {
     if (!options?.force) {
       const cachedHead = getCachedGitHistoryHead(rootID);
       if (cachedHead && cachedHead.items.length > 0) {
-        setGitHistory(cachedHead);
+        setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: cachedHead }));
+        if (currentRootIdRef.current === rootID) {
+          setGitHistory(cachedHead);
+        }
         const newest = cachedHead.items[0]?.hash || "";
         if (newest) {
           void fetchGitHistory(rootID, { afterCommit: newest })
@@ -4312,6 +4325,7 @@ export function App({ onGoHome }: AppProps) {
               return getCachedGitHistoryHead(rootID) || next;
             })
             .then((fresh) => {
+              setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: fresh }));
               if (currentRootIdRef.current === rootID) {
                 setGitHistory(fresh);
               }
@@ -4323,17 +4337,22 @@ export function App({ onGoHome }: AppProps) {
         return cachedHead;
       }
     }
-    setGitHistoryLoading(true);
+    setGitHistoryLoadingByRoot((prev) => ({ ...prev, [rootID]: true }));
+    if (currentRootIdRef.current === rootID) {
+      setGitHistoryLoading(true);
+    }
     try {
       const next = await fetchGitHistory(rootID, { force: options?.force });
       if (next.commit_missing) {
         clearGitHistoryCache(rootID);
         const fresh = await fetchGitHistory(rootID, { force: true });
+        setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: fresh }));
         if (currentRootIdRef.current === rootID) {
           setGitHistory(fresh);
         }
         return fresh;
       }
+      setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: next }));
       if (currentRootIdRef.current === rootID) {
         setGitHistory(next);
       }
@@ -4341,23 +4360,26 @@ export function App({ onGoHome }: AppProps) {
     } catch (err) {
       console.error("[git.history] failed", { rootID, err });
       const fallback = { available: false, items: [], has_more: false } as GitHistoryPayload;
+      setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: fallback }));
       if (currentRootIdRef.current === rootID) {
         setGitHistory(fallback);
       }
       return fallback;
     } finally {
+      setGitHistoryLoadingByRoot((prev) => ({ ...prev, [rootID]: false }));
       if (currentRootIdRef.current === rootID) {
         setGitHistoryLoading(false);
       }
     }
   }, []);
 
-  const loadMoreGitHistory = useCallback(async () => {
-    const rootID = currentRootIdRef.current;
+  const loadMoreGitHistory = useCallback(async (targetRootID?: string) => {
+    const rootID = targetRootID || currentRootIdRef.current;
     if (!rootID || gitHistoryLoadingMore) {
       return;
     }
-    const currentItems = gitHistory?.items || [];
+    const currentItems =
+      (targetRootID ? gitHistoryByRoot[rootID]?.items : gitHistory?.items) || [];
     const beforeCommit = currentItems[currentItems.length - 1]?.hash || "";
     if (!beforeCommit) {
       return;
@@ -4368,14 +4390,15 @@ export function App({ onGoHome }: AppProps) {
       if (next.commit_missing) {
         clearGitHistoryCache(rootID);
         const fresh = await fetchGitHistory(rootID, { force: true });
+        setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: fresh }));
         if (currentRootIdRef.current === rootID) {
           setGitHistory(fresh);
         }
         return;
       }
       const cached = getCachedGitHistory(rootID);
+      const loadedCount = currentItems.length + next.items.length;
       if (currentRootIdRef.current === rootID) {
-        const loadedCount = currentItems.length + next.items.length;
         if (cached) {
           setGitHistory({
             ...cached,
@@ -4386,14 +4409,22 @@ export function App({ onGoHome }: AppProps) {
           setGitHistory(next);
         }
       }
+      setGitHistoryByRoot((prev) => ({
+        ...prev,
+        [rootID]: cached
+          ? {
+              ...cached,
+              items: cached.items.slice(0, loadedCount),
+              has_more: cached.items.length > loadedCount || cached.has_more,
+            }
+          : next,
+      }));
     } catch (err) {
       console.error("[git.history.more] failed", { rootID, beforeCommit, err });
     } finally {
-      if (currentRootIdRef.current === rootID) {
-        setGitHistoryLoadingMore(false);
-      }
+      setGitHistoryLoadingMore(false);
     }
-  }, [gitHistory, gitHistoryLoadingMore]);
+  }, [gitHistory, gitHistoryByRoot, gitHistoryLoadingMore]);
 
   const loadSessionsForRoot = useCallback(
     async (
@@ -4702,11 +4733,12 @@ export function App({ onGoHome }: AppProps) {
       try {
         const nextStatus = await checkoutGitBranch(rootID, branch);
         clearGitHistoryCache(rootID);
+        setGitStatusByRoot((prev) => ({ ...prev, [rootID]: nextStatus }));
+        await refreshGitHistory(rootID, { force: true });
         if (currentRootIdRef.current === rootID) {
           setGitStatus(nextStatus);
           setGitDiff(null);
           setFile(null);
-          await refreshGitHistory(rootID, { force: true });
           await refreshTreeDir(rootID, selectedDirRef.current || ".", true);
         }
       } catch (err) {
@@ -4736,15 +4768,16 @@ export function App({ onGoHome }: AppProps) {
   const applyGitActionResult = useCallback(
     async (rootID: string, nextStatus: GitStatusPayload, options?: { refreshHistory?: boolean; clearDiff?: boolean }) => {
       clearGitHistoryCache(rootID);
+      setGitStatusByRoot((prev) => ({ ...prev, [rootID]: nextStatus }));
+      if (options?.refreshHistory !== false) {
+        await refreshGitHistory(rootID, { force: true });
+      }
       if (currentRootIdRef.current !== rootID) {
         return;
       }
       setGitStatus(nextStatus);
       if (options?.clearDiff) {
         setGitDiff(null);
-      }
-      if (options?.refreshHistory !== false) {
-        await refreshGitHistory(rootID, { force: true });
       }
       await refreshTreeDir(rootID, selectedDirRef.current || ".", true);
     },
@@ -11398,13 +11431,19 @@ export function App({ onGoHome }: AppProps) {
     );
   };
   const renderRootGitContent = (root: string): React.ReactNode => {
-    if (!root || root !== currentRootId) {
-      return (
-        <div style={{ padding: "8px 4px", fontSize: "12px", color: "var(--text-secondary)" }}>
-          选择项目后查看 Git 状态
-        </div>
-      );
-    }
+    const rootGitStatus = root === currentRootId ? gitStatus : gitStatusByRoot[root] || null;
+    const rootGitHistory = root === currentRootId ? gitHistory : gitHistoryByRoot[root] || null;
+    const rootGitStatusLoading =
+      root === currentRootId ? gitStatusLoading : gitStatusLoadingByRoot[root] === true;
+    const rootGitHistoryLoading =
+      root === currentRootId ? gitHistoryLoading : gitHistoryLoadingByRoot[root] === true;
+    const rootGitStatusAvailable = rootGitStatus?.available === true;
+    const rootGitHistoryAvailable = rootGitHistory?.available === true;
+    const rootGitStatusExpanded = gitStatusExpandedByRoot[root] !== false;
+    const rootGitHistoryExpandedCommits = gitHistoryExpandedByRoot[root] || {};
+    const rootShouldRenderGitPanel = rootGitStatusLoading || rootGitStatusAvailable;
+    const rootShouldRenderGitHistoryPanel =
+      rootGitHistoryLoading || (rootGitHistoryAvailable && (rootGitHistory?.items.length || 0) > 0);
     if (managedRootByIdRef.current[root]?.is_git_repo !== true) {
       return (
         <div style={{ padding: "8px 4px", fontSize: "12px", color: "var(--text-secondary)" }}>
@@ -11412,7 +11451,31 @@ export function App({ onGoHome }: AppProps) {
         </div>
       );
     }
-    if (!gitStatusLoading && !gitHistoryLoading && !shouldRenderGitPanel && !shouldRenderGitHistoryPanel) {
+    if (!rootGitStatus && !rootGitHistory && !rootGitStatusLoading && !rootGitHistoryLoading) {
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            void refreshGitStatus(root);
+            void refreshGitHistory(root);
+          }}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            borderRadius: "6px",
+            padding: "8px 4px",
+            fontSize: "12px",
+            cursor: "pointer",
+            textAlign: "left",
+            width: "100%",
+          }}
+        >
+          加载 Git 状态
+        </button>
+      );
+    }
+    if (!rootGitStatusLoading && !rootGitHistoryLoading && !rootShouldRenderGitPanel && !rootShouldRenderGitHistoryPanel) {
       return (
         <div style={{ padding: "8px 4px", fontSize: "12px", color: "var(--text-secondary)" }}>
           暂无 Git 变更或历史
@@ -11421,43 +11484,38 @@ export function App({ onGoHome }: AppProps) {
     }
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 }}>
-        {shouldRenderGitPanel ? (
+        {rootShouldRenderGitPanel ? (
           <GitStatusPanel
-            rootId={currentRootId || undefined}
-            status={gitStatus}
-            loading={gitStatusLoading}
+            rootId={root}
+            status={rootGitStatus}
+            loading={rootGitStatusLoading}
             compact
-            expanded={gitStatusExpanded}
+            expanded={rootGitStatusExpanded}
             onExpandedChange={(expanded) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               setGitStatusExpandedByRoot((prev) => ({ ...prev, [root]: expanded }));
             }}
             onSelectItem={(item) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               void openGitDiff(root, item);
             }}
             onOpenItem={(item) => {
-              const root = currentRootIdRef.current;
               if (!root || item.is_dir === true) {
                 return;
               }
               actionHandlers.open({ path: item.path, root });
             }}
             onDiscardItem={(item) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               return handleGitDiscardItem(root, item);
             }}
             onStageItem={(item) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
@@ -11466,28 +11524,24 @@ export function App({ onGoHome }: AppProps) {
                 : handleGitStageItem(root, item);
             }}
             onPull={() => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               return handleGitPull(root);
             }}
             onPush={() => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               return handleGitPush(root);
             }}
             onCommit={(message) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               return handleGitCommit(root, message);
             }}
             onSwitchBranch={(branch) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
@@ -11495,17 +11549,16 @@ export function App({ onGoHome }: AppProps) {
             }}
           />
         ) : null}
-        {shouldRenderGitHistoryPanel && currentRootId ? (
+        {rootShouldRenderGitHistoryPanel ? (
           <GitHistoryPanel
-            rootId={currentRootId}
-            items={gitHistory?.items || []}
-            loading={gitHistoryLoading}
+            rootId={root}
+            items={rootGitHistory?.items || []}
+            loading={rootGitHistoryLoading}
             loadingMore={gitHistoryLoadingMore}
-            hasMore={gitHistory?.has_more === true}
+            hasMore={rootGitHistory?.has_more === true}
             compact
-            expandedCommits={gitHistoryExpandedCommits}
+            expandedCommits={rootGitHistoryExpandedCommits}
             onToggleCommit={(hash) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
@@ -11521,10 +11574,9 @@ export function App({ onGoHome }: AppProps) {
               });
             }}
             onLoadMore={() => {
-              void loadMoreGitHistory();
+              void loadMoreGitHistory(root);
             }}
             onSelectFile={(commit, item) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
