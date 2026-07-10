@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AgentSelector } from "./AgentSelector";
 import { ModelSelector } from "./ModelSelector";
+import { AgentModeSelector } from "./AgentModeSelector";
+import { EffortSelector } from "./EffortSelector";
+import { FastServiceSelector } from "./FastServiceSelector";
 import { AgentIcon } from "./AgentIcon";
 import {
   deleteStageTemplate,
@@ -436,25 +439,44 @@ export function TaskTemplateDialog({ open, agents, template, onClose, onSaved }:
                     }}
                   />
                   {isAgent ? (
-                    <ModelSelector
+                    <>
+                      <ModelSelector
+                        agent={selectedAgentStatus}
+                        model={snapshot.model || ""}
+                        compact
+                        menuPlacement="bottom"
+                        maxButtonWidth="132px"
+                        onModelChange={(model) =>
+                          updateStage(index, {
+                            model,
+                            effort: modelDefaultEffort(selectedAgentStatus, model),
+                          })
+                        }
+                      />
+                      <AgentModeSelector
+                        agent={selectedAgentStatus}
+                        mode={snapshot.mode || ""}
+                        compact
+                        menuPlacement="bottom"
+                        maxButtonWidth="132px"
+                        onModeChange={(mode) => updateStage(index, { mode: mode || "" })}
+                      />
+                      <EffortSelector
+                        agent={selectedAgentStatus}
+                        model={snapshot.model || ""}
+                        effort={snapshot.effort || ""}
+                        compact
+                        menuPlacement="bottom"
+                        maxButtonWidth="132px"
+                        onEffortChange={(effort) => updateStage(index, { effort: effort || "" })}
+                      />
+                    <FastServiceSelector
                       agent={selectedAgentStatus}
-                      model={snapshot.model || ""}
-                      mode={snapshot.mode || ""}
-                      effort={snapshot.effort || ""}
                       fastService={toFastService(snapshot.fast_service)}
                       compact
-                      menuPlacement="bottom"
-                      maxButtonWidth="132px"
-                      onModelChange={(model) =>
-                        updateStage(index, {
-                          model,
-                          effort: modelDefaultEffort(selectedAgentStatus, model),
-                        })
-                      }
-                      onModeChange={(mode) => updateStage(index, { mode: mode || "" })}
-                      onEffortChange={(effort) => updateStage(index, { effort: effort || "" })}
                       onFastServiceChange={(fastService) => updateStage(index, { fast_service: fastService || "" })}
                     />
+                    </>
                   ) : null}
                   <StageOptionsMenu
                     isAgent={isAgent}

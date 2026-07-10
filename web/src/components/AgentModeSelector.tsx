@@ -1,34 +1,31 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { AgentStatus } from "../services/agents";
 
-type ModelSelectorProps = {
+type AgentModeSelectorProps = {
   agent?: AgentStatus | null;
-  model?: string;
-  onModelChange: (model: string) => void;
+  mode?: string;
+  onModeChange?: (mode?: string) => void;
   compact?: boolean;
   menuPlacement?: "top" | "bottom";
   maxButtonWidth?: string;
 };
 
-/** 模型选择器：独立选择模型，不包含运行参数（模式/思考等级/Fast）。 */
-export function ModelSelector({
+/** Agent 模式选择器：独立选择运行模式，与模型/思考等级/Fast 配置解耦。 */
+export function AgentModeSelector({
   agent,
-  model = "",
-  onModelChange,
+  mode = "",
+  onModeChange,
   compact = false,
   menuPlacement = "top",
   maxButtonWidth = "min(30vw, 132px)",
-}: ModelSelectorProps) {
+}: AgentModeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const models = agent?.models ?? [];
-  const selectedModel = useMemo(() => {
-    const fallback = agent?.default_model_id || agent?.current_model_id || "";
-    const target = model || fallback;
-    return models.find((item) => item.id === target) ?? null;
-  }, [agent, model, models]);
-  const displayName = selectedModel?.name || selectedModel?.id || model || "模型";
-  const hasModelContent = models.length > 0;
+  const modes = agent?.modes ?? [];
+  const displayedMode = mode || agent?.current_mode_id || "";
+  // 从 modes 中找到当前模式的 name 用于展示
+  const currentMode = modes.find((item) => item.id === displayedMode);
+  const displayName = currentMode?.name || currentMode?.id || displayedMode || "模式";
 
   useEffect(() => {
     if (!isOpen) return;
@@ -45,16 +42,15 @@ export function ModelSelector({
 
   const closeMenu = () => setIsOpen(false);
 
-  if (!agent && !model) return null;
+  if (modes.length === 0) return null;
 
   return (
     <div ref={dropdownRef} style={{ position: "relative", minWidth: 0 }}>
       <button
         type="button"
-        disabled={!hasModelContent || !agent?.available}
         onClick={() => setIsOpen((previous) => !previous)}
-        title={selectedModel?.description || selectedModel?.id || model || "当前 Agent 未提供模型"}
-        aria-label={`选择模型，当前为 ${displayName}`}
+        title={currentMode?.description || currentMode?.id || ""}
+        aria-label={`选择模式，当前为 ${displayName}`}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -65,9 +61,8 @@ export function ModelSelector({
           border: "none",
           borderRadius: "10px",
           background: isOpen ? "rgba(59,130,246,0.08)" : "transparent",
-          color: agent?.available === false ? "var(--text-secondary)" : "var(--text-primary)",
-          cursor: hasModelContent && agent?.available !== false ? "pointer" : "default",
-          opacity: hasModelContent ? 1 : 0.58,
+          color: "var(--text-primary)",
+          cursor: "pointer",
           outline: "none",
         }}
       >
@@ -105,16 +100,16 @@ export function ModelSelector({
             zIndex: 1000,
           }}
         >
-          {models.map((item, index) => (
+          {modes.map((item, index) => (
             <button
               key={item.id}
               type="button"
               onClick={() => {
-                onModelChange(item.id);
+                onModeChange?.(item.id);
                 closeMenu();
               }}
               title={item.description || item.id}
-              style={sectionItemStyle(item.id === selectedModel?.id, index > 0, item.hidden ? 0.66 : 1)}
+              style={sectionItemStyle(item.id === displayedMode, index > 0)}
             >
               <span style={{ fontSize: "13px", fontWeight: 600 }}>{item.name || item.id}</span>
               {item.description ? <span style={descriptionStyle}>{item.description}</span> : null}
@@ -154,7 +149,7 @@ function SelectorChevron({ expanded }: { expanded: boolean }) {
   );
 }
 
-function sectionItemStyle(selected: boolean, topBorder = false, opacity = 1): React.CSSProperties {
+function sectionItemStyle(selected: boolean, topBorder = false): React.CSSProperties {
   return {
     display: "flex",
     flexDirection: "column",
@@ -169,6 +164,5 @@ function sectionItemStyle(selected: boolean, topBorder = false, opacity = 1): Re
     color: selected ? "#3b82f6" : "var(--text-primary)",
     textAlign: "left",
     cursor: "pointer",
-    opacity,
   };
 }

@@ -3,6 +3,9 @@ import { type SessionMode } from "./ModeSelector";
 import { ModeSelector } from "./ModeSelector";
 import { AgentSelector } from "./AgentSelector";
 import { ModelSelector } from "./ModelSelector";
+import { AgentModeSelector } from "./AgentModeSelector";
+import { EffortSelector } from "./EffortSelector";
+import { FastServiceSelector } from "./FastServiceSelector";
 import { fetchAgents, fetchShells, restartAgent, type AgentStatus, type ShellStatus } from "../services/agents";
 import { fetchCandidates, type CandidateItem } from "../services/candidates";
 import { reportError } from "../services/error";
@@ -1588,9 +1591,6 @@ export function ActionBar({
                   <ModelSelector
                     agent={selectedAgent}
                     model={model}
-                    mode={agentMode}
-                    effort={effort}
-                    fastService={fastService}
                     compact
                     maxButtonWidth={isMobile ? "min(25vw, 88px)" : "132px"}
                     onModelChange={(nextModel) => {
@@ -1600,8 +1600,26 @@ export function ActionBar({
                       setEffort(getModelDefaultEffort(selectedAgent, nextModel));
                       setFastService(defaults.fastService);
                     }}
+                  />
+                  <AgentModeSelector
+                    agent={selectedAgent}
+                    mode={agentMode}
+                    compact
+                    maxButtonWidth={isMobile ? "min(25vw, 88px)" : "132px"}
                     onModeChange={(nextAgentMode) => setAgentMode(nextAgentMode || "")}
+                  />
+                  <EffortSelector
+                    agent={selectedAgent}
+                    model={model}
+                    effort={effort}
+                    compact
+                    maxButtonWidth={isMobile ? "min(25vw, 88px)" : "132px"}
                     onEffortChange={(nextEffort) => setEffort(nextEffort || "")}
+                  />
+                  <FastServiceSelector
+                    agent={selectedAgent}
+                    fastService={fastService}
+                    compact
                     onFastServiceChange={(nextFastService) => setFastService(nextFastService || "")}
                   />
                 </div>

@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AgentIcon } from "./AgentIcon";
 import { AgentSelector } from "./AgentSelector";
 import { ModelSelector } from "./ModelSelector";
+import { AgentModeSelector } from "./AgentModeSelector";
+import { EffortSelector } from "./EffortSelector";
+import { FastServiceSelector } from "./FastServiceSelector";
 import { renderToolIcon } from "./stream/ToolCallCard";
 import type { AgentStatus } from "../services/agents";
 import {
@@ -1010,9 +1013,6 @@ export function ScheduledAgentTaskDialog({
               <ModelSelector
                 agent={formAgentStatus}
                 model={form.model}
-                mode={form.mode}
-                effort={form.effort}
-                fastService={form.fast_service}
                 compact
                 menuPlacement="bottom"
                 maxButtonWidth="112px"
@@ -1025,8 +1025,28 @@ export function ScheduledAgentTaskDialog({
                     fast_service: "",
                   }))
                 }
+              />
+              <AgentModeSelector
+                agent={formAgentStatus}
+                mode={form.mode}
+                compact
+                menuPlacement="bottom"
+                maxButtonWidth="112px"
                 onModeChange={(mode) => setForm((prev) => ({ ...prev, mode: mode || "" }))}
+              />
+              <EffortSelector
+                agent={formAgentStatus}
+                model={form.model}
+                effort={form.effort}
+                compact
+                menuPlacement="bottom"
+                maxButtonWidth="112px"
                 onEffortChange={(effort) => setForm((prev) => ({ ...prev, effort: effort || "" }))}
+              />
+              <FastServiceSelector
+                agent={formAgentStatus}
+                fastService={form.fast_service}
+                compact
                 onFastServiceChange={(fastService) => setForm((prev) => ({ ...prev, fast_service: fastService || "" }))}
               />
               <label

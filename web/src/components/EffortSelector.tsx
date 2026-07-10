@@ -1,24 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentStatus } from "../services/agents";
 
-type ModelSelectorProps = {
+type EffortSelectorProps = {
   agent?: AgentStatus | null;
   model?: string;
-  onModelChange: (model: string) => void;
+  effort?: string;
+  onEffortChange?: (effort?: string) => void;
   compact?: boolean;
   menuPlacement?: "top" | "bottom";
   maxButtonWidth?: string;
 };
 
-/** 模型选择器：独立选择模型，不包含运行参数（模式/思考等级/Fast）。 */
-export function ModelSelector({
+/** 思考等级选择器：独立选择模型的思考等级，与模型/模式/Fast 配置解耦。 */
+export function EffortSelector({
   agent,
   model = "",
-  onModelChange,
+  effort = "",
+  onEffortChange,
   compact = false,
   menuPlacement = "top",
   maxButtonWidth = "min(30vw, 132px)",
-}: ModelSelectorProps) {
+}: EffortSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const models = agent?.models ?? [];
@@ -27,8 +29,10 @@ export function ModelSelector({
     const target = model || fallback;
     return models.find((item) => item.id === target) ?? null;
   }, [agent, model, models]);
-  const displayName = selectedModel?.name || selectedModel?.id || model || "模型";
-  const hasModelContent = models.length > 0;
+  const modelEfforts = selectedModel?.efforts ?? [];
+  const efforts = modelEfforts.length > 0 ? modelEfforts : agent?.efforts ?? [];
+  const supportsEffort = efforts.length > 0 && !!selectedModel?.supportEffort;
+  const displayedEffort = effort || selectedModel?.default_effort || agent?.default_effort || "Auto";
 
   useEffect(() => {
     if (!isOpen) return;
@@ -45,16 +49,14 @@ export function ModelSelector({
 
   const closeMenu = () => setIsOpen(false);
 
-  if (!agent && !model) return null;
+  if (!supportsEffort) return null;
 
   return (
     <div ref={dropdownRef} style={{ position: "relative", minWidth: 0 }}>
       <button
         type="button"
-        disabled={!hasModelContent || !agent?.available}
         onClick={() => setIsOpen((previous) => !previous)}
-        title={selectedModel?.description || selectedModel?.id || model || "当前 Agent 未提供模型"}
-        aria-label={`选择模型，当前为 ${displayName}`}
+        aria-label={`选择思考等级，当前为 ${displayedEffort}`}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -65,9 +67,8 @@ export function ModelSelector({
           border: "none",
           borderRadius: "10px",
           background: isOpen ? "rgba(59,130,246,0.08)" : "transparent",
-          color: agent?.available === false ? "var(--text-secondary)" : "var(--text-primary)",
-          cursor: hasModelContent && agent?.available !== false ? "pointer" : "default",
-          opacity: hasModelContent ? 1 : 0.58,
+          color: "var(--text-primary)",
+          cursor: "pointer",
           outline: "none",
         }}
       >
@@ -79,9 +80,10 @@ export function ModelSelector({
             whiteSpace: "nowrap",
             fontSize: "12px",
             fontWeight: 600,
+            textTransform: "capitalize",
           }}
         >
-          {displayName}
+          {displayedEffort}
         </span>
         <SelectorChevron expanded={isOpen} />
       </button>
@@ -105,19 +107,17 @@ export function ModelSelector({
             zIndex: 1000,
           }}
         >
-          {models.map((item, index) => (
+          {efforts.map((item, index) => (
             <button
-              key={item.id}
+              key={item}
               type="button"
               onClick={() => {
-                onModelChange(item.id);
+                onEffortChange?.(item);
                 closeMenu();
               }}
-              title={item.description || item.id}
-              style={sectionItemStyle(item.id === selectedModel?.id, index > 0, item.hidden ? 0.66 : 1)}
+              style={sectionItemStyle(item === displayedEffort.toLowerCase(), index > 0)}
             >
-              <span style={{ fontSize: "13px", fontWeight: 600 }}>{item.name || item.id}</span>
-              {item.description ? <span style={descriptionStyle}>{item.description}</span> : null}
+              <span style={{ fontSize: "13px", fontWeight: 600, textTransform: "capitalize" }}>{item}</span>
             </button>
           ))}
         </div>
@@ -125,14 +125,6 @@ export function ModelSelector({
     </div>
   );
 }
-
-const descriptionStyle: React.CSSProperties = {
-  fontSize: "11px",
-  color: "var(--text-secondary)",
-  whiteSpace: "normal",
-  overflowWrap: "anywhere",
-  wordBreak: "break-word",
-};
 
 function SelectorChevron({ expanded }: { expanded: boolean }) {
   return (
@@ -154,7 +146,7 @@ function SelectorChevron({ expanded }: { expanded: boolean }) {
   );
 }
 
-function sectionItemStyle(selected: boolean, topBorder = false, opacity = 1): React.CSSProperties {
+function sectionItemStyle(selected: boolean, topBorder = false): React.CSSProperties {
   return {
     display: "flex",
     flexDirection: "column",
@@ -169,6 +161,5 @@ function sectionItemStyle(selected: boolean, topBorder = false, opacity = 1): Re
     color: selected ? "#3b82f6" : "var(--text-primary)",
     textAlign: "left",
     cursor: "pointer",
-    opacity,
   };
 }
