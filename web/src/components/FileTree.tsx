@@ -148,6 +148,7 @@ type FileTreeProps = {
   onMultiProjectSessionsChange?: (enabled: boolean) => void;
   onRunAgentLifecycleCommand?: (agentName: string, action: "install" | "update", commands: string[]) => void | Promise<void>;
   onGoHome?: () => void;
+  footerTopContent?: React.ReactNode;
 };
 
 type AgentConfigFlow = "backup" | "switch";
@@ -1253,6 +1254,7 @@ export function FileTree({
   onMultiProjectSessionsChange,
   onRunAgentLifecycleCommand,
   onGoHome,
+  footerTopContent,
 }: FileTreeProps) {
   const expandedSet = new Set(expanded);
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
@@ -1563,6 +1565,7 @@ export function FileTree({
   const hasFooterContent =
     !!updateActionLabel ||
     !!updateActionHelp ||
+    !!footerTopContent ||
     !!relayActionLabel ||
     !!relayActionHelp ||
     shouldShowRelayTip ||
@@ -3180,6 +3183,9 @@ export function FileTree({
               </div>
             ) : null}
           </div>
+        ) : null}
+        {footerTopContent ? (
+          <div style={{ width: "100%" }}>{footerTopContent}</div>
         ) : null}
         {shouldShowInstallButton ? (
           relayActionLabel ? (

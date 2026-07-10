@@ -1,4 +1,5 @@
 {
+  "tokenStationUrl": "https://token.a9gent.com",
   "shells": [
     {
       "command": "zsh",
@@ -400,5 +401,6 @@
       "configBackup": {}
     }
   ],
-  "relayBaseURL": "https://relay.a9gent.com"
+  "relayBaseURL": "https://relay.a9gent.com",
+  "tokenStationURL":"https://token.a9gent.com"
 }

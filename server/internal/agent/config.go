@@ -15,9 +15,10 @@ const configPathEnvKey = "MINDFS_AGENTS_CONFIG"
 
 // Config holds all agent configurations.
 type Config struct {
-	Agents       []Definition `json:"agents"`
-	Shells       []Shell      `json:"shells,omitempty"`
-	RelayBaseURL string       `json:"relayBaseURL,omitempty"`
+	Agents          []Definition `json:"agents"`
+	Shells          []Shell      `json:"shells,omitempty"`
+	RelayBaseURL    string       `json:"relayBaseURL,omitempty"`
+	TokenStationURL string       `json:"tokenStationURL,omitempty"`
 }
 
 type Shell struct {

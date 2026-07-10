@@ -28,6 +28,11 @@ import {
   type BootstrapState,
   type RelayStatusPayload,
 } from "./services/bootstrap";
+import {
+  fetchTokenStationInfo,
+  startTokenStationBinding,
+  type TokenStationInfo,
+} from "./services/tokenStation";
 import { syncNativeReplyPollerE2EE } from "./services/replyPoller";
 import {
   ProtectedAPIError,
@@ -1231,16 +1236,18 @@ function hasExplicitFileContext(message: string): boolean {
 // Hook for responsive detection
 function useResponsive() {
   const [isMobile, setIsMobile] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
   useEffect(() => {
     const checkSize = () => {
       const width = window.innerWidth;
       setIsMobile(width < 768);
+      setIsTablet(width >= 768 && width < 1024);
     };
     checkSize();
     window.addEventListener("resize", checkSize);
     return () => window.removeEventListener("resize", checkSize);
   }, []);
-  return { isMobile };
+  return { isMobile, isTablet };
 }
 
 type AppProps = {
@@ -1497,7 +1504,7 @@ export function App({ onGoHome }: AppProps) {
   );
   const [agentsVersion, setAgentsVersion] = useState(0);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const { isMobile } = useResponsive();
+  const { isMobile, isTablet } = useResponsive();
   const [mobileEnterKeySends, setMobileEnterKeySends] = useState(loadMobileEnterKeySends);
   const [sidebarsSwapped, setSidebarsSwapped] = useState(loadSidebarsSwapped);
   const [gitDiffSideBySide, setGitDiffSideBySide] = useState(loadGitDiffSideBySide);
@@ -2141,6 +2148,12 @@ export function App({ onGoHome }: AppProps) {
   const [relayStatus, setRelayStatus] = useState<RelayStatusPayload | null>(
     null,
   );
+  const [tokenStationInfo, setTokenStationInfo] =
+    useState<TokenStationInfo | null>(null);
+  const [tokenStationLoading, setTokenStationLoading] = useState(false);
+  const [tokenStationBusy, setTokenStationBusy] = useState(false);
+  const [tokenStationErrorOpen, setTokenStationErrorOpen] = useState(false);
+  const tokenStationRefreshRef = useRef<(() => void) | null>(null);
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>(() =>
     bootstrapService.snapshot(),
   );
@@ -8703,6 +8716,7 @@ export function App({ onGoHome }: AppProps) {
             streamKey,
             event.data?.contextWindow,
           );
+          tokenStationRefreshRef.current?.();
           break;
         case "error":
           reportError(
@@ -12702,6 +12716,76 @@ export function App({ onGoHome }: AppProps) {
     navigatePopup(pendingPopup, target.toString());
   }, [currentRootId, startRelayBinding, relayStatus]);
 
+  const refreshTokenStationInfo = useCallback(async () => {
+    setTokenStationLoading(true);
+    setTokenStationErrorOpen(false);
+    try {
+      const info = await fetchTokenStationInfo();
+      setTokenStationInfo(info);
+    } catch (error) {
+      setTokenStationInfo({
+        success: false,
+        message: error instanceof Error ? error.message : "token_station_failed",
+      });
+    } finally {
+      setTokenStationLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    tokenStationRefreshRef.current = () => {
+      void refreshTokenStationInfo();
+    };
+    return () => {
+      tokenStationRefreshRef.current = null;
+    };
+  }, [refreshTokenStationInfo]);
+
+  useEffect(() => {
+    if (!bootstrapService.canUseProtectedAPI()) {
+      return;
+    }
+    void refreshTokenStationInfo();
+  }, [refreshTokenStationInfo, bootstrapState.phase]);
+
+  useEffect(() => {
+    if (!bootstrapService.canUseProtectedAPI() || !selectedSession?.updated_at) {
+      return;
+    }
+    void refreshTokenStationInfo();
+  }, [refreshTokenStationInfo, selectedSession?.updated_at]);
+
+  const handleTokenStationAction = useCallback(async () => {
+    setTokenStationErrorOpen(false);
+    const topupURL = String(tokenStationInfo?.data?.topup_url || "http://localhost:3000");
+    if (relayStatus?.relay_bound || relayStatus?.token_station_bound) {
+      window.open(topupURL, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const pendingPopup = openPendingPopup();
+    setTokenStationBusy(true);
+    try {
+      const status = await startTokenStationBinding();
+      if (status.bound) {
+        window.open(String(status.topup_url || topupURL), "_blank", "noopener,noreferrer");
+        pendingPopup?.close();
+        return;
+      }
+      const pendingCode = String(status.pending_code || "");
+      const relayBaseURL = String(status.relay_base_url || relayStatus?.relay_base_url || "");
+      if (!pendingCode || !relayBaseURL) {
+        pendingPopup?.close();
+        return;
+      }
+      const target = new URL("/bind", relayBaseURL);
+      target.searchParams.set("code", pendingCode);
+      target.searchParams.set("purpose", "token_station");
+      navigatePopup(pendingPopup, target.toString());
+    } finally {
+      setTokenStationBusy(false);
+    }
+  }, [relayStatus, tokenStationInfo]);
+
   const relayActionLabel = useMemo(() => {
     if (isRelayNodePage()) {
       return null;
@@ -12981,6 +13065,127 @@ export function App({ onGoHome }: AppProps) {
         }
       />
     );
+  const tokenStationCard = (
+      <section
+        aria-label="Token 加油站"
+        style={{
+          position: "relative",
+          width: "100%",
+          height: 36,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          border: "1px solid rgba(15, 23, 42, 0.14)",
+          background: "rgba(255, 255, 255, 0.94)",
+          backdropFilter: "blur(14px)",
+          boxShadow: "0 10px 28px rgba(15, 23, 42, 0.14)",
+          borderRadius: 8,
+          boxSizing: "border-box",
+          padding: "0 5px 0 8px",
+          color: "var(--text-primary)",
+        }}
+      >
+        {tokenStationInfo?.success === false && tokenStationErrorOpen ? (
+          <div
+            role="status"
+            style={{
+              position: "absolute",
+              left: 0,
+              bottom: 42,
+              width: "100%",
+              border: "1px solid rgba(180, 83, 9, 0.22)",
+              background: "rgba(255, 251, 235, 0.98)",
+              color: "#92400e",
+              borderRadius: 8,
+              boxShadow: "0 10px 28px rgba(15, 23, 42, 0.14)",
+              padding: "7px 9px",
+              fontSize: 11,
+              lineHeight: "15px",
+              wordBreak: "break-word",
+            }}
+          >
+            {tokenStationInfo.message || "未绑定账户"}
+          </div>
+        ) : null}
+        <div
+          style={{
+            width: "100%",
+            height: 28,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <svg
+            aria-hidden="true"
+            width="1em"
+            height="1em"
+            viewBox="0 0 24 24"
+            style={{
+              flex: "0 0 auto",
+              width: 25,
+              height: 25,
+              color: "#f97316",
+            }}
+          >
+            <path d="M0 0h24v24H0z" fill="none" />
+            <path
+              fill="currentColor"
+              d="M3 21a1 1 0 0 1 0-2V6a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v4a3 3 0 0 1 3 3v3a.5.5 0 1 0 1 0v-6a2 2 0 0 1-2-2v-.585l-.707-.708a1 1 0 0 1-.083-1.32l.083-.094a1 1 0 0 1 1.414 0l3.003 3.002l.095.112l.028.04l.044.073l.052.11l.031.09l.02.076l.012.078L21 9v7a2.5 2.5 0 1 1-5 0v-3a1 1 0 0 0-1-1v7a1 1 0 0 1 0 2zm9-16H6a1 1 0 0 0-1 1v4h8V6a1 1 0 0 0-1-1"
+            />
+          </svg>
+          <span
+            title={
+              tokenStationInfo?.success
+                ? tokenStationInfo.data?.balance_text ||
+                  tokenStationInfo.data?.quota_display_text ||
+                  "--"
+                : tokenStationInfo?.message || "未绑定账户"
+            }
+            style={{
+              minWidth: 0,
+              flex: "0 1 auto",
+              maxWidth: isTablet ? 68 : 104,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: 13,
+              fontWeight: 700,
+              lineHeight: "18px",
+            }}
+          >
+            {tokenStationLoading
+              ? "读取中"
+              : tokenStationInfo?.success
+                ? tokenStationInfo.data?.balance_text ||
+                  tokenStationInfo.data?.quota_display_text ||
+                  "--"
+                : "--"}
+          </span>
+          <span style={{ flex: "1 1 auto", minWidth: 4 }} />
+          <button
+            type="button"
+            onClick={() => void handleTokenStationAction()}
+            disabled={tokenStationBusy}
+            style={{
+              flex: "0 0 auto",
+              height: 23,
+              border: "none",
+              borderRadius: 6,
+              background: "#2563eb",
+              color: "#fff",
+              fontSize: 11,
+              fontWeight: 650,
+              cursor: tokenStationBusy ? "default" : "pointer",
+              padding: "0 7px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {tokenStationBusy ? "处理中" : "去加油"}
+          </button>
+        </div>
+      </section>
+  );
 
   return (
     <>
@@ -13059,6 +13264,7 @@ export function App({ onGoHome }: AppProps) {
             onUpdateAction={() => {
               void handleStartUpdate();
             }}
+            footerTopContent={tokenStationCard}
             showEnterKeySendOption={isMobile}
             enterKeySends={mobileEnterKeySends}
             onEnterKeySendsChange={setMobileEnterKeySends}
