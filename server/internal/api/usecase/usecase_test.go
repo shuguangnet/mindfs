@@ -15,10 +15,46 @@ import (
 
 	"mindfs/server/internal/agent"
 	agenttypes "mindfs/server/internal/agent/types"
+	"mindfs/server/internal/apperr"
 	rootfs "mindfs/server/internal/fs"
 	"mindfs/server/internal/preferences"
 	"mindfs/server/internal/session"
 )
+
+func TestListTreeMissingPluginDirReturnsEmptyEntries(t *testing.T) {
+	rootDir := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	service := Service{Registry: uploadTestRegistry{root: root}}
+
+	out, err := service.ListTree(context.Background(), ListTreeInput{
+		RootID: root.ID,
+		Dir:    ".mindfs/plugins",
+	})
+	if err != nil {
+		t.Fatalf("ListTree returned error: %v", err)
+	}
+	if len(out.Entries) != 0 {
+		t.Fatalf("entries len = %d, want 0", len(out.Entries))
+	}
+}
+
+func TestListTreeMissingRegularDirReturnsNotFound(t *testing.T) {
+	rootDir := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	service := Service{Registry: uploadTestRegistry{root: root}}
+
+	_, err := service.ListTree(context.Background(), ListTreeInput{
+		RootID: root.ID,
+		Dir:    "missing",
+	})
+	if err == nil {
+		t.Fatal("ListTree returned nil error, want not found")
+	}
+	appErr, ok := apperr.Classify(err)
+	if !ok || appErr.Code != apperr.CodeNotFound {
+		t.Fatalf("error = %v, want %s", err, apperr.CodeNotFound)
+	}
+}
 
 func TestSaveUploadedFilesDefaultsToAttachmentDirAndRenamesConflicts(t *testing.T) {
 	rootDir := t.TempDir()
