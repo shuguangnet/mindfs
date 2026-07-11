@@ -73,9 +73,18 @@ func (s *Service) ListTree(_ context.Context, in ListTreeInput) (ListTreeOutput,
 	s.ensureFileWatcher(in.RootID, dir)
 	entries, err := root.ListEntries(dir)
 	if err != nil {
+		if isOptionalPluginDir(dir) {
+			if appErr, ok := apperr.Classify(err); ok && appErr.Code == apperr.CodeNotFound {
+				return ListTreeOutput{Entries: []fs.Entry{}}, nil
+			}
+		}
 		return ListTreeOutput{}, err
 	}
 	return ListTreeOutput{Entries: entries}, nil
+}
+
+func isOptionalPluginDir(dir string) bool {
+	return filepath.ToSlash(strings.Trim(dir, "/")) == ".mindfs/plugins"
 }
 
 func parentDir(path string) string {
