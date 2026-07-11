@@ -50,6 +50,8 @@ const sidebarStyle: React.CSSProperties = {
 
 const mainStyle: React.CSSProperties = {
   gridArea: "main",
+  width: "100%",
+  minWidth: 0,
   overflow: "hidden",
   padding: "0",
   background: "var(--mindfs-topbar-bg, var(--mobile-overlay-bg, var(--content-bg)))",

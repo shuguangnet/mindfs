@@ -1,3 +1,9 @@
+# MindFS v0.4.5
+
+## 优化和修复
+- 修复 v0.4.3 中 Ant Design Layout 与 CSS Grid 组合导致中间会话区域宽度变成 0px 的布局回归
+
+
 # MindFS v0.4.4
 
 ## 优化和修复
