@@ -10,7 +10,9 @@ import (
 	"mindfs/server/internal/agent/acp"
 	"mindfs/server/internal/agent/claude"
 	"mindfs/server/internal/agent/codex"
+	remoteagent "mindfs/server/internal/agent/remote"
 	agenttypes "mindfs/server/internal/agent/types"
+	"mindfs/server/internal/remote"
 )
 
 // Pool routes agent session creation to protocol-specific runtimes.
@@ -25,6 +27,7 @@ type Pool struct {
 	acp        *acp.Runtime
 	claude     *claude.Runtime
 	codex      *codex.Runtime
+	remote     *remoteagent.Runtime
 }
 
 type sessionEntry struct {
@@ -49,6 +52,16 @@ func NewPool(cfg Config) *Pool {
 	}
 }
 
+func (p *Pool) SetRemoteManager(manager *remote.Manager) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if manager == nil {
+		p.remote = nil
+		return
+	}
+	p.remote = remoteagent.NewRuntime(manager)
+}
+
 // GetOrCreate returns an existing session handle or creates a new one.
 func (p *Pool) GetOrCreate(ctx context.Context, in agenttypes.OpenSessionInput) (agenttypes.Session, error) {
 	if in.SessionKey == "" {
@@ -64,14 +77,27 @@ func (p *Pool) GetOrCreate(ctx context.Context, in agenttypes.OpenSessionInput) 
 		p.mu.Unlock()
 		return entry.session, nil
 	}
-	def, ok := p.cfg.GetAgent(in.AgentName)
-	if !ok {
-		p.mu.Unlock()
-		return nil, errors.New("agent not configured: " + in.AgentName)
-	}
-	protocol := def.Protocol
-	if protocol == "" {
-		protocol = DefaultProtocol(in.AgentName)
+	var def Definition
+	var protocol Protocol
+	if serverID, remoteAgentName, ok := remote.ParseName(in.AgentName); ok {
+		if p.remote == nil {
+			p.mu.Unlock()
+			return nil, errors.New("remote manager not configured")
+		}
+		protocol = ProtocolRemote
+		def = Definition{Name: remoteAgentName}
+		_ = serverID
+	} else {
+		var ok bool
+		def, ok = p.cfg.GetAgent(in.AgentName)
+		if !ok {
+			p.mu.Unlock()
+			return nil, errors.New("agent not configured: " + in.AgentName)
+		}
+		protocol = def.Protocol
+		if protocol == "" {
+			protocol = DefaultProtocol(in.AgentName)
+		}
 	}
 	p.mu.Unlock()
 
@@ -108,6 +134,25 @@ func (p *Pool) GetOrCreate(ctx context.Context, in agenttypes.OpenSessionInput) 
 
 func (p *Pool) openSession(ctx context.Context, protocol Protocol, def Definition, in agenttypes.OpenSessionInput) (agenttypes.Session, error) {
 	switch protocol {
+	case ProtocolRemote:
+		serverID, remoteAgentName, ok := remote.ParseName(in.AgentName)
+		if !ok {
+			return nil, errors.New("invalid remote agent name")
+		}
+		if p.remote == nil {
+			return nil, errors.New("remote manager not configured")
+		}
+		return p.remote.OpenSession(ctx, remoteagent.OpenOptions{
+			ServerID:        serverID,
+			AgentName:       remoteAgentName,
+			SessionKey:      in.SessionKey,
+			Model:           in.Model,
+			Mode:            in.Mode,
+			Effort:          in.Effort,
+			FastService:     in.FastService,
+			PlanMode:        in.PlanMode,
+			RemoteSessionID: in.AgentSessionID,
+		})
 	case ProtocolClaudeSDK:
 		return p.claude.OpenSession(ctx, claude.OpenOptions{
 			AgentName:       in.AgentName,

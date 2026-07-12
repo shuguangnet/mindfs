@@ -23,6 +23,7 @@ import { AgentMenuList } from "./AgentMenuList";
 import { AgentIcon } from "./AgentIcon";
 import { SymlinkBadge } from "./SymlinkBadge";
 import { RelayLocalServicesDialog } from "./RelayLocalServicesDialog";
+import { RemoteServersDialog } from "./RemoteServersDialog";
 import { fetchAgentCatalog, fetchAgents, type AgentStatus } from "../services/agents";
 import {
   createAgentConfigBackup,
@@ -1102,6 +1103,7 @@ export function FileTree({
   const [agentConfigError, setAgentConfigError] = React.useState("");
   const [agentLifecycleOpen, setAgentLifecycleOpen] = React.useState(false);
   const [relayServicesOpen, setRelayServicesOpen] = React.useState(false);
+  const [remoteServersOpen, setRemoteServersOpen] = React.useState(false);
   const [relayServicesEditing, setRelayServicesEditing] = React.useState(false);
   const [agentLifecycleAgents, setAgentLifecycleAgents] = React.useState<AgentStatus[]>([]);
   const [agentLifecycleBusy, setAgentLifecycleBusy] = React.useState(false);
@@ -1134,6 +1136,7 @@ export function FileTree({
   const agentConfigPopoverRef = React.useRef<HTMLDivElement | null>(null);
   const agentLifecyclePopoverRef = React.useRef<HTMLDivElement | null>(null);
   const relayServicesPopoverRef = React.useRef<HTMLDivElement | null>(null);
+  const remoteServersPopoverRef = React.useRef<HTMLDivElement | null>(null);
   const updateNotesRef = React.useRef<HTMLDivElement | null>(null);
   const createInputRef = React.useRef<HTMLInputElement | null>(null);
   const previousCreatingRootNameRef = React.useRef<string | null>(null);
@@ -1535,6 +1538,7 @@ export function FileTree({
 
   const openAgentConfigFlow = React.useCallback((flow: AgentConfigFlow) => {
     setAgentLifecycleOpen(false);
+    setRemoteServersOpen(false);
     setAgentConfigFlow(flow);
     setAgentConfigStep("agent");
     setAgentConfigAgent("");
@@ -1566,6 +1570,7 @@ export function FileTree({
 
   const openAgentLifecycleFlow = React.useCallback(() => {
     setAgentConfigFlow(null);
+    setRemoteServersOpen(false);
     setAgentLifecycleOpen(true);
     setIsMenuOpen(false);
     setAgentLifecycleError("");
@@ -1627,6 +1632,19 @@ export function FileTree({
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [relayServicesEditing, relayServicesOpen]);
+
+  React.useEffect(() => {
+    if (!remoteServersOpen) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!remoteServersPopoverRef.current?.contains(event.target as Node)) {
+        setRemoteServersOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [remoteServersOpen]);
 
   const closeRelayServices = React.useCallback(() => {
     setRelayServicesOpen(false);
@@ -2149,6 +2167,29 @@ export function FileTree({
                 <button
                   type="button"
                   onClick={() => {
+                    setRemoteServersOpen(true);
+                    setRelayServicesOpen(false);
+                    closeAgentConfigFlow();
+                    setAgentLifecycleOpen(false);
+                    setIsMenuOpen(false);
+                    setIsAppearanceMenuOpen(false);
+                    setIsSortMenuOpen(false);
+                  }}
+                  style={fileTreeMenuButtonStyle}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="6" rx="2" />
+                    <rect x="3" y="14" width="18" height="6" rx="2" />
+                    <path d="M7 7h.01" />
+                    <path d="M7 17h.01" />
+                    <path d="M12 7h5" />
+                    <path d="M12 17h5" />
+                  </svg>
+                  <span>远端服务器</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
                     setRelayServicesOpen(true);
                     setRelayServicesEditing(false);
                     closeAgentConfigFlow();
@@ -2497,6 +2538,23 @@ export function FileTree({
               noRelayer={relayNoRelayer}
               onCancel={closeRelayServices}
               onEditingChange={setRelayServicesEditing}
+            />
+          </div>
+        ) : null}
+        {remoteServersOpen ? (
+          <div
+            ref={remoteServersPopoverRef}
+            style={{
+              position: "absolute",
+              top: "calc(100% + 6px)",
+              left: "8px",
+              right: "3px",
+              zIndex: 35,
+            }}
+          >
+            <RemoteServersDialog
+              open={remoteServersOpen}
+              onClose={() => setRemoteServersOpen(false)}
             />
           </div>
         ) : null}

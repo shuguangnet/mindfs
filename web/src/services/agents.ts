@@ -30,6 +30,10 @@ export type AgentStatus = {
   supports_online_update?: boolean;
   install_commands?: string[];
   update_commands?: string[];
+  remote_server_id?: string;
+  remote_server_name?: string;
+  remote_agent?: string;
+  remote_shell?: string;
 };
 
 export type AgentModelInfo = {
@@ -62,6 +66,9 @@ export type ShellStatus = {
   resolved_command?: string;
   args?: string[];
   default?: boolean;
+  remote_server_id?: string;
+  remote_server_name?: string;
+  remote_shell?: string;
 };
 
 function normalizeEfforts(input: unknown): string[] | undefined {
@@ -144,6 +151,9 @@ function normalizeShellStatus(input: unknown): ShellStatus | null {
     label: String(shell.name || shell.label || id).trim() || id,
     args: Array.isArray(shell.args) ? shell.args.map((item) => String(item)) : undefined,
     default: !!shell.default,
+    remote_server_id: typeof shell.remote_server_id === "string" ? shell.remote_server_id : undefined,
+    remote_server_name: typeof shell.remote_server_name === "string" ? shell.remote_server_name : undefined,
+    remote_shell: typeof shell.remote_shell === "string" ? shell.remote_shell : undefined,
   };
 }
 

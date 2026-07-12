@@ -1488,6 +1488,12 @@ export function App({ onGoHome }: AppProps) {
     "main",
   );
   const [agentsVersion, setAgentsVersion] = useState(0);
+
+  useEffect(() => {
+    const handleAgentsChanged = () => setAgentsVersion((v) => v + 1);
+    window.addEventListener("mindfs-agents-changed", handleAgentsChanged);
+    return () => window.removeEventListener("mindfs-agents-changed", handleAgentsChanged);
+  }, []);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const { isMobile } = useResponsive();
   const [mobileEnterKeySends, setMobileEnterKeySends] = useState(loadMobileEnterKeySends);

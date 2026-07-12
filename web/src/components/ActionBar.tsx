@@ -2,10 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { type SessionMode } from "./ModeSelector";
 import { ModeSelector } from "./ModeSelector";
 import { AgentSelector } from "./AgentSelector";
-import { ModelSelector } from "./ModelSelector";
-import { AgentModeSelector } from "./AgentModeSelector";
-import { EffortSelector } from "./EffortSelector";
-import { FastServiceSelector } from "./FastServiceSelector";
 import { fetchAgents, fetchShells, restartAgent, type AgentStatus, type ShellStatus } from "../services/agents";
 import { fetchCandidates, type CandidateItem } from "../services/candidates";
 import { reportError } from "../services/error";
@@ -209,6 +205,11 @@ function ShellSelector({
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const selected = shells.find((item) => item.id === shell || item.command === shell || item.resolved_command === shell) || shells.find((item) => item.default) || shells[0];
+  const shellLabel = (item?: ShellStatus) => {
+    if (!item) return "shell";
+    const base = item.remote_shell || item.label || item.id;
+    return item.remote_server_name ? `${item.remote_server_name} / ${base}` : item.label || base;
+  };
 
   useEffect(() => {
     const handlePointerOutside = (event: PointerEvent) => {
@@ -228,7 +229,7 @@ function ShellSelector({
         type="button"
         onClick={() => shells.length > 0 && setIsOpen((prev) => !prev)}
         disabled={shells.length === 0}
-        title="Shell"
+        title={shellLabel(selected)}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -264,7 +265,7 @@ function ShellSelector({
             boxSizing: "border-box",
           }}
         >
-          {selected?.label || "shell"}
+          {shellLabel(selected)}
         </span>
       </button>
 
@@ -328,7 +329,7 @@ function ShellSelector({
                   event.currentTarget.style.background = isSelected ? "rgba(59, 130, 246, 0.08)" : "transparent";
                 }}
               >
-                {item.label}
+                {shellLabel(item)}
               </button>
             );
           })}
@@ -1073,12 +1074,11 @@ export function ActionBar({
     : mode === "chat" && !isFocused
       ? blurPlaceholder
       : modePlaceholders[mode];
-  // Agent 与模型拆成两个相邻控件后，单行编辑器需为右侧工具栏预留更多空间。
   const editorRightInset = isMultiLine
     ? 14
     : mode === "command"
       ? isMobile ? 92 : 116
-      : isMobile ? 224 : 280;
+      : isMobile ? 124 : 148;
   const editorBottomInset = isMultiLine ? 44 : 12;
   const editorMinHeight = 44;
   const mobileFileSidebarButton = isMobile ? (
@@ -1567,19 +1567,27 @@ export function ActionBar({
 
               <ModeSelector mode={mode} onModeChange={setMode} compact={true} disabled={isModeLocked} />
               {mode !== "command" ? (
-                <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
+                <div>
                   <AgentSelector
                     agent={agent}
+                    model={model}
+                    mode={agentMode}
+                    effort={effort}
+                    fastService={fastService}
                     agents={agents}
-                    onAgentChange={(nextAgent) => {
+                    onAgentChange={(nextAgent, nextModel) => {
                       const nextStatus = agents.find((item) => item.name === nextAgent);
                       const defaults = getAgentDefaults(nextStatus);
+                      const resolvedModel = nextModel || defaults.model;
                       setAgent(nextAgent);
-                      setModel(defaults.model);
+                      setModel(resolvedModel);
                       setAgentMode("");
-                      setEffort(getModelDefaultEffort(nextStatus, defaults.model));
+                      setEffort(getModelDefaultEffort(nextStatus, resolvedModel));
                       setFastService(defaults.fastService);
                     }}
+                    onModeChange={(nextAgentMode) => setAgentMode(nextAgentMode || "")}
+                    onEffortChange={(nextEffort) => setEffort(nextEffort || "")}
+                    onFastServiceChange={(nextFastService) => setFastService(nextFastService || "")}
                     onAgentRestart={async (targetAgent) => {
                       await restartAgent(targetAgent);
                       const items = await fetchAgents(true);
@@ -1587,40 +1595,6 @@ export function ActionBar({
                     }}
                     compact={true}
                     warnUnavailable={isSelectedAgentUnavailable}
-                  />
-                  <ModelSelector
-                    agent={selectedAgent}
-                    model={model}
-                    compact
-                    maxButtonWidth={isMobile ? "min(25vw, 88px)" : "132px"}
-                    onModelChange={(nextModel) => {
-                      const defaults = getAgentDefaults(selectedAgent);
-                      setModel(nextModel);
-                      setAgentMode("");
-                      setEffort(getModelDefaultEffort(selectedAgent, nextModel));
-                      setFastService(defaults.fastService);
-                    }}
-                  />
-                  <AgentModeSelector
-                    agent={selectedAgent}
-                    mode={agentMode}
-                    compact
-                    maxButtonWidth={isMobile ? "min(25vw, 88px)" : "132px"}
-                    onModeChange={(nextAgentMode) => setAgentMode(nextAgentMode || "")}
-                  />
-                  <EffortSelector
-                    agent={selectedAgent}
-                    model={model}
-                    effort={effort}
-                    compact
-                    maxButtonWidth={isMobile ? "min(25vw, 88px)" : "132px"}
-                    onEffortChange={(nextEffort) => setEffort(nextEffort || "")}
-                  />
-                  <FastServiceSelector
-                    agent={selectedAgent}
-                    fastService={fastService}
-                    compact
-                    onFastServiceChange={(nextFastService) => setFastService(nextFastService || "")}
                   />
                 </div>
               ) : (

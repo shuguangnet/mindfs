@@ -11,6 +11,8 @@ const (
 	ProtocolClaudeSDK Protocol = "claude-sdk"
 	// ProtocolCodexSDK uses codex-go-sdk app-server transport.
 	ProtocolCodexSDK Protocol = "codex-sdk"
+	// ProtocolRemote proxies a session to another MindFS server.
+	ProtocolRemote Protocol = "remote"
 )
 
 // DefaultProtocol returns the default protocol for agents.

@@ -103,6 +103,35 @@ func TestSaveUploadedFilesDefaultsToAttachmentDirAndRenamesConflicts(t *testing.
 	assertFileContent(t, filepath.Join(rootDir, filepath.FromSlash(wantSecond)), "second file")
 }
 
+func TestBuildPromptForRemoteAgentInlinesSwitchContext(t *testing.T) {
+	rootDir := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	manager := session.NewManager(root)
+	current := &session.Session{
+		Key: "session-1",
+		AgentCtxSeq: map[string]int{
+			"remote:prod:codex": 0,
+		},
+		Exchanges: []session.Exchange{
+			{Role: "user", Content: "local question"},
+			{Role: "agent", Agent: "claude", Content: "local answer"},
+		},
+	}
+	service := Service{}
+	got := service.BuildPrompt(BuildPromptInput{
+		Session: current,
+		Manager: manager,
+		Agent:   "remote:prod:codex",
+		Message: "continue remotely",
+	})
+	if !strings.Contains(got, "local question") || !strings.Contains(got, "local answer") {
+		t.Fatalf("remote prompt did not inline recent history: %q", got)
+	}
+	if strings.Contains(got, "read the last") || strings.Contains(got, ".mindfs") {
+		t.Fatalf("remote prompt contains local log read hint: %q", got)
+	}
+}
+
 func TestGetGitRelatedFileDiffResolvesTaskWorktreePath(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not found")
