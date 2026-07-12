@@ -20,6 +20,7 @@ import (
 	agenttypes "mindfs/server/internal/agent/types"
 	"mindfs/server/internal/commandexec"
 	"mindfs/server/internal/fs"
+	"mindfs/server/internal/remote"
 	"mindfs/server/internal/session"
 )
 
@@ -1027,6 +1028,9 @@ func prependSwitchHint(in BuildPromptInput, prompt string) string {
 	if linesToRead <= 0 {
 		return prompt
 	}
+	if _, _, ok := remote.ParseName(currentAgent); ok {
+		return buildRemoteSwitchContextHint(in.Session, linesToRead) + prompt
+	}
 	logPath := switchReadHintPath(in.Manager, in.Session.Key, in.RuntimeRootAbs)
 	readHint := buildSwitchReadHint(logPath, linesToRead)
 	return readHint + prompt
@@ -1213,6 +1217,38 @@ func buildSwitchReadHint(exchangeLogPath string, lines int) string {
 		"Execution order: read history first, then compose the final answer.\n" +
 		"Note: do not send any natural-language response before finishing the required history reads. Start reading immediately via tools/commands.\n" +
 		"Only if reading fails, output a brief error and stop.\n\n"
+}
+
+func buildRemoteSwitchContextHint(current *session.Session, lines int) string {
+	if current == nil || lines <= 0 || len(current.Exchanges) == 0 {
+		return ""
+	}
+	start := len(current.Exchanges) - lines
+	if start < 0 {
+		start = 0
+	}
+	var b strings.Builder
+	b.WriteString("This session was migrated from another runtime. You are running on a remote MindFS server and cannot read the local session log directly.\n")
+	b.WriteString("Use the following recent local conversation history as context before replying:\n\n")
+	for _, exchange := range current.Exchanges[start:] {
+		role := strings.TrimSpace(exchange.Role)
+		if role == "" {
+			role = "message"
+		}
+		agentName := strings.TrimSpace(exchange.Agent)
+		if agentName != "" {
+			role += "/" + agentName
+		}
+		content := strings.TrimSpace(exchange.Content)
+		if content == "" {
+			continue
+		}
+		b.WriteString("[" + role + "]\n")
+		b.WriteString(truncateRunes(content, 4000))
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Now answer the user's latest message below.\n\n")
+	return b.String()
 }
 
 func sessionNameRunner(ctx context.Context, pool *agent.Pool, rootAbs string, in SuggestSessionNameInput) (string, error) {
@@ -2902,6 +2938,9 @@ func (s *Service) sendCommandMessage(ctx context.Context, in SendMessageInput, m
 	if strings.TrimSpace(in.Content) == "" {
 		return errors.New("command required")
 	}
+	if serverID, remoteShellID, ok := remote.ParseName(in.Shell); ok {
+		return s.sendRemoteCommandMessage(ctx, in, manager, current, serverID, remoteShellID)
+	}
 	root := manager.Root()
 	rootAbs, err := root.RootDir()
 	if err != nil {
@@ -3101,6 +3140,179 @@ func stopCommandProcess(proc commandexec.Process) {
 	_ = proc.Terminate()
 	time.Sleep(3 * time.Second)
 	_ = proc.KillTree()
+}
+
+type remoteRegistry interface {
+	GetRemoteManager() *remote.Manager
+}
+
+func (s *Service) sendRemoteCommandMessage(ctx context.Context, in SendMessageInput, manager *session.Manager, current *session.Session, serverID, remoteShellID string) error {
+	registry, ok := s.Registry.(remoteRegistry)
+	if !ok || registry.GetRemoteManager() == nil {
+		return errors.New("remote manager not configured")
+	}
+	client, server, found, err := registry.GetRemoteManager().Client(serverID)
+	if err != nil {
+		return err
+	}
+	if !found || client == nil {
+		return remote.ErrServerNotFound
+	}
+	if !server.Enabled {
+		return errors.New("remote server disabled")
+	}
+	if strings.TrimSpace(server.DefaultRootID) == "" {
+		return errors.New("remote default_root_id required")
+	}
+	ws, err := client.DialWS(ctx, "/ws")
+	if err != nil {
+		return err
+	}
+	defer ws.Close()
+	go func() {
+		<-ctx.Done()
+		_ = ws.Close()
+	}()
+
+	requestID := "remote-cmd-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	if err := ws.SendJSON(map[string]any{
+		"id":   requestID,
+		"type": "session.message",
+		"payload": map[string]any{
+			"root_id":       server.DefaultRootID,
+			"type":          session.TypeCommand,
+			"shell":         remoteShellID,
+			"terminal_cols": in.TerminalCols,
+			"content":       in.Content,
+		},
+	}); err != nil {
+		return err
+	}
+
+	plannedAssistantSeq := len(current.Exchanges) + 2
+	var final *agenttypes.ToolCall
+	for {
+		var resp map[string]any
+		if err := ws.ReadJSON(&resp); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
+		respType := strings.TrimSpace(remoteStringValue(resp["type"]))
+		if respType == "session.error" {
+			return remoteSessionError(resp)
+		}
+		if respType == "session.stream" {
+			payload, _ := resp["payload"].(map[string]any)
+			event, _ := payload["event"].(map[string]any)
+			update, ok := remoteStreamEventToUpdate(event)
+			if ok {
+				if update.Type == agenttypes.EventTypeToolCall || update.Type == agenttypes.EventTypeToolUpdate {
+					if toolCall, ok := update.Data.(agenttypes.ToolCall); ok {
+						copy := toolCall
+						final = &copy
+					}
+				}
+				if in.OnUpdate != nil {
+					in.OnUpdate(update)
+				}
+			}
+		}
+		if respType == "session.done" {
+			break
+		}
+	}
+	if final == nil {
+		fallback := agenttypes.ToolCall{
+			CallID:  "remote-cmd-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+			Title:   in.Content,
+			Status:  "success",
+			Kind:    agenttypes.ToolKindExecute,
+			RawType: "commandExecution",
+			Meta: map[string]any{
+				"source": "userShell",
+				"phase":  "final",
+				"remote": true,
+				"server": server.ID,
+				"shell":  remoteShellID,
+			},
+		}
+		final = &fallback
+	}
+	if final.Meta == nil {
+		final.Meta = map[string]any{}
+	}
+	final.Meta["remote"] = true
+	final.Meta["remoteServerID"] = server.ID
+	final.Meta["remoteServerName"] = server.Name
+	final.Meta["shell"] = remoteShellID
+	if err := manager.UpdateShell(context.Background(), current, remote.EncodeShellID(server.ID, remoteShellID)); err != nil {
+		log.Printf("[remote-command] shell.update.error root=%s session=%s shell=%q err=%v", in.RootID, current.Key, remoteShellID, err)
+	}
+	if err := persistCommandTurn(context.Background(), manager, current, in.Content, *final, plannedAssistantSeq); err != nil {
+		return err
+	}
+	return nil
+}
+
+func remoteSessionError(resp map[string]any) error {
+	if errPayload, ok := resp["error"].(map[string]any); ok {
+		if msg := remoteStringValue(errPayload["message"]); msg != "" {
+			return errors.New(msg)
+		}
+	}
+	if payload, ok := resp["payload"].(map[string]any); ok {
+		if msg := remoteStringValue(payload["message"]); msg != "" {
+			return errors.New(msg)
+		}
+	}
+	return errors.New("remote session error")
+}
+
+func remoteStreamEventToUpdate(event map[string]any) (agenttypes.Event, bool) {
+	if event == nil {
+		return agenttypes.Event{}, false
+	}
+	eventType := strings.TrimSpace(remoteStringValue(event["type"]))
+	data := event["data"]
+	switch eventType {
+	case "tool_call":
+		var out agenttypes.ToolCall
+		if remoteRemarshal(data, &out) == nil {
+			return agenttypes.Event{Type: agenttypes.EventTypeToolCall, Data: out}, true
+		}
+	case "tool_call_update":
+		var out agenttypes.ToolCall
+		if remoteRemarshal(data, &out) == nil {
+			return agenttypes.Event{Type: agenttypes.EventTypeToolUpdate, Data: out}, true
+		}
+	case "message_done":
+		var out agenttypes.MessageDone
+		_ = remoteRemarshal(data, &out)
+		return agenttypes.Event{Type: agenttypes.EventTypeMessageDone, Data: out}, true
+	case "message_chunk":
+		var out agenttypes.MessageChunk
+		if remoteRemarshal(data, &out) == nil {
+			return agenttypes.Event{Type: agenttypes.EventTypeMessageChunk, Data: out}, true
+		}
+	}
+	return agenttypes.Event{}, false
+}
+
+func remoteRemarshal(in any, out any) error {
+	payload, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(payload, out)
+}
+
+func remoteStringValue(value any) string {
+	if s, ok := value.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
 }
 
 func configuredShells(registry Registry) []commandexec.ShellSpec {
@@ -3636,6 +3848,9 @@ func (s *Service) validateAgentModel(agentName, model string) error {
 	agentName = strings.TrimSpace(agentName)
 	model = strings.TrimSpace(model)
 	if agentName == "" || model == "" || s.Registry == nil {
+		return nil
+	}
+	if _, _, ok := remote.ParseName(agentName); ok {
 		return nil
 	}
 	prober := s.Registry.GetProber()

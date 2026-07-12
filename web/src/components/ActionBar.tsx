@@ -196,6 +196,11 @@ function ShellSelector({
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const selected = shells.find((item) => item.id === shell || item.command === shell || item.resolved_command === shell) || shells.find((item) => item.default) || shells[0];
+  const shellLabel = (item?: ShellStatus) => {
+    if (!item) return "shell";
+    const base = item.remote_shell || item.label || item.id;
+    return item.remote_server_name ? `${item.remote_server_name} / ${base}` : item.label || base;
+  };
 
   useEffect(() => {
     const handlePointerOutside = (event: PointerEvent) => {
@@ -215,7 +220,7 @@ function ShellSelector({
         type="button"
         onClick={() => shells.length > 0 && setIsOpen((prev) => !prev)}
         disabled={shells.length === 0}
-        title="Shell"
+        title={shellLabel(selected)}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -251,7 +256,7 @@ function ShellSelector({
             boxSizing: "border-box",
           }}
         >
-          {selected?.label || "shell"}
+          {shellLabel(selected)}
         </span>
       </button>
 
@@ -315,7 +320,7 @@ function ShellSelector({
                   event.currentTarget.style.background = isSelected ? "rgba(59, 130, 246, 0.08)" : "transparent";
                 }}
               >
-                {item.label}
+                {shellLabel(item)}
               </button>
             );
           })}

@@ -33,6 +33,7 @@ import (
 	"mindfs/server/internal/githubimport"
 	"mindfs/server/internal/gitview"
 	"mindfs/server/internal/relay"
+	"mindfs/server/internal/remote"
 	"mindfs/server/internal/session"
 
 	"github.com/go-chi/chi/v5"
@@ -362,6 +363,10 @@ func (h *HTTPHandler) Routes() http.Handler {
 	// Agent status API
 	r.Get("/api/agents", h.protectedEndpoint(h.handleAgentsList))
 	r.Post("/api/agents/restart", h.protectedEndpoint(h.handleAgentRestart))
+	r.Get("/api/remote-servers", h.protectedEndpoint(h.handleRemoteServersList))
+	r.Post("/api/remote-servers", h.protectedEndpoint(h.handleRemoteServerSave))
+	r.Post("/api/remote-servers/{id}/test", h.protectedEndpoint(h.handleRemoteServerTest))
+	r.Delete("/api/remote-servers/{id}", h.protectedEndpoint(h.handleRemoteServerDelete))
 	r.Get("/api/agent-config/defaults", h.protectedEndpoint(h.handleAgentConfigDefaults))
 	r.Get("/api/agent-config/backups", h.protectedEndpoint(h.handleAgentConfigBackupsList))
 	r.Post("/api/agent-config/backups", h.protectedEndpoint(h.handleAgentConfigBackupCreate))
@@ -1153,14 +1158,87 @@ func (h *HTTPHandler) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 	if prefs := h.AppContext.GetPreferences(); prefs != nil {
 		statuses = prefs.ApplyAgentDefaults(statuses)
 	}
-	shells := []agent.ShellStatus{}
-	if pool := h.AppContext.GetAgentPool(); pool != nil {
-		shells = pool.AvailableShells()
+	agentItems := make([]any, 0, len(statuses))
+	for _, status := range statuses {
+		agentItems = append(agentItems, status)
 	}
+	shells := make([]any, 0)
+	if pool := h.AppContext.GetAgentPool(); pool != nil {
+		for _, shell := range pool.AvailableShells() {
+			shells = append(shells, shell)
+		}
+	}
+	h.appendRemoteAgentRuntime(r.Context(), &agentItems, &shells)
 	respondJSON(w, http.StatusOK, map[string]any{
-		"agents": statuses,
+		"agents": agentItems,
 		"shells": shells,
 	})
+}
+
+func (h *HTTPHandler) appendRemoteAgentRuntime(ctx context.Context, agents *[]any, shells *[]any) {
+	if h == nil || h.AppContext == nil || h.AppContext.GetRemoteManager() == nil {
+		return
+	}
+	servers, err := h.AppContext.GetRemoteManager().List()
+	if err != nil {
+		log.Printf("[remote] agents.list_servers.error err=%v", err)
+		return
+	}
+	for _, server := range servers {
+		if !server.Enabled {
+			continue
+		}
+		client, _, ok, err := h.AppContext.GetRemoteManager().Client(server.ID)
+		if err != nil || !ok || client == nil {
+			log.Printf("[remote] agents.client.error server=%s err=%v", server.ID, err)
+			continue
+		}
+		remoteCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		runtime, err := client.Agents(remoteCtx)
+		cancel()
+		if err != nil {
+			log.Printf("[remote] agents.fetch.error server=%s err=%v", server.ID, err)
+			continue
+		}
+		for _, item := range runtime.Agents {
+			name, _ := item["name"].(string)
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			next := cloneAnyMap(item)
+			next["name"] = remote.EncodeAgentName(server.ID, name)
+			next["remote_agent"] = name
+			next["remote_server_id"] = server.ID
+			next["remote_server_name"] = server.Name
+			next["protocol"] = agent.ProtocolRemote
+			*agents = append(*agents, next)
+		}
+		for _, item := range runtime.Shells {
+			id, _ := item["id"].(string)
+			if strings.TrimSpace(id) == "" {
+				id, _ = item["command"].(string)
+			}
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			next := cloneAnyMap(item)
+			next["id"] = remote.EncodeShellID(server.ID, id)
+			next["remote_shell"] = id
+			next["remote_server_id"] = server.ID
+			next["remote_server_name"] = server.Name
+			*shells = append(*shells, next)
+		}
+	}
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func (h *HTTPHandler) handleAppUpdateGet(w http.ResponseWriter, r *http.Request) {

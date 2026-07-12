@@ -22,6 +22,7 @@ import (
 	"mindfs/server/internal/notifyscript"
 	"mindfs/server/internal/preferences"
 	"mindfs/server/internal/relay"
+	"mindfs/server/internal/remote"
 	"mindfs/server/internal/scheduled"
 	"mindfs/server/internal/tlsutil"
 	"mindfs/server/internal/update"
@@ -100,6 +101,12 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 	if err != nil {
 		log.Printf("[preferences] init.error err=%v", err)
 	}
+	remoteStore, err := remote.NewStore()
+	if err != nil {
+		log.Printf("[remote] init.error err=%v", err)
+	}
+	remoteManager := remote.NewManager(remoteStore)
+	agentPool.SetRemoteManager(remoteManager)
 	webPushStore, err := webpush.NewStore()
 	if err != nil {
 		log.Printf("[webpush] init.error err=%v", err)
@@ -116,6 +123,7 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 		Dirs:   registry,
 		Agents: agentPool,
 		Prober: agentProber,
+		Remote: remoteManager,
 		Update: updateSvc,
 		Prefs:  prefs,
 		E2EE: e2ee.NewManager(e2ee.Config{

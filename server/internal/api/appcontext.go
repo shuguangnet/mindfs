@@ -24,6 +24,7 @@ import (
 	"mindfs/server/internal/notifyscript"
 	"mindfs/server/internal/preferences"
 	"mindfs/server/internal/relay"
+	"mindfs/server/internal/remote"
 	"mindfs/server/internal/scheduled"
 	"mindfs/server/internal/session"
 	"mindfs/server/internal/update"
@@ -41,6 +42,7 @@ type AppContext struct {
 	Agents    *agent.Pool
 	Prober    *agent.Prober
 	Relay     *relay.Manager
+	Remote    *remote.Manager
 	RelayTips *relay.TipsService
 	Update    *update.Service
 	GitHub    *githubimport.Service
@@ -59,6 +61,13 @@ type AppContext struct {
 	streamHub                *StreamHub
 	candidateRegistry        *usecase.CandidateRegistry
 	externalImporters        map[string]agenttypes.ExternalSessionImporter
+}
+
+func (s *AppContext) GetRemoteManager() *remote.Manager {
+	if s == nil {
+		return nil
+	}
+	return s.Remote
 }
 
 func (s *AppContext) GetRootContext(rootID string) (*RootContext, error) {

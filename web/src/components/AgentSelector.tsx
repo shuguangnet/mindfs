@@ -108,6 +108,18 @@ function parseAgentErrorDetails(error?: string): string[] {
   }
 }
 
+function agentDisplayName(agent: AgentStatus | null | undefined): string {
+  if (!agent) return "";
+  const remoteName = agent.remote_agent || agent.name;
+  return agent.remote_server_name
+    ? `${agent.remote_server_name} / ${remoteName}`
+    : agent.name;
+}
+
+function agentIconName(agent: AgentStatus | null | undefined, fallback: string): string {
+  return agent?.remote_agent || fallback;
+}
+
 export function AgentSelector({
   agent,
   model = "",
@@ -140,6 +152,10 @@ export function AgentSelector({
   const submenuAgentStatus = useMemo(
     () => agents.find((item) => item.name === submenuAgent) ?? null,
     [agents, submenuAgent],
+  );
+  const selectedAgentStatus = useMemo(
+    () => agents.find((item) => item.name === agent) ?? null,
+    [agents, agent],
   );
   const errorAgentStatus = useMemo(
     () => agents.find((item) => item.name === errorAgent) ?? null,
@@ -197,13 +213,13 @@ export function AgentSelector({
     "on";
   const buttonTitle = useMemo(() => {
     if (warnUnavailable) {
-      return `当前会话的 Agent（${agent}）不可用`;
+      return `当前会话的 Agent（${agentDisplayName(selectedAgentStatus) || agent}）不可用`;
     }
     if (agent && model) {
-      return `${agent} · ${model}`;
+      return `${agentDisplayName(selectedAgentStatus) || agent} · ${model}`;
     }
     return undefined;
-  }, [agent, model, warnUnavailable]);
+  }, [agent, model, selectedAgentStatus, warnUnavailable]);
 
   useEffect(() => {
     const handlePointerOutside = (e: PointerEvent) => {
@@ -401,7 +417,7 @@ export function AgentSelector({
         }}
       >
         <AgentIcon
-          agentName={agent}
+          agentName={agentIconName(selectedAgentStatus, agent)}
           style={{ width: "16px", height: "16px" }}
         />
         {showChevron ? (
@@ -538,7 +554,7 @@ export function AgentSelector({
                       }}
                     >
                       <AgentIcon
-                        agentName={a.name}
+                        agentName={agentIconName(a, a.name)}
                         style={{ width: "16px", height: "16px" }}
                       />
                       <span
@@ -555,7 +571,7 @@ export function AgentSelector({
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {a.name}
+                        {agentDisplayName(a)}
                       </span>
                     </button>
                     {hasError ? (
@@ -693,7 +709,7 @@ export function AgentSelector({
                   >
                     错误信息
                   </div>
-                  {onAgentRestart ? (
+                  {onAgentRestart && !errorAgentStatus.remote_server_id ? (
                     <button
                       type="button"
                       aria-label={`重启 ${errorAgentStatus.name}`}

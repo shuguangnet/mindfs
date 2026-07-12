@@ -15,10 +15,46 @@ import (
 
 	"mindfs/server/internal/agent"
 	agenttypes "mindfs/server/internal/agent/types"
+	"mindfs/server/internal/apperr"
 	rootfs "mindfs/server/internal/fs"
 	"mindfs/server/internal/preferences"
 	"mindfs/server/internal/session"
 )
+
+func TestListTreeMissingPluginDirReturnsEmptyEntries(t *testing.T) {
+	rootDir := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	service := Service{Registry: uploadTestRegistry{root: root}}
+
+	out, err := service.ListTree(context.Background(), ListTreeInput{
+		RootID: root.ID,
+		Dir:    ".mindfs/plugins",
+	})
+	if err != nil {
+		t.Fatalf("ListTree returned error: %v", err)
+	}
+	if len(out.Entries) != 0 {
+		t.Fatalf("entries len = %d, want 0", len(out.Entries))
+	}
+}
+
+func TestListTreeMissingRegularDirReturnsNotFound(t *testing.T) {
+	rootDir := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	service := Service{Registry: uploadTestRegistry{root: root}}
+
+	_, err := service.ListTree(context.Background(), ListTreeInput{
+		RootID: root.ID,
+		Dir:    "missing",
+	})
+	if err == nil {
+		t.Fatal("ListTree returned nil error, want not found")
+	}
+	appErr, ok := apperr.Classify(err)
+	if !ok || appErr.Code != apperr.CodeNotFound {
+		t.Fatalf("error = %v, want %s", err, apperr.CodeNotFound)
+	}
+}
 
 func TestSaveUploadedFilesDefaultsToAttachmentDirAndRenamesConflicts(t *testing.T) {
 	rootDir := t.TempDir()
@@ -65,6 +101,35 @@ func TestSaveUploadedFilesDefaultsToAttachmentDirAndRenamesConflicts(t *testing.
 
 	assertFileContent(t, filepath.Join(rootDir, filepath.FromSlash(wantFirst)), "first file")
 	assertFileContent(t, filepath.Join(rootDir, filepath.FromSlash(wantSecond)), "second file")
+}
+
+func TestBuildPromptForRemoteAgentInlinesSwitchContext(t *testing.T) {
+	rootDir := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	manager := session.NewManager(root)
+	current := &session.Session{
+		Key: "session-1",
+		AgentCtxSeq: map[string]int{
+			"remote:prod:codex": 0,
+		},
+		Exchanges: []session.Exchange{
+			{Role: "user", Content: "local question"},
+			{Role: "agent", Agent: "claude", Content: "local answer"},
+		},
+	}
+	service := Service{}
+	got := service.BuildPrompt(BuildPromptInput{
+		Session: current,
+		Manager: manager,
+		Agent:   "remote:prod:codex",
+		Message: "continue remotely",
+	})
+	if !strings.Contains(got, "local question") || !strings.Contains(got, "local answer") {
+		t.Fatalf("remote prompt did not inline recent history: %q", got)
+	}
+	if strings.Contains(got, "read the last") || strings.Contains(got, ".mindfs") {
+		t.Fatalf("remote prompt contains local log read hint: %q", got)
+	}
 }
 
 func TestGetGitRelatedFileDiffResolvesTaskWorktreePath(t *testing.T) {
