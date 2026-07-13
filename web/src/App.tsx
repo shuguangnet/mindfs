@@ -29,6 +29,12 @@ import {
   type BootstrapState,
   type RelayStatusPayload,
 } from "./services/bootstrap";
+import {
+  fetchTokenStationInfo,
+  startTokenStationBinding,
+  type TokenStationInfo,
+} from "./services/tokenStation";
+import { syncAgentAPIProviders } from "./services/agentConfig";
 import { syncNativeReplyPollerE2EE } from "./services/replyPoller";
 import {
   ProtectedAPIError,
@@ -96,7 +102,7 @@ import { isNativeShellRuntime } from "./services/runtime";
 // 直接导入标准组件
 import { AppShell } from "./layout/AppShell";
 import { ModeIcon } from "./components/ModeIcon";
-import { FileTree } from "./components/FileTree";
+import { FileTree, type AgentConfigSwitchRequest } from "./components/FileTree";
 import { FileViewer } from "./components/FileViewer";
 import { GitDiffViewer } from "./components/GitDiffViewer";
 import { GitHistoryPanel } from "./components/GitHistoryPanel";
@@ -148,6 +154,15 @@ const CHILD_SESSION_PAGE_SIZE = 100;
 const MULTI_PROJECT_SESSION_LIMIT = 6;
 const SESSION_PAGE_SIZE = 50;
 const MULTI_PROJECT_SESSION_STORAGE_KEY = "mindfs-multi-project-session-list";
+const APP_DOCUMENT_TITLE = "MindFS";
+
+function formatDocumentTitle(relayStatus: RelayStatusPayload | null): string {
+  if (!isRelayNodePage()) {
+    return APP_DOCUMENT_TITLE;
+  }
+  const nodeName = String(relayStatus?.node_name || "").trim();
+  return nodeName ? `${nodeName} - ${APP_DOCUMENT_TITLE}` : APP_DOCUMENT_TITLE;
+}
 
 function isTopLevelSessionItem(session: SessionItem): boolean {
   return !String(session?.parent_session_key || "").trim();
@@ -1216,6 +1231,85 @@ function loadStringBooleanRecord(key: string): Record<string, Record<string, boo
   }
 }
 
+const NEW_API_QUOTA_PER_UNIT = 500000;
+
+function formatTokenStationBalance(info: TokenStationInfo | null): string {
+  const data = info?.data;
+  if (!info?.success || !data) {
+    return "--";
+  }
+  const text = data.balance_text || data.quota_display_text || "";
+  const formattedText = formatBalanceText(text);
+  if (formattedText) {
+    return formattedText;
+  }
+  const raw = typeof data.balance === "number" ? data.balance : data.quota;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return (raw / NEW_API_QUOTA_PER_UNIT).toFixed(2);
+  }
+  return text || "--";
+}
+
+function parseTokenStationBalance(info: TokenStationInfo | null): number {
+  const data = info?.data;
+  if (!info?.success || !data) {
+    return 0;
+  }
+  const text = data.balance_text || data.quota_display_text || "";
+  const parsed = parseFirstNumber(text);
+  if (parsed !== null) {
+    return parsed;
+  }
+  const raw = typeof data.balance === "number" ? data.balance : data.quota;
+  return typeof raw === "number" && Number.isFinite(raw)
+    ? raw / NEW_API_QUOTA_PER_UNIT
+    : 0;
+}
+
+function formatBalanceText(text: string): string {
+  const value = String(text || "").trim();
+  if (!value) {
+    return "";
+  }
+  const match = value.match(/(-?\d+(?:\.\d+)?)/);
+  if (!match || match.index === undefined) {
+    return "";
+  }
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed)) {
+    return "";
+  }
+  return `${value.slice(0, match.index)}${parsed.toFixed(2)}${value.slice(match.index + match[1].length)}`;
+}
+
+function parseFirstNumber(text: string): number | null {
+  const match = String(text || "").match(/-?\d+(?:\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function tokenStationWalletURL(baseURL: string): string {
+  const fallback = "http://localhost:3000";
+  const trimmed = String(baseURL || "").trim().replace(/\/+$/, "");
+  const target = `${trimmed || fallback}/wallet`;
+  try {
+    return new URL(target).toString();
+  } catch {
+    return `${fallback}/wallet`;
+  }
+}
+
+function normalizeTokenStationAPIKey(value: string): string {
+  const apiKey = String(value || "").trim();
+  if (!apiKey) {
+    return "";
+  }
+  return apiKey.toLowerCase().startsWith("sk-") ? apiKey : `sk-${apiKey}`;
+}
+
 function hasExplicitFileContext(message: string): boolean {
   return READ_FILE_TOKEN_PATTERN.test(message);
 }
@@ -1223,16 +1317,18 @@ function hasExplicitFileContext(message: string): boolean {
 // Hook for responsive detection
 function useResponsive() {
   const [isMobile, setIsMobile] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
   useEffect(() => {
     const checkSize = () => {
       const width = window.innerWidth;
       setIsMobile(width < 768);
+      setIsTablet(width >= 768 && width < 1024);
     };
     checkSize();
     window.addEventListener("resize", checkSize);
     return () => window.removeEventListener("resize", checkSize);
   }, []);
-  return { isMobile };
+  return { isMobile, isTablet };
 }
 
 type AppProps = {
@@ -1495,7 +1591,7 @@ export function App({ onGoHome }: AppProps) {
     return () => window.removeEventListener("mindfs-agents-changed", handleAgentsChanged);
   }, []);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const { isMobile } = useResponsive();
+  const { isMobile, isTablet } = useResponsive();
   const [mobileEnterKeySends, setMobileEnterKeySends] = useState(loadMobileEnterKeySends);
   const [sidebarsSwapped, setSidebarsSwapped] = useState(loadSidebarsSwapped);
   const [gitDiffSideBySide, setGitDiffSideBySide] = useState(loadGitDiffSideBySide);
@@ -2139,6 +2235,15 @@ export function App({ onGoHome }: AppProps) {
   const [relayStatus, setRelayStatus] = useState<RelayStatusPayload | null>(
     null,
   );
+  const [tokenStationInfo, setTokenStationInfo] =
+    useState<TokenStationInfo | null>(null);
+  const [tokenStationLoading, setTokenStationLoading] = useState(false);
+  const [tokenStationBusy, setTokenStationBusy] = useState(false);
+  const [tokenStationApplyBusy, setTokenStationApplyBusy] = useState(false);
+  const [tokenStationErrorOpen, setTokenStationErrorOpen] = useState(false);
+  const [agentConfigSwitchRequest, setAgentConfigSwitchRequest] =
+    useState<AgentConfigSwitchRequest | null>(null);
+  const tokenStationRefreshRef = useRef<(() => void) | null>(null);
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>(() =>
     bootstrapService.snapshot(),
   );
@@ -2166,6 +2271,10 @@ export function App({ onGoHome }: AppProps) {
   const [gitHistory, setGitHistory] = useState<GitHistoryPayload | null>(null);
   const [gitHistoryLoading, setGitHistoryLoading] = useState(false);
   const [gitHistoryLoadingMore, setGitHistoryLoadingMore] = useState(false);
+  const [gitStatusByRoot, setGitStatusByRoot] = useState<Record<string, GitStatusPayload | null>>({});
+  const [gitStatusLoadingByRoot, setGitStatusLoadingByRoot] = useState<Record<string, boolean>>({});
+  const [gitHistoryByRoot, setGitHistoryByRoot] = useState<Record<string, GitHistoryPayload | null>>({});
+  const [gitHistoryLoadingByRoot, setGitHistoryLoadingByRoot] = useState<Record<string, boolean>>({});
   const [gitStatusExpandedByRoot, setGitStatusExpandedByRoot] = useState<Record<string, boolean>>(() =>
     loadBooleanRecord(GIT_STATUS_EXPANDED_STORAGE_KEY),
   );
@@ -4239,17 +4348,21 @@ export function App({ onGoHome }: AppProps) {
         dirty_count: 0,
         items: [],
       } as GitStatusPayload;
+      setGitStatusByRoot((prev) => ({ ...prev, [rootID]: fallback }));
+      setGitStatusLoadingByRoot((prev) => ({ ...prev, [rootID]: false }));
       if (shouldApply()) {
         setGitStatus(fallback);
         setGitStatusLoading(false);
       }
       return fallback;
     }
+    setGitStatusLoadingByRoot((prev) => ({ ...prev, [rootID]: true }));
     if (shouldApply()) {
       setGitStatusLoading(true);
     }
     try {
       const next = await fetchGitStatus(rootID);
+      setGitStatusByRoot((prev) => ({ ...prev, [rootID]: next }));
       if (shouldApply()) {
         setGitStatus(next);
       }
@@ -4261,11 +4374,13 @@ export function App({ onGoHome }: AppProps) {
         dirty_count: 0,
         items: [],
       } as GitStatusPayload;
+      setGitStatusByRoot((prev) => ({ ...prev, [rootID]: fallback }));
       if (shouldApply()) {
         setGitStatus(fallback);
       }
       return fallback;
     } finally {
+      setGitStatusLoadingByRoot((prev) => ({ ...prev, [rootID]: false }));
       if (shouldApply()) {
         setGitStatusLoading(false);
       }
@@ -4281,7 +4396,10 @@ export function App({ onGoHome }: AppProps) {
     if (!options?.force) {
       const cachedHead = getCachedGitHistoryHead(rootID);
       if (cachedHead && cachedHead.items.length > 0) {
-        setGitHistory(cachedHead);
+        setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: cachedHead }));
+        if (currentRootIdRef.current === rootID) {
+          setGitHistory(cachedHead);
+        }
         const newest = cachedHead.items[0]?.hash || "";
         if (newest) {
           void fetchGitHistory(rootID, { afterCommit: newest })
@@ -4297,6 +4415,7 @@ export function App({ onGoHome }: AppProps) {
               return getCachedGitHistoryHead(rootID) || next;
             })
             .then((fresh) => {
+              setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: fresh }));
               if (currentRootIdRef.current === rootID) {
                 setGitHistory(fresh);
               }
@@ -4308,17 +4427,22 @@ export function App({ onGoHome }: AppProps) {
         return cachedHead;
       }
     }
-    setGitHistoryLoading(true);
+    setGitHistoryLoadingByRoot((prev) => ({ ...prev, [rootID]: true }));
+    if (currentRootIdRef.current === rootID) {
+      setGitHistoryLoading(true);
+    }
     try {
       const next = await fetchGitHistory(rootID, { force: options?.force });
       if (next.commit_missing) {
         clearGitHistoryCache(rootID);
         const fresh = await fetchGitHistory(rootID, { force: true });
+        setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: fresh }));
         if (currentRootIdRef.current === rootID) {
           setGitHistory(fresh);
         }
         return fresh;
       }
+      setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: next }));
       if (currentRootIdRef.current === rootID) {
         setGitHistory(next);
       }
@@ -4326,23 +4450,26 @@ export function App({ onGoHome }: AppProps) {
     } catch (err) {
       console.error("[git.history] failed", { rootID, err });
       const fallback = { available: false, items: [], has_more: false } as GitHistoryPayload;
+      setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: fallback }));
       if (currentRootIdRef.current === rootID) {
         setGitHistory(fallback);
       }
       return fallback;
     } finally {
+      setGitHistoryLoadingByRoot((prev) => ({ ...prev, [rootID]: false }));
       if (currentRootIdRef.current === rootID) {
         setGitHistoryLoading(false);
       }
     }
   }, []);
 
-  const loadMoreGitHistory = useCallback(async () => {
-    const rootID = currentRootIdRef.current;
+  const loadMoreGitHistory = useCallback(async (targetRootID?: string) => {
+    const rootID = targetRootID || currentRootIdRef.current;
     if (!rootID || gitHistoryLoadingMore) {
       return;
     }
-    const currentItems = gitHistory?.items || [];
+    const currentItems =
+      (targetRootID ? gitHistoryByRoot[rootID]?.items : gitHistory?.items) || [];
     const beforeCommit = currentItems[currentItems.length - 1]?.hash || "";
     if (!beforeCommit) {
       return;
@@ -4353,14 +4480,15 @@ export function App({ onGoHome }: AppProps) {
       if (next.commit_missing) {
         clearGitHistoryCache(rootID);
         const fresh = await fetchGitHistory(rootID, { force: true });
+        setGitHistoryByRoot((prev) => ({ ...prev, [rootID]: fresh }));
         if (currentRootIdRef.current === rootID) {
           setGitHistory(fresh);
         }
         return;
       }
       const cached = getCachedGitHistory(rootID);
+      const loadedCount = currentItems.length + next.items.length;
       if (currentRootIdRef.current === rootID) {
-        const loadedCount = currentItems.length + next.items.length;
         if (cached) {
           setGitHistory({
             ...cached,
@@ -4371,14 +4499,22 @@ export function App({ onGoHome }: AppProps) {
           setGitHistory(next);
         }
       }
+      setGitHistoryByRoot((prev) => ({
+        ...prev,
+        [rootID]: cached
+          ? {
+              ...cached,
+              items: cached.items.slice(0, loadedCount),
+              has_more: cached.items.length > loadedCount || cached.has_more,
+            }
+          : next,
+      }));
     } catch (err) {
       console.error("[git.history.more] failed", { rootID, beforeCommit, err });
     } finally {
-      if (currentRootIdRef.current === rootID) {
-        setGitHistoryLoadingMore(false);
-      }
+      setGitHistoryLoadingMore(false);
     }
-  }, [gitHistory, gitHistoryLoadingMore]);
+  }, [gitHistory, gitHistoryByRoot, gitHistoryLoadingMore]);
 
   const loadSessionsForRoot = useCallback(
     async (
@@ -4687,11 +4823,12 @@ export function App({ onGoHome }: AppProps) {
       try {
         const nextStatus = await checkoutGitBranch(rootID, branch);
         clearGitHistoryCache(rootID);
+        setGitStatusByRoot((prev) => ({ ...prev, [rootID]: nextStatus }));
+        await refreshGitHistory(rootID, { force: true });
         if (currentRootIdRef.current === rootID) {
           setGitStatus(nextStatus);
           setGitDiff(null);
           setFile(null);
-          await refreshGitHistory(rootID, { force: true });
           await refreshTreeDir(rootID, selectedDirRef.current || ".", true);
         }
       } catch (err) {
@@ -4721,15 +4858,16 @@ export function App({ onGoHome }: AppProps) {
   const applyGitActionResult = useCallback(
     async (rootID: string, nextStatus: GitStatusPayload, options?: { refreshHistory?: boolean; clearDiff?: boolean }) => {
       clearGitHistoryCache(rootID);
+      setGitStatusByRoot((prev) => ({ ...prev, [rootID]: nextStatus }));
+      if (options?.refreshHistory !== false) {
+        await refreshGitHistory(rootID, { force: true });
+      }
       if (currentRootIdRef.current !== rootID) {
         return;
       }
       setGitStatus(nextStatus);
       if (options?.clearDiff) {
         setGitDiff(null);
-      }
-      if (options?.refreshHistory !== false) {
-        await refreshGitHistory(rootID, { force: true });
       }
       await refreshTreeDir(rootID, selectedDirRef.current || ".", true);
     },
@@ -6728,7 +6866,7 @@ export function App({ onGoHome }: AppProps) {
             setSelectedSessionLoading(false);
             fileCursorRef.current = 0;
             setDrawerOpenForRoot(root, false);
-            if (isMobile) setIsLeftOpen(false);
+            if (!isToggle && isMobile) setIsLeftOpen(false);
             return;
           }
           try {
@@ -6752,7 +6890,7 @@ export function App({ onGoHome }: AppProps) {
             setSelectedSessionLoading(false);
             fileCursorRef.current = 0;
             setDrawerOpenForRoot(root, false);
-            if (isMobile) setIsLeftOpen(false);
+            if (!isToggle && isMobile) setIsLeftOpen(false);
           } catch (error) {
             if (error instanceof ProtectedAPIError) {
               if (
@@ -6808,7 +6946,7 @@ export function App({ onGoHome }: AppProps) {
           if (!forceDirectory) {
             const restored = await tryShowBoundSessionForRoot(path, {
               pluginQuery: nextPluginQuery,
-              closeLeftSidebar: true,
+              closeLeftSidebar: !isToggle,
             });
             if (restored) {
               void loadSessionsForRoot(path, { replace: true, force: true });
@@ -7340,16 +7478,14 @@ export function App({ onGoHome }: AppProps) {
   }, [loadWorktreeList]);
 
   useEffect(() => {
-    if (projectTreeTab !== "worktrees") {
+    if (projectTreeTab !== "worktrees" || !currentRootId) {
       return;
     }
-    managedRootIds.forEach((rootID) => {
-      if (!rootID || worktreeItemsByRoot[rootID] || worktreeLoadingByRoot[rootID]) {
-        return;
-      }
-      void loadProjectTreeWorktrees(rootID);
-    });
-  }, [loadProjectTreeWorktrees, managedRootIds, projectTreeTab, worktreeItemsByRoot, worktreeLoadingByRoot]);
+    if (worktreeItemsByRoot[currentRootId] || worktreeLoadingByRoot[currentRootId]) {
+      return;
+    }
+    void loadProjectTreeWorktrees(currentRootId);
+  }, [currentRootId, loadProjectTreeWorktrees, projectTreeTab, worktreeItemsByRoot, worktreeLoadingByRoot]);
 
   const handleSwitchWorktree = useCallback(async (item: GitWorktreeItem) => {
     const targetPath = String(item.path || "").trim();
@@ -8682,6 +8818,7 @@ export function App({ onGoHome }: AppProps) {
             streamKey,
             event.data?.contextWindow,
           );
+          tokenStationRefreshRef.current?.();
           break;
         case "error":
           reportError(
@@ -9897,6 +10034,10 @@ export function App({ onGoHome }: AppProps) {
   }, []);
 
   useEffect(() => {
+    document.title = formatDocumentTitle(relayStatus);
+  }, [relayStatus]);
+
+  useEffect(() => {
     return e2eeService.subscribe((state) => {
       setE2eeState(state);
     });
@@ -10923,7 +11064,11 @@ export function App({ onGoHome }: AppProps) {
     gitStatusLoading || gitStatusAvailable;
   const shouldRenderGitHistoryPanel =
     gitHistoryLoading || (gitHistoryAvailable && (gitHistory?.items.length || 0) > 0);
-	  const relatedSessionSnapshot = selectedKanbanTaskSessionSnapshot || selectedSessionSnapshot || lastMainSessionSnapshotRef.current;
+	  const relatedSessionSnapshot =
+	    selectedKanbanTaskSessionSnapshot ||
+	    selectedSessionSnapshot ||
+	    drawerSessionSnapshot ||
+	    lastMainSessionSnapshotRef.current;
 	  const relatedSessionRootId =
 	    (relatedSessionSnapshot?.root_id as string | undefined) ||
 	    selectedKanbanTask?.root_id ||
@@ -11357,13 +11502,19 @@ export function App({ onGoHome }: AppProps) {
     );
   };
   const renderRootGitContent = (root: string): React.ReactNode => {
-    if (!root || root !== currentRootId) {
-      return (
-        <div style={{ padding: "8px 4px", fontSize: "12px", color: "var(--text-secondary)" }}>
-          选择项目后查看 Git 状态
-        </div>
-      );
-    }
+    const rootGitStatus = root === currentRootId ? gitStatus : gitStatusByRoot[root] || null;
+    const rootGitHistory = root === currentRootId ? gitHistory : gitHistoryByRoot[root] || null;
+    const rootGitStatusLoading =
+      root === currentRootId ? gitStatusLoading : gitStatusLoadingByRoot[root] === true;
+    const rootGitHistoryLoading =
+      root === currentRootId ? gitHistoryLoading : gitHistoryLoadingByRoot[root] === true;
+    const rootGitStatusAvailable = rootGitStatus?.available === true;
+    const rootGitHistoryAvailable = rootGitHistory?.available === true;
+    const rootGitStatusExpanded = gitStatusExpandedByRoot[root] !== false;
+    const rootGitHistoryExpandedCommits = gitHistoryExpandedByRoot[root] || {};
+    const rootShouldRenderGitPanel = rootGitStatusLoading || rootGitStatusAvailable;
+    const rootShouldRenderGitHistoryPanel =
+      rootGitHistoryLoading || (rootGitHistoryAvailable && (rootGitHistory?.items.length || 0) > 0);
     if (managedRootByIdRef.current[root]?.is_git_repo !== true) {
       return (
         <div style={{ padding: "8px 4px", fontSize: "12px", color: "var(--text-secondary)" }}>
@@ -11371,7 +11522,31 @@ export function App({ onGoHome }: AppProps) {
         </div>
       );
     }
-    if (!gitStatusLoading && !gitHistoryLoading && !shouldRenderGitPanel && !shouldRenderGitHistoryPanel) {
+    if (!rootGitStatus && !rootGitHistory && !rootGitStatusLoading && !rootGitHistoryLoading) {
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            void refreshGitStatus(root);
+            void refreshGitHistory(root);
+          }}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            borderRadius: "6px",
+            padding: "8px 4px",
+            fontSize: "12px",
+            cursor: "pointer",
+            textAlign: "left",
+            width: "100%",
+          }}
+        >
+          加载 Git 状态
+        </button>
+      );
+    }
+    if (!rootGitStatusLoading && !rootGitHistoryLoading && !rootShouldRenderGitPanel && !rootShouldRenderGitHistoryPanel) {
       return (
         <div style={{ padding: "8px 4px", fontSize: "12px", color: "var(--text-secondary)" }}>
           暂无 Git 变更或历史
@@ -11380,43 +11555,38 @@ export function App({ onGoHome }: AppProps) {
     }
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 }}>
-        {shouldRenderGitPanel ? (
+        {rootShouldRenderGitPanel ? (
           <GitStatusPanel
-            rootId={currentRootId || undefined}
-            status={gitStatus}
-            loading={gitStatusLoading}
+            rootId={root}
+            status={rootGitStatus}
+            loading={rootGitStatusLoading}
             compact
-            expanded={gitStatusExpanded}
+            expanded={rootGitStatusExpanded}
             onExpandedChange={(expanded) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               setGitStatusExpandedByRoot((prev) => ({ ...prev, [root]: expanded }));
             }}
             onSelectItem={(item) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               void openGitDiff(root, item);
             }}
             onOpenItem={(item) => {
-              const root = currentRootIdRef.current;
               if (!root || item.is_dir === true) {
                 return;
               }
               actionHandlers.open({ path: item.path, root });
             }}
             onDiscardItem={(item) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               return handleGitDiscardItem(root, item);
             }}
             onStageItem={(item) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
@@ -11425,28 +11595,24 @@ export function App({ onGoHome }: AppProps) {
                 : handleGitStageItem(root, item);
             }}
             onPull={() => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               return handleGitPull(root);
             }}
             onPush={() => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               return handleGitPush(root);
             }}
             onCommit={(message) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
               return handleGitCommit(root, message);
             }}
             onSwitchBranch={(branch) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
@@ -11454,17 +11620,16 @@ export function App({ onGoHome }: AppProps) {
             }}
           />
         ) : null}
-        {shouldRenderGitHistoryPanel && currentRootId ? (
+        {rootShouldRenderGitHistoryPanel ? (
           <GitHistoryPanel
-            rootId={currentRootId}
-            items={gitHistory?.items || []}
-            loading={gitHistoryLoading}
+            rootId={root}
+            items={rootGitHistory?.items || []}
+            loading={rootGitHistoryLoading}
             loadingMore={gitHistoryLoadingMore}
-            hasMore={gitHistory?.has_more === true}
+            hasMore={rootGitHistory?.has_more === true}
             compact
-            expandedCommits={gitHistoryExpandedCommits}
+            expandedCommits={rootGitHistoryExpandedCommits}
             onToggleCommit={(hash) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
@@ -11480,10 +11645,9 @@ export function App({ onGoHome }: AppProps) {
               });
             }}
             onLoadMore={() => {
-              void loadMoreGitHistory();
+              void loadMoreGitHistory(root);
             }}
             onSelectFile={(commit, item) => {
-              const root = currentRootIdRef.current;
               if (!root) {
                 return;
               }
@@ -12677,6 +12841,129 @@ export function App({ onGoHome }: AppProps) {
     navigatePopup(pendingPopup, target.toString());
   }, [currentRootId, startRelayBinding, relayStatus]);
 
+  const refreshTokenStationInfo = useCallback(async () => {
+    setTokenStationLoading(true);
+    setTokenStationErrorOpen(false);
+    try {
+      const info = await fetchTokenStationInfo();
+      setTokenStationInfo(info);
+    } catch (error) {
+      setTokenStationInfo({
+        success: false,
+        message: error instanceof Error ? error.message : "token_station_failed",
+      });
+    } finally {
+      setTokenStationLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    tokenStationRefreshRef.current = () => {
+      void refreshTokenStationInfo();
+    };
+    return () => {
+      tokenStationRefreshRef.current = null;
+    };
+  }, [refreshTokenStationInfo]);
+
+  useEffect(() => {
+    if (!bootstrapService.canUseProtectedAPI()) {
+      return;
+    }
+    void refreshTokenStationInfo();
+  }, [refreshTokenStationInfo, bootstrapState.phase]);
+
+  useEffect(() => {
+    if (!bootstrapService.canUseProtectedAPI() || !selectedSession?.updated_at) {
+      return;
+    }
+    void refreshTokenStationInfo();
+  }, [refreshTokenStationInfo, selectedSession?.updated_at]);
+
+  const handleTokenStationAction = useCallback(async () => {
+    setTokenStationErrorOpen(false);
+    const topupURL = String(tokenStationInfo?.data?.topup_url || "http://localhost:3000");
+    const walletURL = tokenStationWalletURL(topupURL);
+    if (relayStatus?.relay_bound || relayStatus?.token_station_bound) {
+      window.open(walletURL, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const pendingPopup = openPendingPopup();
+    setTokenStationBusy(true);
+    try {
+      const status = await startTokenStationBinding();
+      if (status.bound) {
+        window.open(tokenStationWalletURL(String(status.topup_url || topupURL)), "_blank", "noopener,noreferrer");
+        pendingPopup?.close();
+        return;
+      }
+      const pendingCode = String(status.pending_code || "");
+      const relayBaseURL = String(status.relay_base_url || relayStatus?.relay_base_url || "");
+      if (!pendingCode || !relayBaseURL) {
+        pendingPopup?.close();
+        return;
+      }
+      const target = new URL("/bind", relayBaseURL);
+      target.searchParams.set("code", pendingCode);
+      target.searchParams.set("purpose", "token_station");
+      navigatePopup(pendingPopup, target.toString());
+    } finally {
+      setTokenStationBusy(false);
+    }
+  }, [relayStatus, tokenStationInfo]);
+
+  const handleTokenStationApply = useCallback(async () => {
+    setTokenStationErrorOpen(false);
+    setTokenStationApplyBusy(true);
+    try {
+      const info = await fetchTokenStationInfo("apply");
+      setTokenStationInfo(info);
+      if (!info.success) {
+        setTokenStationInfo({
+          ...info,
+          message: info.message || "Token 加油站配置读取失败",
+        });
+        setTokenStationErrorOpen(true);
+        return;
+      }
+      const topupURL = String(info.data?.topup_url || tokenStationInfo?.data?.topup_url || "").trim();
+      const byName = new Map<string, { name: string; baseUrl: string; apiKey: string }>();
+      for (const item of info.data?.api_keys || []) {
+        const name = String(item?.name || "").trim();
+        const apiKey = normalizeTokenStationAPIKey(String(item?.api_key || ""));
+        if (!name || !apiKey || !topupURL) {
+          continue;
+        }
+        if (!byName.has(name)) {
+          byName.set(name, { name, baseUrl: topupURL, apiKey });
+        }
+      }
+      const providers = Array.from(byName.values());
+      if (providers.length === 0) {
+        setTokenStationInfo({
+          ...info,
+          success: false,
+          message: "Token 加油站没有可同步的 API Key",
+        });
+        setTokenStationErrorOpen(true);
+        return;
+      }
+      const result = await syncAgentAPIProviders(providers);
+      setAgentConfigSwitchRequest({
+        nonce: Date.now(),
+        providerIDs: (result.providers || []).map((provider) => provider.id),
+      });
+    } catch (error) {
+      setTokenStationInfo({
+        success: false,
+        message: error instanceof Error ? error.message : "Token 加油站配置生效失败",
+      });
+      setTokenStationErrorOpen(true);
+    } finally {
+      setTokenStationApplyBusy(false);
+    }
+  }, [tokenStationInfo]);
+
   const relayActionLabel = useMemo(() => {
     if (isRelayNodePage()) {
       return null;
@@ -12956,6 +13243,167 @@ export function App({ onGoHome }: AppProps) {
         }
       />
     );
+  const tokenStationBalanceText = tokenStationLoading
+    ? "读取中"
+    : formatTokenStationBalance(tokenStationInfo);
+  const canApplyTokenStationConfig =
+    tokenStationInfo?.success === true && parseTokenStationBalance(tokenStationInfo) > 0;
+  const tokenStationCard = (
+      <section
+        aria-label="Token 加油站"
+        style={{
+          position: "relative",
+          width: "100%",
+          height: 36,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          border: "1px solid var(--panel-border)",
+          background: "var(--panel-bg)",
+          backdropFilter: "blur(14px)",
+          boxShadow: "var(--panel-shadow)",
+          borderRadius: 8,
+          boxSizing: "border-box",
+          padding: "0 5px 0 8px",
+          color: "var(--text-primary)",
+        }}
+      >
+        {tokenStationInfo?.success === false && tokenStationErrorOpen ? (
+          <div
+            role="status"
+            style={{
+              position: "absolute",
+              left: 0,
+              bottom: 42,
+              width: "100%",
+              border:
+                "1px solid color-mix(in srgb, var(--mindfs-launcher-error-text) 24%, transparent)",
+              background: "var(--mindfs-launcher-error-bg)",
+              color: "var(--mindfs-launcher-error-text)",
+              borderRadius: 8,
+              boxShadow: "var(--panel-shadow)",
+              padding: "7px 9px",
+              fontSize: 11,
+              lineHeight: "15px",
+              wordBreak: "break-word",
+            }}
+          >
+            {tokenStationInfo.message || "未绑定账户"}
+          </div>
+        ) : null}
+        <div
+          style={{
+            width: "100%",
+            height: 28,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <svg
+            aria-hidden="true"
+            width="1em"
+            height="1em"
+            viewBox="0 0 24 24"
+            style={{
+              flex: "0 0 auto",
+              width: 25,
+              height: 25,
+              color: "#f97316",
+            }}
+          >
+            <path d="M0 0h24v24H0z" fill="none" />
+            <path
+              fill="currentColor"
+              d="M3 21a1 1 0 0 1 0-2V6a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v4a3 3 0 0 1 3 3v3a.5.5 0 1 0 1 0v-6a2 2 0 0 1-2-2v-.585l-.707-.708a1 1 0 0 1-.083-1.32l.083-.094a1 1 0 0 1 1.414 0l3.003 3.002l.095.112l.028.04l.044.073l.052.11l.031.09l.02.076l.012.078L21 9v7a2.5 2.5 0 1 1-5 0v-3a1 1 0 0 0-1-1v7a1 1 0 0 1 0 2zm9-16H6a1 1 0 0 0-1 1v4h8V6a1 1 0 0 0-1-1"
+            />
+          </svg>
+          <span
+            title={
+              tokenStationInfo?.success
+                ? tokenStationBalanceText
+                : tokenStationInfo?.message || "未绑定账户"
+            }
+            style={{
+              minWidth: 0,
+              flex: "0 1 auto",
+              maxWidth: isTablet ? 68 : 104,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: 13,
+              fontWeight: 700,
+              lineHeight: "18px",
+            }}
+          >
+            {tokenStationBalanceText}
+          </span>
+          <span style={{ flex: "1 1 auto", minWidth: 4 }} />
+          {canApplyTokenStationConfig ? (
+            <button
+              type="button"
+              onClick={() => void handleTokenStationApply()}
+              disabled={tokenStationApplyBusy}
+              style={{
+                flex: "0 0 auto",
+                height: 23,
+                border: "1px solid var(--accent-color)",
+                borderRadius: 6,
+                background: "transparent",
+                color: "var(--accent-color)",
+                fontSize: 11,
+                fontWeight: 650,
+                cursor: tokenStationApplyBusy ? "default" : "pointer",
+                opacity: tokenStationApplyBusy ? 0.65 : 1,
+                padding: "0 7px",
+                whiteSpace: "nowrap",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              {tokenStationApplyBusy ? (
+                <svg
+                  aria-hidden="true"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  style={{ animation: "mindfs-update-spin 0.9s linear infinite" }}
+                >
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              ) : null}
+              <span>配置生效</span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void handleTokenStationAction()}
+            disabled={tokenStationBusy}
+            style={{
+              flex: "0 0 auto",
+              height: 23,
+              border: "none",
+              borderRadius: 6,
+              background: "var(--accent-color)",
+              color: "#fff",
+              fontSize: 11,
+              fontWeight: 650,
+              cursor: tokenStationBusy ? "default" : "pointer",
+              opacity: tokenStationBusy ? 0.65 : 1,
+              padding: "0 7px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {tokenStationBusy ? "处理中" : "去加油"}
+          </button>
+        </div>
+      </section>
+  );
 
   return (
     <>
@@ -13018,6 +13466,7 @@ export function App({ onGoHome }: AppProps) {
             renderRootWorktreeContent={renderRootWorktreeContent}
             renderRootRelatedContent={renderRootRelatedContent}
             projectTreeTabRequest={projectTreeTabRequest}
+            agentConfigSwitchRequest={agentConfigSwitchRequest}
             onProjectTreeTabChange={setProjectTreeTab}
             relayActionLabel={relayActionLabel}
             relayActionDisabled={relayActionDisabled}
@@ -13034,6 +13483,7 @@ export function App({ onGoHome }: AppProps) {
             onUpdateAction={() => {
               void handleStartUpdate();
             }}
+            footerTopContent={tokenStationCard}
             showEnterKeySendOption={isMobile}
             enterKeySends={mobileEnterKeySends}
             onEnterKeySendsChange={setMobileEnterKeySends}

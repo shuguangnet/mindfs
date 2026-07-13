@@ -354,6 +354,8 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/local_dirs", h.protectedEndpoint(h.handleLocalDirs))
 	r.Get("/api/relay/status", h.handleRelayStatus)
 	r.Post("/api/relay/bind/start", h.protectedEndpoint(h.handleRelayBindStart))
+	r.Get("/api/token-station/userinfo", h.protectedEndpoint(h.handleTokenStationUserInfo))
+	r.Post("/api/token-station/bind/start", h.protectedEndpoint(h.handleTokenStationBindStart))
 	r.Get("/api/relay/tips", h.protectedEndpoint(h.handleRelayTips))
 	r.Get("/api/relay/services", h.protectedEndpoint(h.handleRelayServicesList))
 	r.Post("/api/relay/services", h.protectedEndpoint(h.handleRelayServiceSave))
@@ -380,6 +382,11 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Post("/api/agent-config/backups", h.protectedEndpoint(h.handleAgentConfigBackupCreate))
 	r.Delete("/api/agent-config/backups", h.protectedEndpoint(h.handleAgentConfigBackupDelete))
 	r.Post("/api/agent-config/switch", h.protectedEndpoint(h.handleAgentConfigSwitch))
+	r.Get("/api/agent-api-providers", h.protectedEndpoint(h.handleAgentAPIProvidersList))
+	r.Post("/api/agent-api-providers", h.protectedEndpoint(h.handleAgentAPIProviderCreate))
+	r.Post("/api/agent-api-providers/sync", h.protectedEndpoint(h.handleAgentAPIProvidersSync))
+	r.Delete("/api/agent-api-providers", h.protectedEndpoint(h.handleAgentAPIProviderDelete))
+	r.Post("/api/agent-api-providers/switch", h.protectedEndpoint(h.handleAgentAPIProviderSwitch))
 	r.NotFound(h.handleNotFound)
 
 	return r
@@ -1166,6 +1173,7 @@ func (h *HTTPHandler) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 	if prefs := h.AppContext.GetPreferences(); prefs != nil {
 		statuses = prefs.ApplyAgentDefaults(statuses)
 	}
+	statuses = applyAgentAPIProviderCapabilities(statuses)
 	agentItems := make([]any, 0, len(statuses))
 	for _, status := range statuses {
 		agentItems = append(agentItems, status)
@@ -2516,9 +2524,10 @@ func (h *HTTPHandler) relayStatusWithE2EE(status relay.Status) relay.Status {
 
 func publicRelayStatus(status relay.Status) relay.Status {
 	return relay.Status{
-		NoRelayer:    status.NoRelayer,
-		E2EERequired: status.E2EERequired,
-		E2EENodeID:   status.E2EENodeID,
+		NoRelayer:         status.NoRelayer,
+		TokenStationBound: status.TokenStationBound,
+		E2EERequired:      status.E2EERequired,
+		E2EENodeID:        status.E2EENodeID,
 	}
 }
 

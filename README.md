@@ -31,11 +31,12 @@ Access your personal AI agents and workstation data anywhere, anytime through Mi
 - **Binding persistence and recovery**: MindFS persists the mapping between its internal session and the underlying agent session, so the link can be restored after service restarts and follow-up messages continue on the same agent session when available.
 - **Rich media input**: Attach files and images directly in your messages.
 - **Multi-device sync**: Access the same instance from multiple devices simultaneously with live session sync.
-- **Configuration backup and switching**: Agent configurations can be backed up and switched with one click, making it easier to move between multiple accounts or API keys.
+- **Configuration Management & Switching**: Agents configurations / API providers can be backup / added and switched with one click, making it easier to move between multiple accounts or API keys.
 - **Subagents**: Codex/claudecode subagents are automatically discovered and displayed.
 - **session fork**: Session can forked from historical replies.
 - **Scheduled tasks**: Trigger agents to run tasks at specified times.
 - **Codex Remote Login**: Login to Codex remotely via the /login command.
+- **Built-in Token Stagion**: Real-time balance display and one-click activation.
 
 ### Task Board
 - **Concurrent Execution**: Run multiple tasks in parallel, with each task isolated via its own worktree.

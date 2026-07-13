@@ -2395,7 +2395,7 @@ func (r *claudeSubagentRouter) Handle(ctx context.Context, update agenttypes.Eve
 	if r == nil || r.in.Parent == nil || r.in.Manager == nil {
 		return false
 	}
-	if r.handleSubagentResult(ctx, update) {
+	if r.handleSubagentTerminalSummary(ctx, update) {
 		return false
 	}
 	ref := claudeSubagentRefFromUpdate(update)
@@ -2436,27 +2436,40 @@ func (r *claudeSubagentRouter) FinishAll() {
 	}
 }
 
-func (r *claudeSubagentRouter) handleSubagentResult(ctx context.Context, update agenttypes.Event) bool {
+func (r *claudeSubagentRouter) handleSubagentTerminalSummary(ctx context.Context, update agenttypes.Event) bool {
 	if update.Type != agenttypes.EventTypeToolUpdate {
 		return false
 	}
 	toolCall, ok := update.Data.(agenttypes.ToolCall)
-	if !ok || toolCall.RawType != "subagent_result" {
+	if !ok {
 		return false
 	}
-	child := r.onlyOpenChild()
+	summary := ""
+	if toolCall.RawType == "subagent_result" {
+		for _, item := range toolCall.Content {
+			if strings.TrimSpace(item.Text) != "" {
+				summary = item.Text
+				break
+			}
+		}
+	} else if toolCall.RawType == "claude_task" && strings.TrimSpace(stringMeta(toolCall.Meta, "subtype")) == "task_notification" {
+		summary = stringMeta(toolCall.Meta, "summary")
+	} else {
+		return false
+	}
+	child := r.find(claudeSubagentRefFromUpdate(update))
+	if child == nil && toolCall.RawType == "subagent_result" {
+		child = r.onlyOpenChild()
+	}
 	if child == nil {
 		return false
 	}
-	for _, item := range toolCall.Content {
-		if strings.TrimSpace(item.Text) != "" {
-			child.runtime.emit(agenttypes.Event{
-				Type:      agenttypes.EventTypeMessageChunk,
-				SessionID: update.SessionID,
-				Data:      agenttypes.MessageChunk{Content: item.Text},
-			})
-			break
-		}
+	if strings.TrimSpace(summary) != "" {
+		child.runtime.emit(agenttypes.Event{
+			Type:      agenttypes.EventTypeMessageChunk,
+			SessionID: update.SessionID,
+			Data:      agenttypes.MessageChunk{Content: summary},
+		})
 	}
 	child.runtime.emit(agenttypes.Event{Type: agenttypes.EventTypeMessageDone, SessionID: update.SessionID, Data: agenttypes.MessageDone{}})
 	child.closed = true

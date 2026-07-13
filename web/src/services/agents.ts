@@ -17,6 +17,9 @@ export type AgentStatus = {
   default_model_id?: string;
   default_effort?: string;
   default_fast_service?: string;
+  last_config_selection?: AgentLastConfigSelection;
+  supports_api_provider_switch?: boolean;
+  supported_api_provider_protocols?: string[];
   supports_fast_service?: boolean;
   efforts?: string[];
   models?: AgentModelInfo[];
@@ -34,6 +37,12 @@ export type AgentStatus = {
   remote_server_name?: string;
   remote_agent?: string;
   remote_shell?: string;
+};
+
+export type AgentLastConfigSelection = {
+  type?: string;
+  id?: string;
+  name?: string;
 };
 
 export type AgentModelInfo = {
@@ -100,19 +109,20 @@ function normalizeAgentStatus(input: unknown): AgentStatus | null {
     return null;
   }
   const agent = input as AgentStatus;
+  const models = Array.isArray(agent.models)
+    ? agent.models.map((model) => ({
+        ...model,
+        efforts: normalizeEfforts(model.efforts),
+        default_effort:
+          typeof model.default_effort === "string"
+            ? model.default_effort.trim().toLowerCase()
+            : "",
+      }))
+    : agent.models;
   return {
     ...agent,
     efforts: normalizeEfforts(agent.efforts),
-    models: Array.isArray(agent.models)
-      ? agent.models.map((model) => ({
-          ...model,
-          efforts: normalizeEfforts(model.efforts),
-          default_effort:
-            typeof model.default_effort === "string"
-              ? model.default_effort.trim().toLowerCase()
-              : "",
-        }))
-      : agent.models,
+    models,
     default_fast_service:
       typeof agent.default_fast_service === "string"
         ? agent.default_fast_service
