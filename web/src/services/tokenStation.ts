@@ -7,10 +7,19 @@ export type TokenStationInfo = {
   data?: {
     quota?: number;
     used_quota?: number;
+    balance?: number;
     balance_text?: string;
     used_quota_text?: string;
     quota_display_text?: string;
     topup_url?: string;
+    api_keys?: Array<{
+      id?: number;
+      name?: string;
+      api_key?: string;
+      status?: number;
+      group?: string;
+      created_at?: number;
+    }>;
   };
 };
 
@@ -22,8 +31,9 @@ export type TokenStationBindStatus = {
   last_error?: string;
 };
 
-export async function fetchTokenStationInfo(): Promise<TokenStationInfo> {
-  const target = appPath("/api/token-station/userinfo");
+export async function fetchTokenStationInfo(purpose: "balance" | "apply" = "balance"): Promise<TokenStationInfo> {
+  const params = new URLSearchParams({ purpose });
+  const target = appPath(`/api/token-station/userinfo?${params.toString()}`);
   const response = e2eeService.isRequired()
     ? await e2eeService.protectedFetch(target)
     : await fetch(target);

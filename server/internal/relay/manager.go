@@ -154,7 +154,7 @@ func (m *Manager) TokenStationStatus(ctx context.Context) (TokenStationStatus, e
 	if !status.Bound {
 		return status, nil
 	}
-	userInfo, err := m.TokenStationUserInfo(ctx)
+	userInfo, err := m.TokenStationUserInfo(ctx, "")
 	if err != nil {
 		status.LastError = err.Error()
 		return status, err
@@ -185,12 +185,12 @@ func (m *Manager) StartTokenStationBinding() (TokenStationStatus, error) {
 	return m.tokenStationStatusLocked(), nil
 }
 
-func (m *Manager) TokenStationUserInfo(ctx context.Context) (map[string]any, error) {
+func (m *Manager) TokenStationUserInfo(ctx context.Context, purpose string) (map[string]any, error) {
 	creds, err := m.service.store.Load()
 	if err != nil {
 		return nil, err
 	}
-	return m.service.FetchTokenStationUserInfo(ctx, m.resolveRelayBase(), creds)
+	return m.service.FetchTokenStationUserInfo(ctx, m.resolveRelayBase(), creds, purpose)
 }
 
 func (m *Manager) statusLocked() Status {

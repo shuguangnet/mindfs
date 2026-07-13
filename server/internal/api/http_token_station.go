@@ -11,7 +11,8 @@ func (h *HTTPHandler) handleTokenStationUserInfo(w http.ResponseWriter, r *http.
 		respondError(w, http.StatusServiceUnavailable, errServiceUnavailable("relay manager not configured"))
 		return
 	}
-	userInfo, err := manager.TokenStationUserInfo(r.Context())
+	purpose := strings.TrimSpace(r.URL.Query().Get("purpose"))
+	userInfo, err := manager.TokenStationUserInfo(r.Context(), purpose)
 	if err != nil {
 		respondJSON(w, http.StatusOK, map[string]any{
 			"success": false,
@@ -28,6 +29,9 @@ func (h *HTTPHandler) handleTokenStationUserInfo(w http.ResponseWriter, r *http.
 		userInfo["data"] = data
 	}
 	data["topup_url"] = h.tokenStationURL()
+	if purpose != "apply" {
+		delete(data, "api_keys")
+	}
 	respondJSON(w, http.StatusOK, userInfo)
 }
 

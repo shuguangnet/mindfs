@@ -83,6 +83,10 @@ type RootSessionIndicator = {
 };
 
 type ProjectTreeTab = "files" | "git" | "worktrees" | "related";
+export type AgentConfigSwitchRequest = {
+  nonce: number;
+  providerIDs?: string[];
+};
 
 const PROJECT_TREE_TAB_STORAGE_KEY = "mindfs-project-tree-tab";
 const PROJECT_TREE_ROOT_PADDING_LEFT = 0;
@@ -113,6 +117,7 @@ type FileTreeProps = {
   renderRootWorktreeContent?: (rootId: string) => React.ReactNode;
   renderRootRelatedContent?: (rootId: string) => React.ReactNode;
   projectTreeTabRequest?: { tab: ProjectTreeTab; nonce: number } | null;
+  agentConfigSwitchRequest?: AgentConfigSwitchRequest | null;
   onProjectTreeTabChange?: (tab: ProjectTreeTab) => void;
   creatingRootName?: string | null;
   creatingRootBusy?: boolean;
@@ -1219,6 +1224,7 @@ export function FileTree({
   renderRootWorktreeContent,
   renderRootRelatedContent,
   projectTreeTabRequest = null,
+  agentConfigSwitchRequest = null,
   onProjectTreeTabChange,
   creatingRootName = null,
   creatingRootBusy = false,
@@ -1298,6 +1304,7 @@ export function FileTree({
   const [selectedAgentConfigID, setSelectedAgentConfigID] = React.useState("");
   const [selectedAgentAPIProviderID, setSelectedAgentAPIProviderID] = React.useState("");
   const [agentConfigSwitchSelection, setAgentConfigSwitchSelection] = React.useState<AgentConfigSwitchSelection | null>(null);
+  const [agentConfigPreferredProviderIDs, setAgentConfigPreferredProviderIDs] = React.useState<string[]>([]);
   const [agentConfigConfirmMessage, setAgentConfigConfirmMessage] = React.useState("");
   const [agentConfigBusy, setAgentConfigBusy] = React.useState(false);
   const [agentConfigError, setAgentConfigError] = React.useState("");
@@ -1753,6 +1760,7 @@ export function FileTree({
     setSelectedAgentConfigID("");
     setSelectedAgentAPIProviderID("");
     setAgentConfigSwitchSelection(null);
+    setAgentConfigPreferredProviderIDs([]);
     setAgentConfigConfirmMessage("");
     setAgentConfigError("");
     setIsMenuOpen(false);
@@ -1766,6 +1774,45 @@ export function FileTree({
       })
       .finally(() => setAgentConfigBusy(false));
   }, []);
+
+  React.useEffect(() => {
+    if (!agentConfigSwitchRequest) {
+      return;
+    }
+    const providerIDs = (agentConfigSwitchRequest.providerIDs || [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
+    setAgentLifecycleOpen(false);
+    setAgentConfigFlow("switch");
+    setAgentConfigStep("agent");
+    setAgentConfigAgent("");
+    setAgentConfigAddTab("backup");
+    setAgentConfigSwitchTab("api_provider");
+    setAgentConfigName("");
+    setAgentConfigFileSourcesBody("");
+    setAgentConfigEnvBody("");
+    setAgentAPIProviderName("");
+    setAgentAPIProviderBaseURL("");
+    setAgentAPIProviderAPIKey("");
+    setAgentConfigBackups([]);
+    setAgentAPIProviders([]);
+    setSelectedAgentConfigID("");
+    setSelectedAgentAPIProviderID("");
+    setAgentConfigSwitchSelection(null);
+    setAgentConfigPreferredProviderIDs(providerIDs);
+    setAgentConfigConfirmMessage("");
+    setAgentConfigError("");
+    setIsMenuOpen(false);
+    setAgentConfigBusy(true);
+    fetchAgents(true)
+      .then((items) => {
+        setAgentConfigAgents(items.filter((item) => item.installed));
+      })
+      .catch((error) => {
+        setAgentConfigError(error instanceof Error ? error.message : "加载 Agent 失败");
+      })
+      .finally(() => setAgentConfigBusy(false));
+  }, [agentConfigSwitchRequest?.nonce]);
 
   const closeAgentConfigFlow = React.useCallback(() => {
     setAgentConfigFlow(null);
@@ -1890,9 +1937,13 @@ export function FileTree({
         setAgentConfigBackups(backups);
         setAgentAPIProviders(providers);
         setSelectedAgentConfigID("");
-        setSelectedAgentAPIProviderID("");
-        setAgentConfigSwitchSelection(null);
+        const preferredProvider = providers.find((provider) => agentConfigPreferredProviderIDs.includes(provider.id));
+        setSelectedAgentAPIProviderID(preferredProvider?.id || "");
+        setAgentConfigSwitchSelection(preferredProvider ? { type: "api_provider", id: preferredProvider.id } : null);
         setAgentConfigSwitchTab(supportsAPIProvider && selectedAgent?.last_config_selection?.type === "api_provider" ? "api_provider" : "backup");
+        if (supportsAPIProvider && agentConfigPreferredProviderIDs.length > 0) {
+          setAgentConfigSwitchTab("api_provider");
+        }
         setAgentConfigStep("details");
       }
     } catch (error) {
@@ -1900,7 +1951,7 @@ export function FileTree({
     } finally {
       setAgentConfigBusy(false);
     }
-  }, [agentConfigAgents, agentConfigFlow]);
+  }, [agentConfigAgents, agentConfigFlow, agentConfigPreferredProviderIDs]);
 
   const saveAgentConfigBackup = React.useCallback(async (overwrite = false) => {
     if (!agentConfigName.trim()) {

@@ -33,6 +33,7 @@ import {
   startTokenStationBinding,
   type TokenStationInfo,
 } from "./services/tokenStation";
+import { syncAgentAPIProviders } from "./services/agentConfig";
 import { syncNativeReplyPollerE2EE } from "./services/replyPoller";
 import {
   ProtectedAPIError,
@@ -100,7 +101,7 @@ import { isNativeShellRuntime } from "./services/runtime";
 // 直接导入标准组件
 import { AppShell } from "./layout/AppShell";
 import { ModeIcon } from "./components/ModeIcon";
-import { FileTree } from "./components/FileTree";
+import { FileTree, type AgentConfigSwitchRequest } from "./components/FileTree";
 import { FileViewer } from "./components/FileViewer";
 import { GitDiffViewer } from "./components/GitDiffViewer";
 import { GitHistoryPanel } from "./components/GitHistoryPanel";
@@ -1229,6 +1230,85 @@ function loadStringBooleanRecord(key: string): Record<string, Record<string, boo
   }
 }
 
+const NEW_API_QUOTA_PER_UNIT = 500000;
+
+function formatTokenStationBalance(info: TokenStationInfo | null): string {
+  const data = info?.data;
+  if (!info?.success || !data) {
+    return "--";
+  }
+  const text = data.balance_text || data.quota_display_text || "";
+  const formattedText = formatBalanceText(text);
+  if (formattedText) {
+    return formattedText;
+  }
+  const raw = typeof data.balance === "number" ? data.balance : data.quota;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return (raw / NEW_API_QUOTA_PER_UNIT).toFixed(2);
+  }
+  return text || "--";
+}
+
+function parseTokenStationBalance(info: TokenStationInfo | null): number {
+  const data = info?.data;
+  if (!info?.success || !data) {
+    return 0;
+  }
+  const text = data.balance_text || data.quota_display_text || "";
+  const parsed = parseFirstNumber(text);
+  if (parsed !== null) {
+    return parsed;
+  }
+  const raw = typeof data.balance === "number" ? data.balance : data.quota;
+  return typeof raw === "number" && Number.isFinite(raw)
+    ? raw / NEW_API_QUOTA_PER_UNIT
+    : 0;
+}
+
+function formatBalanceText(text: string): string {
+  const value = String(text || "").trim();
+  if (!value) {
+    return "";
+  }
+  const match = value.match(/(-?\d+(?:\.\d+)?)/);
+  if (!match || match.index === undefined) {
+    return "";
+  }
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed)) {
+    return "";
+  }
+  return `${value.slice(0, match.index)}${parsed.toFixed(2)}${value.slice(match.index + match[1].length)}`;
+}
+
+function parseFirstNumber(text: string): number | null {
+  const match = String(text || "").match(/-?\d+(?:\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function tokenStationWalletURL(baseURL: string): string {
+  const fallback = "http://localhost:3000";
+  const trimmed = String(baseURL || "").trim().replace(/\/+$/, "");
+  const target = `${trimmed || fallback}/wallet`;
+  try {
+    return new URL(target).toString();
+  } catch {
+    return `${fallback}/wallet`;
+  }
+}
+
+function normalizeTokenStationAPIKey(value: string): string {
+  const apiKey = String(value || "").trim();
+  if (!apiKey) {
+    return "";
+  }
+  return apiKey.toLowerCase().startsWith("sk-") ? apiKey : `sk-${apiKey}`;
+}
+
 function hasExplicitFileContext(message: string): boolean {
   return READ_FILE_TOKEN_PATTERN.test(message);
 }
@@ -2152,7 +2232,10 @@ export function App({ onGoHome }: AppProps) {
     useState<TokenStationInfo | null>(null);
   const [tokenStationLoading, setTokenStationLoading] = useState(false);
   const [tokenStationBusy, setTokenStationBusy] = useState(false);
+  const [tokenStationApplyBusy, setTokenStationApplyBusy] = useState(false);
   const [tokenStationErrorOpen, setTokenStationErrorOpen] = useState(false);
+  const [agentConfigSwitchRequest, setAgentConfigSwitchRequest] =
+    useState<AgentConfigSwitchRequest | null>(null);
   const tokenStationRefreshRef = useRef<(() => void) | null>(null);
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>(() =>
     bootstrapService.snapshot(),
@@ -12812,8 +12895,9 @@ export function App({ onGoHome }: AppProps) {
   const handleTokenStationAction = useCallback(async () => {
     setTokenStationErrorOpen(false);
     const topupURL = String(tokenStationInfo?.data?.topup_url || "http://localhost:3000");
+    const walletURL = tokenStationWalletURL(topupURL);
     if (relayStatus?.relay_bound || relayStatus?.token_station_bound) {
-      window.open(topupURL, "_blank", "noopener,noreferrer");
+      window.open(walletURL, "_blank", "noopener,noreferrer");
       return;
     }
     const pendingPopup = openPendingPopup();
@@ -12821,7 +12905,7 @@ export function App({ onGoHome }: AppProps) {
     try {
       const status = await startTokenStationBinding();
       if (status.bound) {
-        window.open(String(status.topup_url || topupURL), "_blank", "noopener,noreferrer");
+        window.open(tokenStationWalletURL(String(status.topup_url || topupURL)), "_blank", "noopener,noreferrer");
         pendingPopup?.close();
         return;
       }
@@ -12839,6 +12923,58 @@ export function App({ onGoHome }: AppProps) {
       setTokenStationBusy(false);
     }
   }, [relayStatus, tokenStationInfo]);
+
+  const handleTokenStationApply = useCallback(async () => {
+    setTokenStationErrorOpen(false);
+    setTokenStationApplyBusy(true);
+    try {
+      const info = await fetchTokenStationInfo("apply");
+      setTokenStationInfo(info);
+      if (!info.success) {
+        setTokenStationInfo({
+          ...info,
+          message: info.message || "Token 加油站配置读取失败",
+        });
+        setTokenStationErrorOpen(true);
+        return;
+      }
+      const topupURL = String(info.data?.topup_url || tokenStationInfo?.data?.topup_url || "").trim();
+      const byName = new Map<string, { name: string; baseUrl: string; apiKey: string }>();
+      for (const item of info.data?.api_keys || []) {
+        const name = String(item?.name || "").trim();
+        const apiKey = normalizeTokenStationAPIKey(String(item?.api_key || ""));
+        if (!name || !apiKey || !topupURL) {
+          continue;
+        }
+        if (!byName.has(name)) {
+          byName.set(name, { name, baseUrl: topupURL, apiKey });
+        }
+      }
+      const providers = Array.from(byName.values());
+      if (providers.length === 0) {
+        setTokenStationInfo({
+          ...info,
+          success: false,
+          message: "Token 加油站没有可同步的 API Key",
+        });
+        setTokenStationErrorOpen(true);
+        return;
+      }
+      const result = await syncAgentAPIProviders(providers);
+      setAgentConfigSwitchRequest({
+        nonce: Date.now(),
+        providerIDs: (result.providers || []).map((provider) => provider.id),
+      });
+    } catch (error) {
+      setTokenStationInfo({
+        success: false,
+        message: error instanceof Error ? error.message : "Token 加油站配置生效失败",
+      });
+      setTokenStationErrorOpen(true);
+    } finally {
+      setTokenStationApplyBusy(false);
+    }
+  }, [tokenStationInfo]);
 
   const relayActionLabel = useMemo(() => {
     if (isRelayNodePage()) {
@@ -13119,6 +13255,11 @@ export function App({ onGoHome }: AppProps) {
         }
       />
     );
+  const tokenStationBalanceText = tokenStationLoading
+    ? "读取中"
+    : formatTokenStationBalance(tokenStationInfo);
+  const canApplyTokenStationConfig =
+    tokenStationInfo?.success === true && parseTokenStationBalance(tokenStationInfo) > 0;
   const tokenStationCard = (
       <section
         aria-label="Token 加油站"
@@ -13192,9 +13333,7 @@ export function App({ onGoHome }: AppProps) {
           <span
             title={
               tokenStationInfo?.success
-                ? tokenStationInfo.data?.balance_text ||
-                  tokenStationInfo.data?.quota_display_text ||
-                  "--"
+                ? tokenStationBalanceText
                 : tokenStationInfo?.message || "未绑定账户"
             }
             style={{
@@ -13209,15 +13348,50 @@ export function App({ onGoHome }: AppProps) {
               lineHeight: "18px",
             }}
           >
-            {tokenStationLoading
-              ? "读取中"
-              : tokenStationInfo?.success
-                ? tokenStationInfo.data?.balance_text ||
-                  tokenStationInfo.data?.quota_display_text ||
-                  "--"
-                : "--"}
+            {tokenStationBalanceText}
           </span>
           <span style={{ flex: "1 1 auto", minWidth: 4 }} />
+          {canApplyTokenStationConfig ? (
+            <button
+              type="button"
+              onClick={() => void handleTokenStationApply()}
+              disabled={tokenStationApplyBusy}
+              style={{
+                flex: "0 0 auto",
+                height: 23,
+                border: "1px solid var(--accent-color)",
+                borderRadius: 6,
+                background: "transparent",
+                color: "var(--accent-color)",
+                fontSize: 11,
+                fontWeight: 650,
+                cursor: tokenStationApplyBusy ? "default" : "pointer",
+                opacity: tokenStationApplyBusy ? 0.65 : 1,
+                padding: "0 7px",
+                whiteSpace: "nowrap",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              {tokenStationApplyBusy ? (
+                <svg
+                  aria-hidden="true"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  style={{ animation: "mindfs-update-spin 0.9s linear infinite" }}
+                >
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              ) : null}
+              <span>配置生效</span>
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void handleTokenStationAction()}
@@ -13304,6 +13478,7 @@ export function App({ onGoHome }: AppProps) {
             renderRootWorktreeContent={renderRootWorktreeContent}
             renderRootRelatedContent={renderRootRelatedContent}
             projectTreeTabRequest={projectTreeTabRequest}
+            agentConfigSwitchRequest={agentConfigSwitchRequest}
             onProjectTreeTabChange={setProjectTreeTab}
             relayActionLabel={relayActionLabel}
             relayActionDisabled={relayActionDisabled}

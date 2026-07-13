@@ -113,6 +113,18 @@ export async function createAgentAPIProvider(input: {
   });
 }
 
+export async function syncAgentAPIProviders(input: Array<{
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+}>): Promise<{ providers: AgentAPIProvider[] }> {
+  return protectedJSON<{ providers: AgentAPIProvider[] }>(appPath("/api/agent-api-providers/sync"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providers: input }),
+  });
+}
+
 export async function deleteAgentAPIProvider(id: string): Promise<{ deleted: boolean; id: string; providers?: AgentAPIProvider[] }> {
   const params = new URLSearchParams({ id });
   return protectedJSON<{ deleted: boolean; id: string; providers?: AgentAPIProvider[] }>(appPath(`/api/agent-api-providers?${params.toString()}`), {

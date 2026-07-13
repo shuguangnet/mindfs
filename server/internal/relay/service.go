@@ -266,7 +266,7 @@ func buildBindPollURL(baseURL, pendingCode string, purpose ...string) (string, e
 	}
 }
 
-func (s *Service) FetchTokenStationUserInfo(ctx context.Context, baseURL string, creds Credentials) (map[string]any, error) {
+func (s *Service) FetchTokenStationUserInfo(ctx context.Context, baseURL string, creds Credentials, purpose string) (map[string]any, error) {
 	baseURL = strings.TrimSuffix(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		return nil, errors.New("relay base URL required")
@@ -283,7 +283,11 @@ func (s *Service) FetchTokenStationUserInfo(ctx context.Context, baseURL string,
 		return nil, err
 	}
 	u.Path = strings.TrimSuffix(u.Path, "/") + "/api/token-station/userinfo"
-	u.RawQuery = ""
+	q := u.Query()
+	if purpose = strings.TrimSpace(purpose); purpose != "" {
+		q.Set("purpose", purpose)
+	}
+	u.RawQuery = q.Encode()
 	u.Fragment = ""
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {

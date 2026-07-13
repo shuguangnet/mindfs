@@ -60,6 +60,10 @@ type agentAPIProviderCreateRequest struct {
 	APIKey  string `json:"apiKey"`
 }
 
+type agentAPIProviderSyncRequest struct {
+	Providers []agentAPIProviderCreateRequest `json:"providers"`
+}
+
 type agentAPIProviderSwitchRequest struct {
 	Agent      string `json:"agent"`
 	ProviderID string `json:"provider_id"`
@@ -104,6 +108,24 @@ func (h *HTTPHandler) handleAgentAPIProviderCreate(w http.ResponseWriter, r *htt
 		return
 	}
 	respondJSON(w, http.StatusOK, publicAgentAPIProvider(provider))
+}
+
+func (h *HTTPHandler) handleAgentAPIProvidersSync(w http.ResponseWriter, r *http.Request) {
+	var req agentAPIProviderSyncRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxUploadRequestBytes)).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid request body"))
+		return
+	}
+	providers, err := syncAgentAPIProviders(r.Context(), req.Providers)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	out := make([]agentAPIProviderPublic, 0, len(providers))
+	for _, provider := range providers {
+		out = append(out, publicAgentAPIProvider(provider))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"providers": out})
 }
 
 func (h *HTTPHandler) handleAgentAPIProviderDelete(w http.ResponseWriter, r *http.Request) {
@@ -190,6 +212,98 @@ func createAgentAPIProvider(ctx context.Context, req agentAPIProviderCreateReque
 		return agentAPIProvider{}, err
 	}
 	return provider, nil
+}
+
+func syncAgentAPIProviders(ctx context.Context, requests []agentAPIProviderCreateRequest) ([]agentAPIProvider, error) {
+	if len(requests) == 0 {
+		return nil, errors.New("providers required")
+	}
+	providers, err := readAgentAPIProviders()
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]int, len(providers))
+	for i, provider := range providers {
+		byName[strings.TrimSpace(provider.Name)] = i
+	}
+	now := time.Now().Format(time.RFC3339)
+	changed := make([]agentAPIProvider, 0, len(requests))
+	seenNames := map[string]struct{}{}
+	for _, req := range requests {
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			return nil, errors.New("provider name required")
+		}
+		if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+			return nil, errors.New("provider name must not contain path separators")
+		}
+		if _, ok := seenNames[name]; ok {
+			continue
+		}
+		seenNames[name] = struct{}{}
+		baseURL, err := normalizeAPIProviderBaseURL(req.BaseURL)
+		if err != nil {
+			return nil, err
+		}
+		apiKey := strings.TrimSpace(req.APIKey)
+		if apiKey == "" {
+			return nil, errors.New("api key required")
+		}
+		probe, err := probeAgentAPIProvider(ctx, baseURL, apiKey)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		if index, ok := byName[name]; ok {
+			provider := providers[index]
+			provider.Name = name
+			provider.BaseURL = baseURL
+			provider.APIKey = apiKey
+			provider.Protocols = probe.Protocols
+			provider.ModelFamilies = probe.ModelFamilies
+			provider.Models = probe.Models
+			provider.UpdatedAt = now
+			providers[index] = provider
+			changed = append(changed, provider)
+			continue
+		}
+		id := "api-" + slugifyAPIProviderName(name)
+		if id == "api-" {
+			id = fmt.Sprintf("api-%d", time.Now().UnixNano())
+		}
+		if providerIDExists(providers, id) {
+			id = fmt.Sprintf("%s-%d", id, time.Now().UnixNano())
+		}
+		provider := agentAPIProvider{
+			ID:            id,
+			Name:          name,
+			BaseURL:       baseURL,
+			APIKey:        apiKey,
+			Protocols:     probe.Protocols,
+			ModelFamilies: probe.ModelFamilies,
+			Models:        probe.Models,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		providers = append(providers, provider)
+		byName[name] = len(providers) - 1
+		changed = append(changed, provider)
+	}
+	if len(changed) == 0 {
+		return nil, errors.New("no valid providers")
+	}
+	if err := writeAgentAPIProviders(providers); err != nil {
+		return nil, err
+	}
+	return changed, nil
+}
+
+func providerIDExists(providers []agentAPIProvider, id string) bool {
+	for _, provider := range providers {
+		if provider.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func deleteAgentAPIProvider(id string) ([]agentAPIProvider, error) {
