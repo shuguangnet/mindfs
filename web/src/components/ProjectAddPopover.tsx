@@ -97,9 +97,6 @@ function PathBreadcrumb({
   const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
   const segments = normalized.split("/").filter(Boolean);
   const [volumeMenuOpen, setVolumeMenuOpen] = React.useState(false);
-  if (segments.length === 0) {
-    return null;
-  }
   const volumeItems = Array.isArray(volumes) ? volumes : [];
   const visibleSegments =
     segments.length > 3
@@ -225,6 +222,32 @@ function PathBreadcrumb({
         minWidth: 0,
       }}
     >
+      {!isWindowsPath ? (
+        <>
+          <button
+            type="button"
+            onClick={() => onNavigate("/")}
+            aria-label="根目录"
+            style={{
+              border: "none",
+              background: "transparent",
+              padding: 0,
+              color: segments.length === 0 ? "var(--text-primary)" : "var(--text-secondary)",
+              fontSize: segments.length === 0 ? "13px" : "11px",
+              fontWeight: segments.length === 0 ? 600 : 500,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            /
+          </button>
+          {segments.length > 0 ? (
+            <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+              &gt;
+            </span>
+          ) : null}
+        </>
+      ) : null}
       {hiddenCount > 0 ? (
         <>
           <button
@@ -410,15 +433,56 @@ function LocalPanel({
     : "rgba(59, 130, 246, 0.45)";
   const actionCursor = !actionDisabled ? "pointer" : "not-allowed";
   const volumes = Array.isArray(localState.volumes) ? localState.volumes : [];
+  const canNavigateParent = !localState.loading && !!localState.parent;
 
   return (
     <div style={popoverStyle}>
-      <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-        <PathBreadcrumb
-          path={localState.path}
-          volumes={volumes}
-          onNavigate={onLocalNavigate}
-        />
+      <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
+        <button
+          type="button"
+          disabled={!canNavigateParent}
+          onClick={() => {
+            if (localState.parent) {
+              onLocalNavigate(localState.parent);
+            }
+          }}
+          aria-label="返回上级目录"
+          title="返回上级目录"
+          style={{
+            width: "24px",
+            height: "24px",
+            border: "none",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            borderRadius: "6px",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: canNavigateParent ? "pointer" : "not-allowed",
+            opacity: canNavigateParent ? 1 : 0.4,
+            flexShrink: 0,
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
+        <div style={{ display: "flex", alignItems: "center", minWidth: 0, flex: 1 }}>
+          <PathBreadcrumb
+            path={localState.path}
+            volumes={volumes}
+            onNavigate={onLocalNavigate}
+          />
+        </div>
       </div>
       <div
         style={{
