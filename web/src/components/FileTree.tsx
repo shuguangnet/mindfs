@@ -867,11 +867,11 @@ function AgentConfigPopover({
                 );
               })
             ) : (
-              apiProviders.length === 0 ? (
-                <div style={agentConfigHintStyle}>暂无适配的 API 供应商</div>
+	              apiProviders.length === 0 ? (
+	                <div style={agentConfigHintStyle}>暂无适配的 API 供应商</div>
               ) : apiProviders.map((item) => {
                 const selected = item.id === selectedAPIProviderID;
-                const summary = [item.protocol, (item.modelFamilies || []).join(", ")].filter(Boolean).join(" / ");
+                const summary = (item.modelFamilies || []).join(", ");
                 return (
                   <div
                     key={item.id}

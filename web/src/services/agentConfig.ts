@@ -20,7 +20,7 @@ export type AgentAPIProvider = {
   id: string;
   name: string;
   baseUrl: string;
-  protocol: string;
+  protocols: string[];
   modelFamilies: string[];
   models?: string[];
   createdAt: string;

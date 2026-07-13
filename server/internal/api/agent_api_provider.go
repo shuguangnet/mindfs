@@ -31,22 +31,23 @@ const (
 )
 
 type agentAPIProvider struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	BaseURL       string   `json:"baseUrl"`
-	APIKey        string   `json:"apiKey,omitempty"`
-	Protocol      string   `json:"protocol"`
-	ModelFamilies []string `json:"modelFamilies"`
-	Models        []string `json:"models"`
-	CreatedAt     string   `json:"createdAt"`
-	UpdatedAt     string   `json:"updatedAt"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	BaseURL        string   `json:"baseUrl"`
+	APIKey         string   `json:"apiKey,omitempty"`
+	Protocols      []string `json:"protocols,omitempty"`
+	ModelFamilies  []string `json:"modelFamilies"`
+	Models         []string `json:"models"`
+	CreatedAt      string   `json:"createdAt"`
+	UpdatedAt      string   `json:"updatedAt"`
+	activeProtocol string
 }
 
 type agentAPIProviderPublic struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
 	BaseURL       string   `json:"baseUrl"`
-	Protocol      string   `json:"protocol"`
+	Protocols     []string `json:"protocols,omitempty"`
 	ModelFamilies []string `json:"modelFamilies"`
 	Models        []string `json:"models,omitempty"`
 	CreatedAt     string   `json:"createdAt"`
@@ -65,7 +66,7 @@ type agentAPIProviderSwitchRequest struct {
 }
 
 type agentAPIProviderProbeResult struct {
-	Protocol      string
+	Protocols     []string
 	Models        []string
 	ModelFamilies []string
 }
@@ -79,7 +80,7 @@ func (h *HTTPHandler) handleAgentAPIProvidersList(w http.ResponseWriter, r *http
 	}
 	out := make([]agentAPIProviderPublic, 0, len(providers))
 	for _, provider := range providers {
-		if agentName != "" && !apiProviderCompatibleWithAgent(provider.Protocol, agentName) {
+		if agentName != "" && !apiProviderCompatibleWithAgent(provider, agentName) {
 			continue
 		}
 		out = append(out, publicAgentAPIProvider(provider))
@@ -178,7 +179,7 @@ func createAgentAPIProvider(ctx context.Context, req agentAPIProviderCreateReque
 		Name:          name,
 		BaseURL:       baseURL,
 		APIKey:        apiKey,
-		Protocol:      probe.Protocol,
+		Protocols:     probe.Protocols,
 		ModelFamilies: probe.ModelFamilies,
 		Models:        probe.Models,
 		CreatedAt:     now,
@@ -244,9 +245,11 @@ func switchAgentAPIProvider(req agentAPIProviderSwitchRequest, app *AppContext) 
 	if provider.ID == "" {
 		return agentAPIProvider{}, errors.New("provider not found")
 	}
-	if !apiProviderCompatibleWithAgent(provider.Protocol, agentName) {
-		return agentAPIProvider{}, fmt.Errorf("provider protocol %s is not compatible with agent %s", provider.Protocol, agentName)
+	selectedProtocol, ok := selectAPIProviderProtocolForAgent(provider, agentName)
+	if !ok {
+		return agentAPIProvider{}, fmt.Errorf("provider protocols %s are not compatible with agent %s", strings.Join(agentAPIProviderProtocols(provider), ", "), agentName)
 	}
+	provider.activeProtocol = selectedProtocol
 	if err := applyAgentAPIProvider(agentName, provider, app); err != nil {
 		return agentAPIProvider{}, err
 	}
@@ -361,7 +364,7 @@ func copilotAPIProviderEnv(provider agentAPIProvider) map[string]string {
 		"COPILOT_PROVIDER_API_KEY":  provider.APIKey,
 		"COPILOT_MODEL":             firstModelOrDefault(provider.Models, ""),
 	}
-	switch provider.Protocol {
+	switch agentAPIProviderActiveProtocol(provider) {
 	case apiProviderProtocolAnthropicCompatible:
 		env["COPILOT_PROVIDER_TYPE"] = "anthropic"
 	default:
@@ -513,7 +516,7 @@ func applyQwenAPIProvider(provider agentAPIProvider) error {
 	providerKey := "openai"
 	protocol := "openai"
 	baseURL := openAIModelsBaseURL(provider.BaseURL)
-	if provider.Protocol == apiProviderProtocolAnthropicCompatible {
+	if agentAPIProviderActiveProtocol(provider) == apiProviderProtocolAnthropicCompatible {
 		envKey = "ANTHROPIC_API_KEY"
 		providerKey = "anthropic"
 		protocol = "anthropic"
@@ -541,7 +544,7 @@ func applyKimiAPIProvider(provider agentAPIProvider) error {
 	model := firstModelOrDefault(provider.Models, "")
 	providerType := "openai_legacy"
 	baseURL := openAIModelsBaseURL(provider.BaseURL)
-	if provider.Protocol == apiProviderProtocolAnthropicCompatible {
+	if agentAPIProviderActiveProtocol(provider) == apiProviderProtocolAnthropicCompatible {
 		providerType = "anthropic"
 		baseURL = anthropicBaseURL(provider.BaseURL)
 	}
@@ -572,7 +575,7 @@ func applyOpenCodeAPIProvider(provider agentAPIProvider) error {
 	}
 	npm := "@ai-sdk/openai-compatible"
 	baseURL := openAIModelsBaseURL(provider.BaseURL)
-	if provider.Protocol == apiProviderProtocolAnthropicCompatible {
+	if agentAPIProviderActiveProtocol(provider) == apiProviderProtocolAnthropicCompatible {
 		npm = "@ai-sdk/anthropic"
 		baseURL = anthropicBaseURL(provider.BaseURL)
 	}
@@ -602,9 +605,10 @@ func applyOpenClawAPIProvider(provider agentAPIProvider) error {
 	if err != nil {
 		return err
 	}
-	apiMode := additiveAgentAPI(provider.Protocol)
+	activeProtocol := agentAPIProviderActiveProtocol(provider)
+	apiMode := additiveAgentAPI(activeProtocol)
 	baseURL := provider.BaseURL
-	if provider.Protocol == apiProviderProtocolAnthropicCompatible {
+	if activeProtocol == apiProviderProtocolAnthropicCompatible {
 		baseURL = anthropicBaseURL(provider.BaseURL)
 	}
 	models := ensureJSONObject(cfg, "models")
@@ -650,8 +654,9 @@ func applyOMPAPIProvider(provider agentAPIProvider) error {
 	if err != nil {
 		return err
 	}
+	activeProtocol := agentAPIProviderActiveProtocol(provider)
 	baseURL := provider.BaseURL
-	if provider.Protocol == apiProviderProtocolAnthropicCompatible {
+	if activeProtocol == apiProviderProtocolAnthropicCompatible {
 		baseURL = anthropicBaseURL(provider.BaseURL)
 	}
 	providerName := agentAPIProviderConfigName(provider)
@@ -659,8 +664,8 @@ func applyOMPAPIProvider(provider agentAPIProvider) error {
 	providers[providerName] = map[string]any{
 		"baseUrl":    baseURL,
 		"apiKey":     provider.APIKey,
-		"api":        additiveAgentAPI(provider.Protocol),
-		"authHeader": provider.Protocol == apiProviderProtocolOpenAICompatible,
+		"api":        additiveAgentAPI(activeProtocol),
+		"authHeader": activeProtocol == apiProviderProtocolOpenAICompatible,
 		"models":     modelArray(provider.Models),
 	}
 	if model := firstModelOrDefault(provider.Models, ""); model != "" {
@@ -680,7 +685,7 @@ func applyPiAPIProvider(provider agentAPIProvider) error {
 		return err
 	}
 	providerName := agentAPIProviderConfigName(provider)
-	apiMode := piAgentAPI(provider.Protocol)
+	apiMode := piAgentAPI(agentAPIProviderActiveProtocol(provider))
 	baseURL := piAgentBaseURL(provider)
 	providers := ensureJSONObject(cfg, "providers")
 	providers[providerName] = map[string]any{
@@ -790,7 +795,7 @@ func mergeAgentEnvConfig(agentName string, updates map[string]string) (map[strin
 }
 
 func probeAgentAPIProvider(ctx context.Context, baseURL, apiKey string) (agentAPIProviderProbeResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	attempts := []struct {
 		protocol string
@@ -800,20 +805,39 @@ func probeAgentAPIProvider(ctx context.Context, baseURL, apiKey string) (agentAP
 		{apiProviderProtocolAnthropicCompatible, probeAnthropicCompatibleModels},
 		{apiProviderProtocolGeminiCompatible, probeGeminiCompatibleModels},
 	}
-	var failures []string
+	type probeAttemptResult struct {
+		protocol string
+		models   []string
+		err      error
+	}
+	results := make(chan probeAttemptResult, len(attempts))
 	for _, attempt := range attempts {
-		models, err := attempt.fn(ctx, baseURL, apiKey)
-		if err != nil {
-			failures = append(failures, attempt.protocol+": "+err.Error())
+		attempt := attempt
+		go func() {
+			models, err := attempt.fn(ctx, baseURL, apiKey)
+			results <- probeAttemptResult{protocol: attempt.protocol, models: models, err: err}
+		}()
+	}
+	var failures []string
+	modelsByProtocol := map[string][]string{}
+	for range attempts {
+		result := <-results
+		if result.err != nil {
+			failures = append(failures, result.protocol+": "+result.err.Error())
 			continue
 		}
-		if len(models) == 0 {
-			failures = append(failures, attempt.protocol+": no models returned")
+		if len(result.models) == 0 {
+			failures = append(failures, result.protocol+": no models returned")
 			continue
 		}
+		modelsByProtocol[result.protocol] = result.models
+	}
+	protocols := successfulProbeProtocols(modelsByProtocol)
+	if len(protocols) > 0 {
+		models := mergeProtocolModels(modelsByProtocol, protocols)
 		families := inferModelFamilies(models)
 		return agentAPIProviderProbeResult{
-			Protocol:      overrideAPIProviderProtocolByModelFamily(attempt.protocol, families),
+			Protocols:     protocols,
 			Models:        models,
 			ModelFamilies: families,
 		}, nil
@@ -937,6 +961,9 @@ func readAgentAPIProviders() ([]agentAPIProvider, error) {
 	if err := json.Unmarshal(payload, &providers); err != nil {
 		return nil, err
 	}
+	for i := range providers {
+		providers[i].Protocols = agentAPIProviderProtocols(providers[i])
+	}
 	return providers, nil
 }
 
@@ -979,7 +1006,7 @@ func publicAgentAPIProvider(provider agentAPIProvider) agentAPIProviderPublic {
 		ID:            provider.ID,
 		Name:          provider.Name,
 		BaseURL:       provider.BaseURL,
-		Protocol:      provider.Protocol,
+		Protocols:     agentAPIProviderProtocols(provider),
 		ModelFamilies: append([]string(nil), provider.ModelFamilies...),
 		Models:        append([]string(nil), provider.Models...),
 		CreatedAt:     provider.CreatedAt,
@@ -1026,13 +1053,46 @@ func geminiModelsURL(baseURL string) string {
 	return base + "/v1beta/models"
 }
 
-func apiProviderCompatibleWithAgent(protocol, agentName string) bool {
+func apiProviderCompatibleWithAgent(provider agentAPIProvider, agentName string) bool {
+	_, ok := selectAPIProviderProtocolForAgent(provider, agentName)
+	return ok
+}
+
+func selectAPIProviderProtocolForAgent(provider agentAPIProvider, agentName string) (string, bool) {
+	providerProtocols := agentAPIProviderProtocols(provider)
 	for _, supported := range agentSupportedAPIProtocols(agentName) {
-		if protocol == supported {
-			return true
+		for _, protocol := range providerProtocols {
+			if protocol == supported {
+				return protocol, true
+			}
 		}
 	}
-	return false
+	return "", false
+}
+
+func agentAPIProviderProtocols(provider agentAPIProvider) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(provider.Protocols))
+	for _, protocol := range provider.Protocols {
+		protocol = strings.TrimSpace(protocol)
+		if protocol == "" || seen[protocol] {
+			continue
+		}
+		seen[protocol] = true
+		out = append(out, protocol)
+	}
+	return out
+}
+
+func agentAPIProviderActiveProtocol(provider agentAPIProvider) string {
+	if protocol := strings.TrimSpace(provider.activeProtocol); protocol != "" {
+		return protocol
+	}
+	protocols := agentAPIProviderProtocols(provider)
+	if len(protocols) == 0 {
+		return ""
+	}
+	return protocols[0]
 }
 
 func applyAgentAPIProviderCapabilities(statuses []agent.Status) []agent.Status {
@@ -1065,18 +1125,35 @@ func agentSupportedAPIProtocols(agentName string) []string {
 	}
 }
 
-func overrideAPIProviderProtocolByModelFamily(detectedProtocol string, families []string) string {
-	for _, family := range families {
-		switch strings.ToLower(strings.TrimSpace(family)) {
-		case "openai":
-			return apiProviderProtocolOpenAICompatible
-		case "anthropic":
-			return apiProviderProtocolAnthropicCompatible
-		case "gemini":
-			return apiProviderProtocolGeminiCompatible
+func successfulProbeProtocols(modelsByProtocol map[string][]string) []string {
+	priority := []string{
+		apiProviderProtocolOpenAICompatible,
+		apiProviderProtocolAnthropicCompatible,
+		apiProviderProtocolGeminiCompatible,
+	}
+	out := make([]string, 0, len(priority))
+	for _, protocol := range priority {
+		if len(modelsByProtocol[protocol]) > 0 {
+			out = append(out, protocol)
 		}
 	}
-	return detectedProtocol
+	return out
+}
+
+func mergeProtocolModels(modelsByProtocol map[string][]string, protocols []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, protocol := range protocols {
+		for _, model := range modelsByProtocol[protocol] {
+			model = strings.TrimSpace(model)
+			if model == "" || seen[model] {
+				continue
+			}
+			seen[model] = true
+			out = append(out, model)
+		}
+	}
+	return out
 }
 
 func agentAPIProviderConfigName(provider agentAPIProvider) string {
@@ -1515,7 +1592,7 @@ func piAgentAPI(protocol string) string {
 }
 
 func piAgentBaseURL(provider agentAPIProvider) string {
-	switch provider.Protocol {
+	switch agentAPIProviderActiveProtocol(provider) {
 	case apiProviderProtocolAnthropicCompatible:
 		return anthropicBaseURL(provider.BaseURL)
 	case apiProviderProtocolGeminiCompatible:
