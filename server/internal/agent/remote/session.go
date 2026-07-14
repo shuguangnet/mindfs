@@ -88,6 +88,10 @@ func (s *Session) SendMessage(ctx context.Context, content string) error {
 	if strings.TrimSpace(content) == "" {
 		return errors.New("content required")
 	}
+	s.mu.Lock()
+	planMode := s.planMode
+	s.mu.Unlock()
+	content = messageContent(content, planMode)
 	turnCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	if s.cancel != nil {
@@ -172,7 +176,7 @@ func (s *Session) AnswerQuestion(ctx context.Context, answer agenttypes.AskUserA
 	}); err != nil {
 		return err
 	}
-	return nil
+	return waitForResponse(ws, "session.answer_question.accepted")
 }
 
 func (s *Session) CurrentModel() string { return s.model }
@@ -206,8 +210,35 @@ func (s *Session) SetMode(_ context.Context, mode string) error {
 	return nil
 }
 
-func (s *Session) SetPlanMode(_ context.Context, enabled bool) error {
+func (s *Session) SetPlanMode(ctx context.Context, enabled bool) error {
+	s.mu.Lock()
+	remoteSessionID := s.remoteSessionID
+	s.mu.Unlock()
+	if remoteSessionID != "" {
+		ws, err := s.client.DialWS(ctx, "/ws")
+		if err != nil {
+			return err
+		}
+		defer ws.Close()
+		requestID := fmt.Sprintf("remote-plan-%d", time.Now().UnixNano())
+		if err := ws.SendJSON(map[string]any{
+			"id":   requestID,
+			"type": "session.plan_mode.set",
+			"payload": map[string]any{
+				"root_id":     s.server.DefaultRootID,
+				"session_key": remoteSessionID,
+				"enabled":     enabled,
+			},
+		}); err != nil {
+			return err
+		}
+		if err := waitForResponse(ws, "session.done"); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
 	s.planMode = enabled
+	s.mu.Unlock()
 	return nil
 }
 
@@ -290,17 +321,7 @@ func (s *Session) handleWSResponse(resp map[string]any) error {
 		return nil
 	}
 	if respType == "session.error" {
-		if errPayload, ok := resp["error"].(map[string]any); ok {
-			if msg := stringValue(errPayload["message"]); msg != "" {
-				return errors.New(msg)
-			}
-		}
-		if payload != nil {
-			if msg := stringValue(payload["message"]); msg != "" {
-				return errors.New(msg)
-			}
-		}
-		return errors.New("remote session error")
+		return responseError(resp)
 	}
 	if respType != "session.stream" || payload == nil {
 		return nil
@@ -315,6 +336,48 @@ func (s *Session) handleWSResponse(resp map[string]any) error {
 	}
 	s.emit(update)
 	return nil
+}
+
+func messageContent(content string, planMode bool) string {
+	if !planMode {
+		return content
+	}
+	trimmed := strings.TrimSpace(content)
+	lower := strings.ToLower(trimmed)
+	if lower == "/plan" || strings.HasPrefix(lower, "/plan ") {
+		return content
+	}
+	return "/plan " + content
+}
+
+func waitForResponse(ws *remote.WSConn, terminalType string) error {
+	for {
+		var resp map[string]any
+		if err := ws.ReadJSON(&resp); err != nil {
+			return err
+		}
+		respType := strings.TrimSpace(stringValue(resp["type"]))
+		if respType == "session.error" {
+			return responseError(resp)
+		}
+		if respType == terminalType {
+			return nil
+		}
+	}
+}
+
+func responseError(resp map[string]any) error {
+	if errPayload, ok := resp["error"].(map[string]any); ok {
+		if msg := stringValue(errPayload["message"]); msg != "" {
+			return errors.New(msg)
+		}
+	}
+	if payload, ok := resp["payload"].(map[string]any); ok {
+		if msg := stringValue(payload["message"]); msg != "" {
+			return errors.New(msg)
+		}
+	}
+	return errors.New("remote session error")
 }
 
 func (s *Session) emit(update agenttypes.Event) {

@@ -68,7 +68,6 @@ type ActionBarProps = {
   agentsVersion?: number;
   currentRootId?: string | null;
   currentSession?: SessionInfo | null;
-  pendingPlanMode?: boolean;
   attachedFileContext?: AttachedFileContext | null;
   canOpenSessionDrawer?: boolean;
   sessionDrawerOpen?: boolean;
@@ -392,7 +391,6 @@ export function ActionBar({
   agentsVersion = 0,
   currentRootId,
   currentSession,
-  pendingPlanMode = false,
   attachedFileContext,
   canOpenSessionDrawer = false,
   sessionDrawerOpen = false,
@@ -575,7 +573,6 @@ export function ActionBar({
   const supportsEffort =
     availableEfforts.length > 0 && !!selectedModelInfo?.supportEffort;
   const supportsServiceTier = !!selectedAgent?.supports_fast_service;
-  const planModeActive = (!!currentSession?.plan_mode || pendingPlanMode) && mode !== "command";
   const planSessionKey = currentSession?.key || currentSession?.session_key || "";
   const planRootId = currentSession?.root_id || currentRootId || "";
 
@@ -1256,58 +1253,10 @@ export function ActionBar({
               display: "flex",
               flexDirection: "column",
               alignItems: "flex-start",
-              gap: planModeActive ? "4px" : 0,
+              gap: 0,
               minWidth: 0,
             }}
           >
-            {planModeActive ? (
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  height: "20px",
-                  padding: "0 5px 0 8px",
-                  borderRadius: "999px",
-                  border: "1px solid rgba(37, 99, 235, 0.22)",
-                  background: "rgba(37, 99, 235, 0.10)",
-                  color: "#2563eb",
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  lineHeight: 1,
-                }}
-              >
-                <span>Plan</span>
-                <button
-                  type="button"
-                  aria-label="关闭 Plan 模式"
-                  title="关闭 Plan 模式"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => void onSetPlanMode?.(false, planSessionKey, planRootId)}
-                  style={{
-                    width: "14px",
-                    height: "14px",
-                    border: "none",
-                    borderRadius: "999px",
-                    background: "transparent",
-                    color: "currentColor",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                    lineHeight: 1,
-                    padding: 0,
-                  }}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M0 0h24v24H0z" fill="none" />
-                    <path fill="currentColor" fillRule="evenodd" d="M21 12a9 9 0 1 1-18 0a9 9 0 0 1 18 0M7.293 16.707a1 1 0 0 1 0-1.414L10.586 12L7.293 8.707a1 1 0 0 1 1.414-1.414L12 10.586l3.293-3.293a1 1 0 1 1 1.414 1.414L13.414 12l3.293 3.293a1 1 0 0 1-1.414 1.414L12 13.414l-3.293 3.293a1 1 0 0 1-1.414 0" clipRule="evenodd" />
-                  </svg>
-                </button>
-              </div>
-            ) : null}
-
             <div
               data-mindfs-command-input-width="1"
               style={{

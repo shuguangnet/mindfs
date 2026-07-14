@@ -13139,7 +13139,6 @@ export function App({ onGoHome }: AppProps) {
               agentsVersion={agentsVersion}
               currentRootId={currentRootId}
               currentSession={actionBarSession}
-              pendingPlanMode={pendingPlanMode}
               attachedFileContext={attachedFileContext}
               canOpenSessionDrawer={canOpenSessionDrawer}
               sessionDrawerOpen={isDrawerOpen}

@@ -338,8 +338,6 @@ export function TaskTemplateDialog({ open, agents, template, onClose, onSaved }:
           {draft.stages.map((stage, index) => {
             const snapshot = stage.snapshot;
             const isAgent = snapshot.role === "agent";
-            const selectedAgentStatus = agents.find((item) => item.name === (snapshot.agent || "codex")) || null;
-            const planModeDisabled = isAgent && selectedAgentStatus?.protocol === "acp";
             const changed = stageChangedFromTemplate(snapshot, stageTemplates);
             const savedStageKey = `${stage.stage_template_id || snapshot.id || stage.id || index}-${index}`;
             const recentlySaved = savedStageKeys[savedStageKey] === true;
@@ -435,13 +433,8 @@ export function TaskTemplateDialog({ open, agents, template, onClose, onSaved }:
                   <StageOptionsMenu
                     isAgent={isAgent}
                     autoAdvance={snapshot.auto_advance === true}
-                    planMode={!planModeDisabled && snapshot.plan_mode === true}
-                    planModeDisabled={planModeDisabled}
                     sessionReusePolicy={snapshot.session_reuse_policy || "task_main"}
                     onAutoAdvanceChange={() => updateStage(index, { auto_advance: !snapshot.auto_advance })}
-                    onPlanModeChange={() => {
-                      if (!planModeDisabled) updateStage(index, { plan_mode: !snapshot.plan_mode });
-                    }}
                     onSessionReusePolicyChange={(policy) => updateStage(index, { session_reuse_policy: policy })}
                   />
                   <div style={{ flex: "1 1 8px", minWidth: 0 }} />
@@ -655,20 +648,14 @@ function StageTemplateSelect({ value, name, role, templates, onNameChange, onCha
 function StageOptionsMenu({
   isAgent,
   autoAdvance,
-  planMode,
-  planModeDisabled,
   sessionReusePolicy,
   onAutoAdvanceChange,
-  onPlanModeChange,
   onSessionReusePolicyChange,
 }: {
   isAgent: boolean;
   autoAdvance: boolean;
-  planMode: boolean;
-  planModeDisabled?: boolean;
   sessionReusePolicy: "task_main" | "same_stage" | "always_new";
   onAutoAdvanceChange: () => void;
-  onPlanModeChange: () => void;
   onSessionReusePolicyChange: (policy: "task_main" | "same_stage" | "always_new") => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -704,7 +691,6 @@ function StageOptionsMenu({
       {open ? (
         <div style={stageMenuStyle}>
           <MenuCheckRow checked={autoAdvance} label="自动进入下一阶段" onClick={onAutoAdvanceChange} />
-          <MenuCheckRow checked={planMode} label="Plan 模式" disabled={!isAgent || planModeDisabled} onClick={onPlanModeChange} />
           <div style={menuDividerStyle} />
           <button
             type="button"
