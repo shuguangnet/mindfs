@@ -1057,6 +1057,67 @@ func TestCompletingAdmittedTaskSchedulesNextQueuedTask(t *testing.T) {
 	}
 }
 
+func TestAgentStageAllowsBlankModel(t *testing.T) {
+	ctx := context.Background()
+	root := fs.NewRootInfo("root", "root", t.TempDir())
+	store := NewTemplateStoreAt(t.TempDir())
+	svc := NewService(store, testRoots{root: root})
+	runner := &fakeRunner{}
+	svc.SetRunner(runner)
+	tmpl, err := store.SaveTaskTemplate(TaskTemplate{
+		Name: "Default Model Flow",
+		Stages: []TaskTemplateStage{{
+			Position: 0,
+			Snapshot: StageTemplate{
+				Name:        "Describe",
+				Role:        RoleUser,
+				AutoAdvance: true,
+			},
+		}, {
+			Position: 1,
+			Snapshot: StageTemplate{
+				Name:               "Fix",
+				Role:               RoleAgent,
+				Agent:              "codex",
+				SessionReusePolicy: SessionReuseTaskMain,
+				PromptTemplate:     "Fix this:\n{previous_input}",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SaveTaskTemplate: %v", err)
+	}
+	detail, err := svc.CreateTask(ctx, CreateTaskInput{RootID: root.ID, TaskTemplateID: tmpl.ID, Input: "use defaults"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runner.mu.Lock()
+		execCount := len(runner.execs)
+		model := ""
+		if execCount > 0 {
+			model = runner.execs[0].Stage.Model
+		}
+		runner.mu.Unlock()
+		if execCount > 0 {
+			if model != "" {
+				t.Fatalf("execution model = %q, want empty", model)
+			}
+			return
+		}
+		detail, err = svc.GetTask(ctx, root.ID, detail.Task.ID)
+		if err != nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		if detail.Task.AuxFlags.SessionError != "" {
+			t.Fatalf("session error = %q", detail.Task.AuxFlags.SessionError)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("agent stage did not start")
+}
+
 func TestRunNowBypassesConcurrencySlot(t *testing.T) {
 	ctx := context.Background()
 	root := fs.NewRootInfo("root", "root", t.TempDir())

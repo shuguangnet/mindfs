@@ -100,14 +100,6 @@ function toFastService(value?: string): "" | "on" | "off" {
   return value === "on" || value === "off" ? value : "";
 }
 
-function agentDefaults(agent?: AgentStatus | null) {
-  return {
-    model: agent?.default_model_id || agent?.current_model_id || "",
-    effort: agent?.default_effort || "",
-    fastService: (agent?.default_fast_service || "") as "" | "on" | "off",
-  };
-}
-
 export function TaskTemplateDialog({ open, agents, template, onClose, onSaved }: TaskTemplateDialogProps) {
   const { t } = useI18n();
   const [stageTemplates, setStageTemplates] = useState<StageTemplate[]>([]);
@@ -407,26 +399,24 @@ export function TaskTemplateDialog({ open, agents, template, onClose, onSaved }:
                     onUserClick={() => updateStage(index, { ...blankUserStage(), name: snapshot.name || "" })}
                     onAgentActivate={() => {
                       const status = agents.find((item) => item.name === (snapshot.agent || "codex")) || agents[0] || null;
-                      const defaults = agentDefaults(status);
                       updateStage(index, {
                         ...blankAgentStage(),
                         name: snapshot.name || "",
                         agent: status?.name || snapshot.agent || "codex",
-                        model: snapshot.model || defaults.model,
-                        effort: snapshot.effort || defaults.effort,
-                        fast_service: snapshot.fast_service || defaults.fastService,
+                        model: snapshot.model || "",
+                        effort: snapshot.effort || "",
+                        fast_service: snapshot.fast_service || "",
                         ...(status?.protocol === "acp" ? { plan_mode: false } : {}),
                       });
                     }}
                     onAgentChange={(agent, model) => {
                       const status = agents.find((item) => item.name === agent) || null;
-                      const defaults = agentDefaults(status);
                       updateStage(index, {
                         agent,
-                        model: model || defaults.model,
+                        model: model || "",
                         mode: status?.current_mode_id || "",
-                        effort: defaults.effort,
-                        fast_service: defaults.fastService,
+                        effort: "",
+                        fast_service: "",
                         ...(status?.protocol === "acp" ? { plan_mode: false } : {}),
                       });
                     }}

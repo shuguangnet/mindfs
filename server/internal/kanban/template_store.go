@@ -70,9 +70,6 @@ func (s *TemplateStore) SaveStageTemplate(in StageTemplate) (StageTemplate, erro
 		if strings.TrimSpace(in.Agent) == "" {
 			return StageTemplate{}, errors.New("agent stage requires agent")
 		}
-		if strings.TrimSpace(in.Model) == "" {
-			return StageTemplate{}, errors.New("agent stage requires model")
-		}
 	}
 	if in.ID == "" {
 		in.ID = newID("stage")
@@ -188,9 +185,6 @@ func (s *TemplateStore) SaveTaskTemplate(in TaskTemplate) (TaskTemplate, error) 
 		if in.Stages[i].Snapshot.Role == RoleAgent {
 			if strings.TrimSpace(in.Stages[i].Snapshot.Agent) == "" {
 				return TaskTemplate{}, errors.New("agent stage requires agent")
-			}
-			if strings.TrimSpace(in.Stages[i].Snapshot.Model) == "" {
-				return TaskTemplate{}, errors.New("agent stage requires model")
 			}
 		}
 	}

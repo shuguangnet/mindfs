@@ -841,9 +841,6 @@ func (s *Service) runAgentStage(ctx context.Context, store *TaskStore, task Task
 	if strings.TrimSpace(stage.Agent) == "" {
 		return s.failTask(ctx, store, task, run.ID, errors.New("agent stage requires agent"))
 	}
-	if strings.TrimSpace(stage.Model) == "" {
-		return s.failTask(ctx, store, task, run.ID, errors.New("agent stage requires model"))
-	}
 	now := time.Now().UTC()
 	values := s.promptValues(ctx, store, task, tmpl, stage, run)
 	prompt := BuildAgentPrompt(stage.PromptTemplate, values, TaskControlPromptContext{
