@@ -2,6 +2,7 @@ package kanban
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -63,6 +64,92 @@ func (r *fakeRunner) RunAgentStage(ctx context.Context, exec AgentStageExecution
 }
 
 func (r *fakeRunner) TaskUpdated(rootID string, detail TaskDetail) {}
+
+func TestTaskTemplateStoreSeedsBundledTemplatesWhenUserFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	bundledPath := filepath.Join(t.TempDir(), taskTemplateFile)
+	bundled := []TaskTemplate{{
+		ID:             "tmpl_default",
+		Name:           "Default task",
+		MaxConcurrency: 2,
+		Stages: []TaskTemplateStage{{
+			ID:       "stage_default",
+			Position: 0,
+			Snapshot: StageTemplate{
+				ID:   "stage_user",
+				Name: "Describe",
+				Role: RoleUser,
+			},
+		}},
+	}}
+	data, err := json.MarshalIndent(bundled, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal bundled templates: %v", err)
+	}
+	if err := os.WriteFile(bundledPath, append(data, '\n'), 0o644); err != nil {
+		t.Fatalf("write bundled templates: %v", err)
+	}
+
+	previous := bundledTaskTemplatePaths
+	bundledTaskTemplatePaths = func() []string { return []string{bundledPath} }
+	defer func() { bundledTaskTemplatePaths = previous }()
+
+	store := NewTemplateStoreAt(dir)
+	items, err := store.ListTaskTemplates()
+	if err != nil {
+		t.Fatalf("ListTaskTemplates: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "tmpl_default" {
+		t.Fatalf("templates = %#v, want bundled default", items)
+	}
+	if _, err := os.Stat(filepath.Join(dir, taskTemplateFile)); err != nil {
+		t.Fatalf("user task template file not seeded: %v", err)
+	}
+}
+
+func TestTaskTemplateStoreDoesNotSeedWhenUserFileExists(t *testing.T) {
+	cases := []struct {
+		name     string
+		contents string
+		wantFile string
+	}{
+		{name: "empty array", contents: "[]\n", wantFile: "[]"},
+		{name: "empty file", contents: "", wantFile: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, taskTemplateFile), []byte(tc.contents), 0o644); err != nil {
+				t.Fatalf("write user templates: %v", err)
+			}
+			bundledPath := filepath.Join(t.TempDir(), taskTemplateFile)
+			if err := os.WriteFile(bundledPath, []byte(`[{"id":"tmpl_default","name":"Default task","max_concurrency":1,"stages":[{"id":"stage_default","position":0,"snapshot":{"id":"stage_user","name":"Describe","role":"user"}}]}]`), 0o644); err != nil {
+				t.Fatalf("write bundled templates: %v", err)
+			}
+
+			previous := bundledTaskTemplatePaths
+			bundledTaskTemplatePaths = func() []string { return []string{bundledPath} }
+			defer func() { bundledTaskTemplatePaths = previous }()
+
+			store := NewTemplateStoreAt(dir)
+			items, err := store.ListTaskTemplates()
+			if err != nil {
+				t.Fatalf("ListTaskTemplates: %v", err)
+			}
+			if len(items) != 0 {
+				t.Fatalf("templates = %#v, want no seed", items)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, taskTemplateFile))
+			if err != nil {
+				t.Fatalf("read user templates: %v", err)
+			}
+			if got := strings.TrimSpace(string(data)); got != tc.wantFile {
+				t.Fatalf("user file = %q, want %q", got, tc.wantFile)
+			}
+		})
+	}
+}
 
 func TestTemplateStoreJSONAndFirstStageValidation(t *testing.T) {
 	dir := t.TempDir()
