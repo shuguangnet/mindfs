@@ -105,6 +105,9 @@ type FileTreeProps = {
   onSelectFile?: (entry: FileEntry, rootId: string) => void;
   onSelectRoot?: (entry: FileEntry, rootId: string) => void;
   onToggleDir?: (entry: FileEntry, rootId: string) => void;
+  onCreateDirectory?: () => void;
+  onDeleteDirectory?: () => void;
+  canDeleteDirectory?: boolean;
   renderRootExtraContent?: (rootId: string) => React.ReactNode;
   renderRootWorktreeContent?: (rootId: string) => React.ReactNode;
   renderRootRelatedContent?: (rootId: string) => React.ReactNode;
@@ -439,6 +442,16 @@ function TrashIcon() {
       <path d="M19 6l-1 14H6L5 6" />
       <path d="M10 11v5" />
       <path d="M14 11v5" />
+    </svg>
+  );
+}
+
+function FolderPlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <path d="M12 10v6" />
+      <path d="M9 13h6" />
     </svg>
   );
 }
@@ -1018,6 +1031,9 @@ export function FileTree({
   onSelectFile,
   onSelectRoot,
   onToggleDir,
+  onCreateDirectory,
+  onDeleteDirectory,
+  canDeleteDirectory = false,
   renderRootExtraContent,
   renderRootWorktreeContent,
   renderRootRelatedContent,
@@ -2156,6 +2172,36 @@ export function FileTree({
                 zIndex: 20,
               }}
             >
+                <button
+                  type="button"
+                  disabled={!rootId || projectTreeTab !== "files"}
+                  onClick={() => {
+                    onCreateDirectory?.();
+                    setIsMenuOpen(false);
+                  }}
+                  style={fileTreeMenuButtonStyle}
+                >
+                  <FolderPlusIcon />
+                  <span>新建文件夹</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!canDeleteDirectory || projectTreeTab !== "files"}
+                  onClick={() => {
+                    onDeleteDirectory?.();
+                    setIsMenuOpen(false);
+                  }}
+                  style={{
+                    ...fileTreeMenuButtonStyle,
+                    color: canDeleteDirectory && projectTreeTab === "files" ? "#dc2626" : "var(--text-secondary)",
+                    cursor: canDeleteDirectory && projectTreeTab === "files" ? "pointer" : "not-allowed",
+                    opacity: canDeleteDirectory && projectTreeTab === "files" ? 1 : 0.5,
+                  }}
+                >
+                  <TrashIcon />
+                  <span>删除文件夹</span>
+                </button>
+                <div style={{ height: "1px", background: "var(--border-color)", margin: "6px 4px" }} />
                 <button
                   type="button"
                   onClick={() => {

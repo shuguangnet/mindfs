@@ -1,4 +1,5 @@
 import { appURL } from "./base";
+import { protectedJSON } from "./api";
 import { e2eeService } from "./e2ee";
 
 export type ReadMode = "full" | "incremental";
@@ -19,6 +20,28 @@ export type FilePayload = {
   targetLine?: number;
   targetColumn?: number;
 };
+
+export async function createDirectory(params: {
+  rootId: string;
+  parent: string;
+  name: string;
+}): Promise<{ path: string }> {
+  return protectedJSON<{ path: string }>(appURL("/api/directories"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ root_id: params.rootId, parent: params.parent, name: params.name }),
+  });
+}
+
+export async function deleteDirectory(params: {
+  rootId: string;
+  path: string;
+}): Promise<{ path: string; parent: string }> {
+  return protectedJSON<{ path: string; parent: string }>(
+    appURL("/api/directories", new URLSearchParams({ root: params.rootId, path: params.path })),
+    { method: "DELETE" },
+  );
+}
 
 type FetchFileParams = {
   rootId: string;

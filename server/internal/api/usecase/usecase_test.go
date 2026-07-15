@@ -56,6 +56,146 @@ func TestListTreeMissingRegularDirReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestCreateDirectoryCreatesChild(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(rootDir, "docs"), 0o755); err != nil {
+		t.Fatalf("Mkdir docs: %v", err)
+	}
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	service := Service{Registry: uploadTestRegistry{root: root}}
+
+	out, err := service.CreateDirectory(context.Background(), CreateDirectoryInput{
+		RootID: root.ID,
+		Parent: "docs",
+		Name:   "guides",
+	})
+	if err != nil {
+		t.Fatalf("CreateDirectory returned error: %v", err)
+	}
+	if out.Path != "docs/guides" {
+		t.Fatalf("path = %q, want docs/guides", out.Path)
+	}
+	info, err := os.Stat(filepath.Join(rootDir, "docs", "guides"))
+	if err != nil || !info.IsDir() {
+		t.Fatalf("created directory stat = %v, %v", info, err)
+	}
+}
+
+func TestCreateDirectoryRejectsInvalidNameAndSymlinkEscape(t *testing.T) {
+	rootDir := t.TempDir()
+	outside := t.TempDir()
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	service := Service{Registry: uploadTestRegistry{root: root}}
+
+	if _, err := service.CreateDirectory(context.Background(), CreateDirectoryInput{
+		RootID: root.ID,
+		Parent: ".",
+		Name:   "../escape",
+	}); err == nil {
+		t.Fatal("CreateDirectory accepted path separator in name")
+	}
+	if err := os.Symlink(outside, filepath.Join(rootDir, "outside")); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
+	if _, err := service.CreateDirectory(context.Background(), CreateDirectoryInput{
+		RootID: root.ID,
+		Parent: "outside",
+		Name:   "escaped",
+	}); err == nil {
+		t.Fatal("CreateDirectory followed parent symlink outside root")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "escaped")); !os.IsNotExist(err) {
+		t.Fatalf("outside directory was created, stat err = %v", err)
+	}
+}
+
+func TestDeleteDirectoryRecursivelyAndProtectsRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	target := filepath.Join(rootDir, "build", "cache")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("MkdirAll target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "data.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	service := Service{Registry: uploadTestRegistry{root: root}}
+
+	out, err := service.DeleteDirectory(context.Background(), DeleteDirectoryInput{
+		RootID: root.ID,
+		Path:   "build",
+	})
+	if err != nil {
+		t.Fatalf("DeleteDirectory returned error: %v", err)
+	}
+	if out.Path != "build" || out.Parent != "." {
+		t.Fatalf("output = %#v", out)
+	}
+	if _, err := os.Stat(filepath.Join(rootDir, "build")); !os.IsNotExist(err) {
+		t.Fatalf("deleted directory still exists, stat err = %v", err)
+	}
+	if _, err := service.DeleteDirectory(context.Background(), DeleteDirectoryInput{
+		RootID: root.ID,
+		Path:   ".",
+	}); err == nil {
+		t.Fatal("DeleteDirectory accepted work directory root")
+	}
+	if _, err := os.Stat(rootDir); err != nil {
+		t.Fatalf("work directory root was removed: %v", err)
+	}
+}
+
+func TestDeleteDirectoryRemovesSymlinkOnly(t *testing.T) {
+	rootDir := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "keep.txt")
+	if err := os.WriteFile(outsideFile, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("WriteFile outside: %v", err)
+	}
+	linkPath := filepath.Join(rootDir, "linked")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	service := Service{Registry: uploadTestRegistry{root: root}}
+
+	if _, err := service.DeleteDirectory(context.Background(), DeleteDirectoryInput{
+		RootID: root.ID,
+		Path:   "linked",
+	}); err != nil {
+		t.Fatalf("DeleteDirectory symlink returned error: %v", err)
+	}
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Fatalf("symlink still exists, lstat err = %v", err)
+	}
+	if data, err := os.ReadFile(outsideFile); err != nil || string(data) != "keep" {
+		t.Fatalf("outside target changed: data=%q err=%v", data, err)
+	}
+}
+
+func TestDeleteDirectoryRejectsSymlinkAncestor(t *testing.T) {
+	rootDir := t.TempDir()
+	realDir := filepath.Join(rootDir, "real")
+	if err := os.MkdirAll(filepath.Join(realDir, "child"), 0o755); err != nil {
+		t.Fatalf("MkdirAll real child: %v", err)
+	}
+	if err := os.Symlink(realDir, filepath.Join(rootDir, "alias")); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
+	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)
+	service := Service{Registry: uploadTestRegistry{root: root}}
+
+	if _, err := service.DeleteDirectory(context.Background(), DeleteDirectoryInput{
+		RootID: root.ID,
+		Path:   "alias/child",
+	}); err == nil {
+		t.Fatal("DeleteDirectory followed a symbolic-link ancestor")
+	}
+	if info, err := os.Stat(filepath.Join(realDir, "child")); err != nil || !info.IsDir() {
+		t.Fatalf("real child changed: info=%v err=%v", info, err)
+	}
+}
+
 func TestSaveUploadedFilesDefaultsToAttachmentDirAndRenamesConflicts(t *testing.T) {
 	rootDir := t.TempDir()
 	root := rootfs.NewRootInfo("mindfs", "mindfs", rootDir)

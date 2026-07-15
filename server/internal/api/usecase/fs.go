@@ -27,6 +27,26 @@ type ListTreeOutput struct {
 	Entries []fs.Entry
 }
 
+type CreateDirectoryInput struct {
+	RootID string
+	Parent string
+	Name   string
+}
+
+type CreateDirectoryOutput struct {
+	Path string
+}
+
+type DeleteDirectoryInput struct {
+	RootID string
+	Path   string
+}
+
+type DeleteDirectoryOutput struct {
+	Path   string
+	Parent string
+}
+
 type OpenFileRawInput struct {
 	RootID string
 	Path   string
@@ -81,6 +101,159 @@ func (s *Service) ListTree(_ context.Context, in ListTreeInput) (ListTreeOutput,
 		return ListTreeOutput{}, err
 	}
 	return ListTreeOutput{Entries: entries}, nil
+}
+
+func (s *Service) CreateDirectory(_ context.Context, in CreateDirectoryInput) (CreateDirectoryOutput, error) {
+	if err := s.ensureRegistry(); err != nil {
+		return CreateDirectoryOutput{}, err
+	}
+	root, err := s.Registry.GetRoot(strings.TrimSpace(in.RootID))
+	if err != nil {
+		return CreateDirectoryOutput{}, err
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return CreateDirectoryOutput{}, errors.New("directory name required")
+	}
+	if name == "." || name == ".." || filepath.Base(name) != name || strings.ContainsAny(name, `/\\`) {
+		return CreateDirectoryOutput{}, errors.New("directory name must be a single path component")
+	}
+	parent := strings.TrimSpace(in.Parent)
+	if parent == "" {
+		parent = "."
+	} else {
+		parent, err = root.NormalizePath(parent)
+		if err != nil {
+			return CreateDirectoryOutput{}, err
+		}
+	}
+	parentAbs, err := safeExistingDirectory(root, parent)
+	if err != nil {
+		return CreateDirectoryOutput{}, err
+	}
+	targetAbs := filepath.Join(parentAbs, name)
+	if err := os.Mkdir(targetAbs, 0o755); err != nil {
+		return CreateDirectoryOutput{}, apperr.Wrap("mkdir", targetAbs, err)
+	}
+	rel, err := root.NormalizePath(targetAbs)
+	if err != nil {
+		_ = os.Remove(targetAbs)
+		return CreateDirectoryOutput{}, err
+	}
+	return CreateDirectoryOutput{Path: rel}, nil
+}
+
+func (s *Service) DeleteDirectory(_ context.Context, in DeleteDirectoryInput) (DeleteDirectoryOutput, error) {
+	if err := s.ensureRegistry(); err != nil {
+		return DeleteDirectoryOutput{}, err
+	}
+	root, err := s.Registry.GetRoot(strings.TrimSpace(in.RootID))
+	if err != nil {
+		return DeleteDirectoryOutput{}, err
+	}
+	rawPath := strings.TrimSpace(in.Path)
+	if rawPath == "" {
+		return DeleteDirectoryOutput{}, errors.New("directory path required")
+	}
+	relPath, err := root.NormalizePath(rawPath)
+	if err != nil {
+		return DeleteDirectoryOutput{}, err
+	}
+	if relPath == "." || relPath == "" {
+		return DeleteDirectoryOutput{}, errors.New("work directory root cannot be deleted")
+	}
+	rootAbs, err := root.RootDir()
+	if err != nil {
+		return DeleteDirectoryOutput{}, err
+	}
+	if err := rejectSymlinkAncestors(rootAbs, relPath); err != nil {
+		return DeleteDirectoryOutput{}, err
+	}
+	targetAbs := filepath.Join(rootAbs, filepath.FromSlash(relPath))
+	info, err := os.Lstat(targetAbs)
+	if err != nil {
+		return DeleteDirectoryOutput{}, apperr.Wrap("stat", targetAbs, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(targetAbs); err != nil {
+			return DeleteDirectoryOutput{}, apperr.Wrap("remove", targetAbs, err)
+		}
+		return DeleteDirectoryOutput{Path: relPath, Parent: parentDir(relPath)}, nil
+	}
+	if !info.IsDir() {
+		return DeleteDirectoryOutput{}, errors.New("path is not a directory")
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(targetAbs)
+	if err != nil {
+		return DeleteDirectoryOutput{}, apperr.Wrap("resolve", targetAbs, err)
+	}
+	if err := ensurePathWithinRoot(rootAbs, resolvedTarget); err != nil {
+		return DeleteDirectoryOutput{}, err
+	}
+	if err := os.RemoveAll(targetAbs); err != nil {
+		return DeleteDirectoryOutput{}, apperr.Wrap("remove", targetAbs, err)
+	}
+	return DeleteDirectoryOutput{Path: relPath, Parent: parentDir(relPath)}, nil
+}
+
+func safeExistingDirectory(root fs.RootInfo, relPath string) (string, error) {
+	rootAbs, err := root.RootDir()
+	if err != nil {
+		return "", err
+	}
+	if err := rejectSymlinkAncestors(rootAbs, filepath.ToSlash(filepath.Join(relPath, "child"))); err != nil {
+		return "", err
+	}
+	targetAbs := filepath.Join(rootAbs, filepath.FromSlash(relPath))
+	resolved, err := filepath.EvalSymlinks(targetAbs)
+	if err != nil {
+		return "", apperr.Wrap("resolve", targetAbs, err)
+	}
+	if err := ensurePathWithinRoot(rootAbs, resolved); err != nil {
+		return "", err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", apperr.Wrap("stat", resolved, err)
+	}
+	if !info.IsDir() {
+		return "", errors.New("parent path is not a directory")
+	}
+	return resolved, nil
+}
+
+func rejectSymlinkAncestors(rootPath, relPath string) error {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(filepath.FromSlash(relPath))), "/")
+	current := filepath.Clean(rootPath)
+	for index, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		if index == len(parts)-1 {
+			break
+		}
+		current = filepath.Join(current, filepath.FromSlash(part))
+		info, err := os.Lstat(current)
+		if err != nil {
+			return apperr.Wrap("stat", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("directory path must not traverse symbolic links")
+		}
+	}
+	return nil
+}
+
+func ensurePathWithinRoot(rootPath, targetPath string) error {
+	resolvedRoot, err := filepath.EvalSymlinks(rootPath)
+	if err != nil {
+		return apperr.Wrap("resolve", rootPath, err)
+	}
+	rel, err := filepath.Rel(filepath.Clean(resolvedRoot), filepath.Clean(targetPath))
+	if err != nil || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("path outside root")
+	}
+	return nil
 }
 
 func isOptionalPluginDir(dir string) bool {

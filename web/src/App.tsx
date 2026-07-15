@@ -36,6 +36,8 @@ import {
 } from "./services/api";
 import { reportError } from "./services/error";
 import {
+  createDirectory,
+  deleteDirectory,
   fetchFile,
   clearFileCacheForRoot,
   getCachedFile,
@@ -4169,6 +4171,51 @@ export function App({ onGoHome }: AppProps) {
     },
     [normalizeTreeResponse, treeCacheKey],
   );
+
+  const handleCreateDirectory = useCallback(async () => {
+    const rootID = currentRootIdRef.current;
+    if (!rootID) return;
+    const selected = selectedDirRef.current;
+    const parent = !selected || selected === rootID ? "." : selected;
+    const rawName = window.prompt(`在 ${parent === "." ? "工作目录根目录" : parent} 中新建文件夹`, "");
+    if (rawName === null) return;
+    const name = rawName.trim();
+    if (!name) {
+      reportError("file.write_failed", "文件夹名称不能为空");
+      return;
+    }
+    try {
+      await createDirectory({ rootId: rootID, parent, name });
+      invalidTreeCacheKeysRef.current.add(treeCacheKey(rootID, parent));
+      await refreshTreeDir(rootID, parent, parent === "." || selected === parent);
+      const parentKey = parent === "." ? rootID : `${rootID}:${parent}`;
+      setExpanded((prev) => prev.includes(parentKey) ? prev : [...prev, parentKey]);
+    } catch (error) {
+      reportError("file.write_failed", error instanceof Error ? error.message : "新建文件夹失败");
+    }
+  }, [refreshTreeDir, treeCacheKey]);
+
+  const handleDeleteDirectory = useCallback(async () => {
+    const rootID = currentRootIdRef.current;
+    const selected = selectedDirRef.current;
+    if (!rootID || !selected || selected === rootID || selected === ".") return;
+    if (!window.confirm(`确定递归删除文件夹“${selected}”及其中的所有内容吗？此操作无法撤销。`)) return;
+    try {
+      const result = await deleteDirectory({ rootId: rootID, path: selected });
+      const deletedPrefix = `${rootID}:${result.path}`;
+      setExpanded((prev) => prev.filter((key) => key !== deletedPrefix && !key.startsWith(`${deletedPrefix}/`)));
+      setEntriesByPath((prev) => Object.fromEntries(
+        Object.entries(prev).filter(([key]) => key !== deletedPrefix && !key.startsWith(`${deletedPrefix}/`)),
+      ));
+      invalidTreeCacheKeysRef.current.add(treeCacheKey(rootID, result.parent));
+      await refreshTreeDir(rootID, result.parent, true);
+      const parentSelection = result.parent === "." ? rootID : result.parent;
+      setSelectedDir(parentSelection);
+      setSelectedDirKey(result.parent === "." ? rootID : `${rootID}:${result.parent}`);
+    } catch (error) {
+      reportError("file.write_failed", error instanceof Error ? error.message : "删除文件夹失败");
+    }
+  }, [refreshTreeDir, treeCacheKey]);
 
   const refreshCurrentFileContent = useCallback(
     async (rootID: string, changedPath: string) => {
@@ -13032,6 +13079,13 @@ export function App({ onGoHome }: AppProps) {
                 isRoot: e.is_root === true,
               })
             }
+            onCreateDirectory={() => {
+              void handleCreateDirectory();
+            }}
+            onDeleteDirectory={() => {
+              void handleDeleteDirectory();
+            }}
+            canDeleteDirectory={!!selectedDir && selectedDir !== currentRootId && selectedDir !== "."}
             renderRootExtraContent={renderRootGitContent}
             renderRootWorktreeContent={renderRootWorktreeContent}
             renderRootRelatedContent={renderRootRelatedContent}

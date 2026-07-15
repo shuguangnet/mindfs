@@ -281,6 +281,8 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/", h.handleFrontend)
 	r.Get("/health", h.handleHealth)
 	r.Get("/api/tree", h.protectedEndpoint(h.handleTree))
+	r.Post("/api/directories", h.protectedEndpoint(h.handleDirectoryCreate))
+	r.Delete("/api/directories", h.protectedEndpoint(h.handleDirectoryDelete))
 	r.Get("/api/file", h.handleFile)
 	r.Get("/api/git/status", h.protectedEndpoint(h.handleGitStatus))
 	r.Get("/api/git/diff", h.protectedEndpoint(h.handleGitDiff))
@@ -1548,6 +1550,40 @@ func (h *HTTPHandler) handleTree(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{
 		"entries": out.Entries,
 	})
+}
+
+func (h *HTTPHandler) handleDirectoryCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RootID string `json:"root_id"`
+		Parent string `json:"parent"`
+		Name   string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json body"))
+		return
+	}
+	out, err := h.service().CreateDirectory(r.Context(), usecase.CreateDirectoryInput{
+		RootID: req.RootID,
+		Parent: req.Parent,
+		Name:   req.Name,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]any{"path": out.Path})
+}
+
+func (h *HTTPHandler) handleDirectoryDelete(w http.ResponseWriter, r *http.Request) {
+	out, err := h.service().DeleteDirectory(r.Context(), usecase.DeleteDirectoryInput{
+		RootID: r.URL.Query().Get("root"),
+		Path:   r.URL.Query().Get("path"),
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"path": out.Path, "parent": out.Parent})
 }
 
 func (h *HTTPHandler) handleFile(w http.ResponseWriter, r *http.Request) {
