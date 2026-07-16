@@ -7,6 +7,7 @@ import { registerServiceWorker } from "./registerServiceWorker";
 import { applyAppearanceMode, getAppearanceMode } from "./services/appearance";
 import { isHarmonyRuntime, isNativeShellRuntime } from "./services/runtime";
 import { Login } from "./components/Login";
+import { I18nProvider, translateNow } from "./i18n";
 import { MindFSAntdProvider } from "./theme/AntdProvider";
 
 applyAppearanceMode();

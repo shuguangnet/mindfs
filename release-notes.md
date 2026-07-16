@@ -1,3 +1,9 @@
+# MindFS v0.4.12
+
+## 优化和修复
+- 修复 v0.4.11 合并国际化支持时遗漏 `I18nProvider` 和 `translateNow` 导入，导致 Web 页面启动时报错并显示空白的问题
+
+
 # MindFS v0.4.11
 
 ## 新功能

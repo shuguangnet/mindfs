@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Button, Drawer, Layout, Tooltip } from "antd";
+import { useI18n } from "../i18n";
 
 const { Content, Footer, Sider } = Layout;
 

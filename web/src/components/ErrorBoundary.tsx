@@ -1,5 +1,6 @@
 import React, { Component, type ReactNode } from "react";
 import { Button, Card, Result } from "antd";
+import { translateNow, useI18n } from "../i18n";
 
 type ErrorBoundaryProps = {
   children: ReactNode;

@@ -160,7 +160,7 @@ class ErrorService {
         recoverable: true,
       },
       "session.slash_command_failed": {
-        message: "斜杠命令执行失败",
+        messageKey: "error.session.slashCommandFailed",
         severity: "error",
         recoverable: true,
       },

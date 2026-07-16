@@ -2613,7 +2613,7 @@ export function FileTree({
                 >
                   <span style={{ flex: 1 }}>{t("appearance.title")}</span>
                   <span style={{ color: "var(--text-secondary)", fontSize: "11px" }}>
-                    {t(APPEARANCE_OPTIONS.find((option) => option.value === appearanceMode)?.labelKey || "appearance.system")}
+                    {APPEARANCE_OPTIONS.find((option) => option.value === appearanceMode)?.label || t("appearance.system")}
                   </span>
                   <ChevronRight isOpen={isAppearanceMenuOpen} />
                 </button>
@@ -2646,7 +2646,7 @@ export function FileTree({
                         fontSize: "12px",
                       }}
                     >
-                      <span>{t(option.labelKey)}</span>
+                      <span>{option.label}</span>
                       <span style={{ fontSize: "11px", opacity: active ? 1 : 0 }}>✓</span>
                     </button>
                   );

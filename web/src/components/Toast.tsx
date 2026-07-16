@@ -98,6 +98,7 @@ type ToastProps = {
 };
 
 function Toast({ error, onClose, onRetry }: ToastProps): React.ReactElement {
+  const { t } = useI18n();
   const type =
     error.severity === "error"
       ? "error"
@@ -113,7 +114,7 @@ function Toast({ error, onClose, onRetry }: ToastProps): React.ReactElement {
       showIcon
       closable
       onClose={onClose}
-      message={error.message}
+      message={message}
       description={error.code || undefined}
       action={
         onRetry ? (

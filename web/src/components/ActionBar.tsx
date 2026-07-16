@@ -1162,8 +1162,8 @@ export function ActionBar({
   const inputPlaceholder = currentSession && !currentSession.pending
     ? t("action.placeholder.newSessionSwipe")
     : mode === "chat" && !isFocused
-      ? blurPlaceholder
-      : modePlaceholders[mode];
+      ? t(blurPlaceholderKey)
+      : t(modePlaceholderKeys[mode]);
   const editorRightInset = isMultiLine
     ? 14
     : mode === "command"

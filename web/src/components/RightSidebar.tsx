@@ -1,5 +1,6 @@
 import React from "react";
 import { Layout, Typography } from "antd";
+import { useI18n } from "../i18n";
 
 const { Content, Header } = Layout;
 const { Text } = Typography;

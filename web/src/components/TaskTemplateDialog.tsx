@@ -428,6 +428,7 @@ export function TaskTemplateDialog({ open, agents, template, onClose, onSaved }:
                     }}
                     onAgentChange={(agent) => {
                       const status = agents.find((item) => item.name === agent) || null;
+                      const defaults = agentDefaults(status);
                       updateStage(index, {
                         agent,
                         model: defaults.model,
