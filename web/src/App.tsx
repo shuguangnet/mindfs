@@ -83,7 +83,7 @@ import {
   type DirectorySortMode,
   type FileEntry,
 } from "./services/directorySort";
-import { uploadFiles } from "./services/upload";
+import { isUploadAbortError, uploadFiles, type UploadProgress } from "./services/upload";
 import {
   PluginManager,
   loadAllPlugins,
@@ -113,6 +113,7 @@ import { ExternalSessionList } from "./components/ExternalSessionList";
 import { AgentIcon } from "./components/AgentIcon";
 import { AgentMenuList } from "./components/AgentMenuList";
 import { ActionBar } from "./components/ActionBar";
+import { CompactUploadProgress } from "./components/CompactUploadProgress";
 import { ToastContainer } from "./components/Toast";
 import { BottomSheet } from "./components/BottomSheet";
 import { ScheduledAgentTaskDialog } from "./components/ScheduledAgentTaskDialog";
@@ -1552,6 +1553,8 @@ export function App({ onGoHome }: AppProps) {
   const [taskInlineCandidates, setTaskInlineCandidates] = useState<CandidateItem[]>([]);
   const [taskInlineCandidateIndex, setTaskInlineCandidateIndex] = useState(0);
   const [taskInlineSaving, setTaskInlineSaving] = useState(false);
+  const [taskInlineUploadProgress, setTaskInlineUploadProgress] = useState<UploadProgress | null>(null);
+  const [directoryUploadProgress, setDirectoryUploadProgress] = useState<UploadProgress | null>(null);
   const [taskWorktreeBranches, setTaskWorktreeBranches] = useState<GitBranchesPayload>({ branches: [] });
   const [taskWorktreeBranchesLoading, setTaskWorktreeBranchesLoading] = useState(false);
   const [taskWorktreeBranchError, setTaskWorktreeBranchError] = useState("");
@@ -1562,6 +1565,8 @@ export function App({ onGoHome }: AppProps) {
   const [taskCreateTemplateMenuOpen, setTaskCreateTemplateMenuOpen] = useState(false);
   const taskInlineEditorRef = useRef<TokenEditorHandle | null>(null);
   const taskInlineAttachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const taskInlineUploadAbortRef = useRef<AbortController | null>(null);
+  const directoryUploadAbortRef = useRef<AbortController | null>(null);
   const knownTaskWorktreePathsRef = useRef<Set<string>>(new Set());
   const [selectedSession, setSelectedSession] = useState<SessionItem | null>(
     null,
@@ -2005,6 +2010,9 @@ export function App({ onGoHome }: AppProps) {
     setTaskInlineCandidates([]);
     setTaskInlineCandidateIndex(0);
     setTaskInlineSaving(false);
+    setTaskInlineUploadProgress(null);
+    taskInlineUploadAbortRef.current?.abort();
+    taskInlineUploadAbortRef.current = null;
   }, []);
 
   const applyTaskInlineCandidate = useCallback((candidate: CandidateItem) => {
@@ -2115,12 +2123,17 @@ export function App({ onGoHome }: AppProps) {
     const rootId = currentRootIdRef.current;
     if (!edit || !rootId) return;
     setTaskInlineSaving(true);
+    setTaskInlineUploadProgress(null);
     try {
       let attachmentTokens = "";
       if (edit.attachments.length > 0) {
+        const uploadAbort = new AbortController();
+        taskInlineUploadAbortRef.current = uploadAbort;
         const uploaded = await uploadFiles({
           rootId,
           files: edit.attachments.map((attachment) => attachment.file),
+          onProgress: setTaskInlineUploadProgress,
+          signal: uploadAbort.signal,
         });
         attachmentTokens = uploaded.map((file) => `[read file: ${file.path}]`).join("\n");
       }
@@ -2143,8 +2156,12 @@ export function App({ onGoHome }: AppProps) {
       }
       closeTaskEditDialog();
     } catch (err) {
-      reportError("file.write_failed", String((err as Error)?.message || t("task.saveFailed")));
+      if (!isUploadAbortError(err)) {
+        reportError("file.write_failed", String((err as Error)?.message || t("task.saveFailed")));
+      }
       setTaskInlineSaving(false);
+      setTaskInlineUploadProgress(null);
+      taskInlineUploadAbortRef.current = null;
     }
   }, [applyTaskDetails, closeTaskEditDialog, taskInlineEdit, t]);
 
@@ -4958,11 +4975,16 @@ export function App({ onGoHome }: AppProps) {
       const targetDir =
         selectedDirPath ||
         (fileRef.current?.path ? dirnameOfPath(fileRef.current.path) : ".");
+      setDirectoryUploadProgress(null);
       try {
+        const uploadAbort = new AbortController();
+        directoryUploadAbortRef.current = uploadAbort;
         const uploaded = await uploadFiles({
           rootId: rootID,
           dir: targetDir,
           files,
+          onProgress: setDirectoryUploadProgress,
+          signal: uploadAbort.signal,
         });
         uploaded.forEach((item) => {
           if (typeof item?.path === "string" && item.path) {
@@ -4985,10 +5007,15 @@ export function App({ onGoHome }: AppProps) {
           ),
         );
       } catch (err) {
-        reportError(
-          "file.write_failed",
-          String((err as Error)?.message || t("file.uploadFailed")),
-        );
+        if (!isUploadAbortError(err)) {
+          reportError(
+            "file.write_failed",
+            String((err as Error)?.message || t("file.uploadFailed")),
+          );
+        }
+      } finally {
+        directoryUploadAbortRef.current = null;
+        setDirectoryUploadProgress(null);
       }
     },
     [refreshTreeDir, t],
@@ -12738,6 +12765,8 @@ export function App({ onGoHome }: AppProps) {
         sortControlValue={currentDirectorySortOverride || "inherit"}
         currentViewMode={currentMainContentView}
         onViewModeChange={handleMainContentViewChange}
+        uploadProgress={directoryUploadProgress}
+        onCancelUpload={() => directoryUploadAbortRef.current?.abort()}
         onSortModeChange={(nextMode) => {
           const rootID = currentRootIdRef.current;
           const nextKey = getDirectorySortKey(rootID, selectedDirRef.current);
@@ -14123,7 +14152,7 @@ export function App({ onGoHome }: AppProps) {
                   <PlusSmallIcon />
                 </button>
               </div>
-              {taskInlineEdit.attachments.length > 0 ? (
+              {taskInlineEdit.attachments.length > 0 || taskInlineUploadProgress ? (
                 <div style={{ marginTop: "10px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
                   {taskInlineEdit.attachments.map((attachment) => attachment.isImage && attachment.previewUrl ? (
                     <div
@@ -14195,6 +14224,13 @@ export function App({ onGoHome }: AppProps) {
                       </button>
                     </span>
                   ))}
+                  <CompactUploadProgress
+                    progress={taskInlineUploadProgress}
+                    label={t("upload.attachmentsProgress")}
+                    statusLabel={t("upload.inProgress")}
+                    cancelLabel={t("upload.cancel")}
+                    onCancel={() => taskInlineUploadAbortRef.current?.abort()}
+                  />
                 </div>
               ) : null}
               <input

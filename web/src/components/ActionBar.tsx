@@ -5,7 +5,7 @@ import { AgentSelector } from "./AgentSelector";
 import { fetchAgents, fetchShells, restartAgent, type AgentStatus, type ShellStatus } from "../services/agents";
 import { fetchCandidates, type CandidateItem } from "../services/candidates";
 import { reportError } from "../services/error";
-import { uploadFiles } from "../services/upload";
+import { isUploadAbortError, uploadFiles, type UploadProgress } from "../services/upload";
 import {
   APPEARANCE_CHANGE_EVENT,
   getAppearanceMode,
@@ -16,6 +16,7 @@ import TokenEditor, {
 } from "./editor/TokenEditor";
 import { renderToolIcon } from "./stream/ToolCallCard";
 import { useI18n, type MessageKey } from "../i18n";
+import { CompactUploadProgress } from "./CompactUploadProgress";
 
 type SessionInfo = {
   key: string;
@@ -425,6 +426,7 @@ export function ActionBar({
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [sending, setSending] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
   const [editingQueueText, setEditingQueueText] = useState("");
@@ -444,6 +446,7 @@ export function ActionBar({
   const candidateItemRefs = useRef<Array<HTMLDivElement | null>>([]);
   const suppressedCommandCandidateTextRef = useRef("");
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const isComposingRef = useRef(false);
   const compositionGuardUntilRef = useRef(0);
   const { isMobile } = useResponsive();
@@ -792,6 +795,7 @@ export function ActionBar({
       }
     }
     setSending(true);
+    setUploadProgress(null);
     setCandidates([]);
     setActiveCandidateIndex(0);
     try {
@@ -801,9 +805,13 @@ export function ActionBar({
           reportError("file.write_failed", t("action.uploadNoProject"));
           return;
         }
+        const uploadAbort = new AbortController();
+        uploadAbortRef.current = uploadAbort;
         const uploaded = await uploadFiles({
           rootId: currentRootId,
           files: pendingAttachments.map((attachment) => attachment.file),
+          onProgress: setUploadProgress,
+          signal: uploadAbort.signal,
         });
         attachmentTokens = uploaded
           .map((file) => `[read file: ${file.path}]`)
@@ -841,9 +849,13 @@ export function ActionBar({
         requestAnimationFrame(() => editorRef.current?.blur());
       }
     } catch (err) {
-      reportError("file.write_failed", String((err as Error)?.message || t("action.uploadFailed")));
+      if (!isUploadAbortError(err)) {
+        reportError("file.write_failed", String((err as Error)?.message || t("action.uploadFailed")));
+      }
     } finally {
+      uploadAbortRef.current = null;
       setSending(false);
+      setUploadProgress(null);
       if (!isMobile) {
         requestAnimationFrame(() => editorRef.current?.focus());
       }
@@ -1689,7 +1701,7 @@ export function ActionBar({
             </span>
           </div>
         ) : null}
-        {pendingAttachments.length > 0 ? (
+        {pendingAttachments.length > 0 || uploadProgress ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: isMobile ? "6px 4px 0" : "0 4px" }}>
             {pendingAttachments.some((attachment) => attachment.isImage) ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: "8px" }}>
@@ -1791,6 +1803,13 @@ export function ActionBar({
                 </button>
               </span>
               ))}
+              <CompactUploadProgress
+                progress={uploadProgress}
+                label={t("upload.attachmentsProgress")}
+                statusLabel={t("upload.inProgress")}
+                cancelLabel={t("upload.cancel")}
+                onCancel={() => uploadAbortRef.current?.abort()}
+              />
             </div>
           </div>
         ) : null}

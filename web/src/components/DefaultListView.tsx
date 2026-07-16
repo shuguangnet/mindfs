@@ -7,7 +7,9 @@ import {
   type FileEntry,
   sortDirectoryEntries,
 } from "../services/directorySort";
+import type { UploadProgress } from "../services/upload";
 import { useI18n, type MessageKey } from "../i18n";
+import { CompactUploadProgress } from "./CompactUploadProgress";
 
 type DirectorySortControlValue = DirectorySortMode | "inherit";
 export type MainContentViewMode = "task-kanban" | "file-browser";
@@ -54,6 +56,8 @@ type DefaultListViewProps = {
   onPathClick?: (path: string) => void;
   onSortModeChange?: (mode: DirectorySortControlValue) => void;
   onUploadFiles?: (files: File[]) => void | Promise<void>;
+  onCancelUpload?: () => void;
+  uploadProgress?: UploadProgress | null;
   onRenameRoot?: (nextName: string) => Promise<boolean> | boolean;
   onRemoveRoot?: () => void;
   isGitRepo?: boolean;
@@ -421,6 +425,8 @@ export function DefaultListView({
   onPathClick,
   onSortModeChange,
   onUploadFiles,
+  onCancelUpload,
+  uploadProgress = null,
   onRenameRoot,
   onRemoveRoot,
   isGitRepo = false,
@@ -572,6 +578,17 @@ export function DefaultListView({
             }}
             onRootRenameCancel={cancelRootRename}
           />
+          {uploadProgress ? (
+          <div style={{ marginLeft: "10px", flexShrink: 0 }}>
+            <CompactUploadProgress
+              progress={uploadProgress}
+              label={t("upload.directoryProgress")}
+              statusLabel={t("upload.inProgress")}
+              cancelLabel={t("upload.cancel")}
+              onCancel={onCancelUpload}
+            />
+          </div>
+          ) : null}
         </div>
         <div
           style={{
