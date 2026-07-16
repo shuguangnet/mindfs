@@ -73,6 +73,9 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     cp "${ROOT}/scripts/deploy-release.sh" "${ROOT}/${OUT_DIR}/scripts/deploy-release.sh"
     chmod 0755 "${ROOT}/${OUT_DIR}/scripts/deploy-release.sh"
   fi
+  if [[ -f "${ROOT}/task_template.json" ]]; then
+    cp "${ROOT}/task_template.json" "${ROOT}/${OUT_DIR}/task_template.json"
+  fi
 done
 
 # Produce archives

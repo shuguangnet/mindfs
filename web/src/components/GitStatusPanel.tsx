@@ -5,6 +5,7 @@ import {
   type GitStatusItem,
   type GitStatusPayload,
 } from "../services/git";
+import { useI18n } from "../i18n";
 
 type GitStatusPanelProps = {
   rootId?: string;
@@ -209,6 +210,7 @@ export function GitStatusPanel({
   onSwitchBranch,
   onExpandedChange,
 }: GitStatusPanelProps) {
+  const { t } = useI18n();
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branches, setBranches] = useState<GitBranchItem[]>([]);
@@ -317,8 +319,8 @@ export function GitStatusPanel({
       >
         <div style={{ display: "flex", alignItems: "center", gap: compact ? "6px" : "8px", minWidth: 0, overflow: "visible" }}>
           <span
-            title="Git 变更"
-            aria-label="Git 变更"
+            title={t("git.changes")}
+            aria-label={t("git.changes")}
             style={{
               width: "18px",
               height: "18px",
@@ -410,9 +412,9 @@ export function GitStatusPanel({
                   }}
                 >
                   {branchesLoading ? (
-                    <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--text-secondary)" }}>加载中...</div>
+                    <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--text-secondary)" }}>{t("git.loading")}</div>
                   ) : branches.length === 0 ? (
-                    <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--text-secondary)" }}>无可切换分支</div>
+                    <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--text-secondary)" }}>{t("git.noBranches")}</div>
                   ) : branches.map((branch) => {
                     const active = branch.name === status.branch;
                     const busy = switchingBranch === branch.name;
@@ -466,14 +468,14 @@ export function GitStatusPanel({
           {showHeaderActions ? (
             <>
               <GitIconButton
-                title={actionBusy === "pull" ? "pull 中" : "Git pull"}
+                title={actionBusy === "pull" ? t("git.pulling") : "Git pull"}
                 disabled={!onPull || !!actionBusy}
                 onClick={() => runPanelAction("pull", onPull)}
               >
                 <GitPullIcon />
               </GitIconButton>
               <GitIconButton
-                title={actionBusy === "push" ? "push 中" : "Git push"}
+                title={actionBusy === "push" ? t("git.pushing") : "Git push"}
                 disabled={!onPush || !!actionBusy}
                 onClick={() => runPanelAction("push", onPush)}
               >
@@ -494,8 +496,8 @@ export function GitStatusPanel({
           {showExpandedToggle ? (
           <button
             type="button"
-            aria-label={expanded ? "收起 Git 变更" : "展开 Git 变更"}
-            title={expanded ? "收起" : "展开"}
+            aria-label={expanded ? t("git.collapseChanges") : t("git.expandChanges")}
+            title={expanded ? t("git.collapse") : t("git.expand")}
             onClick={() => onExpandedChange?.(!expanded)}
             style={{
               width: "20px",
@@ -548,7 +550,7 @@ export function GitStatusPanel({
             value={commitMessage}
             disabled={actionBusy === "commit"}
             autoFocus
-            placeholder="输入提交消息"
+            placeholder={t("git.commitMessagePlaceholder")}
             onChange={(event) => setCommitMessage(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -574,8 +576,8 @@ export function GitStatusPanel({
           />
           <button
             type="button"
-            title={actionBusy === "commit" ? "提交中" : "提交"}
-            aria-label={actionBusy === "commit" ? "提交中" : "提交"}
+            title={actionBusy === "commit" ? t("git.committing") : t("git.commit")}
+            aria-label={actionBusy === "commit" ? t("git.committing") : t("git.commit")}
             disabled={!commitMessage.trim() || actionBusy === "commit"}
             onClick={() => void submitCommit()}
             style={{
@@ -601,7 +603,7 @@ export function GitStatusPanel({
       ) : null}
 
       {!expanded ? null : loading ? (
-        <div style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "6px 10px" }}>正在加载 git 变更...</div>
+        <div style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "6px 10px" }}>{t("git.loadingChanges")}</div>
       ) : !hasStatusItems ? null : (
         <div style={{ display: "flex", flexDirection: "column", gap: "6px", paddingLeft: compact ? 0 : "14px", minWidth: 0 }}>
           {items.map((item) => {
@@ -682,18 +684,18 @@ export function GitStatusPanel({
                     }}
                   >
                     <GitIconButton
-                      title="打开文件"
+                      title={t("git.openFile")}
                       disabled={!onOpenItem || item.is_dir === true || !!actionBusy}
                       onClick={() => onOpenItem?.(item)}
                     >
                       <OpenFileIcon />
                     </GitIconButton>
                     <GitIconButton
-                      title="撤销变更"
+                      title={t("git.discardChanges")}
                       disabled={!onDiscardItem || !!actionBusy}
                       onClick={() => {
                         if (item.status === "??") {
-                          const ok = window.confirm(`确认删除未跟踪文件“${item.path}”？`);
+                          const ok = window.confirm(t("git.confirmDeleteUntracked", { path: item.path }));
                           if (!ok) {
                             return;
                           }
@@ -704,7 +706,7 @@ export function GitStatusPanel({
                       <UndoIcon />
                     </GitIconButton>
                     <GitIconButton
-                      title={item.staged === true ? "取消暂存" : "暂存变更"}
+                      title={item.staged === true ? t("git.unstageChanges") : t("git.stageChanges")}
                       disabled={!onStageItem || !!actionBusy}
                       onClick={() => runPanelAction(`${item.staged === true ? "unstage" : "stage"}:${item.path}`, () => onStageItem?.(item))}
                     >

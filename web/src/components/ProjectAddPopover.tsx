@@ -1,4 +1,5 @@
 import React from "react";
+import { useI18n } from "../i18n";
 
 export type ProjectAddMode =
   | "mode"
@@ -93,6 +94,7 @@ function PathBreadcrumb({
   volumes?: LocalDirItem[];
   onNavigate: (path: string) => void;
 }) {
+  const { t } = useI18n();
   const isWindowsPath = /^[A-Za-z]:[\\/]/.test(path);
   const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
   const segments = normalized.split("/").filter(Boolean);
@@ -145,7 +147,7 @@ function PathBreadcrumb({
           display: "inline-flex",
           alignItems: "center",
         }}
-        aria-label="选择盘符"
+        aria-label={t("projectAdd.selectVolume")}
       >
         <svg
           width="11"
@@ -368,10 +370,11 @@ function ModePanel({
   ProjectAddPopoverProps,
   "onSelectBlankLocation" | "onSelectLocal" | "onSelectGitHubLocation"
 >) {
+  const { t } = useI18n();
   return (
     <div style={popoverStyle}>
       <ModeItem
-        label="空白项目"
+        label={t("projectAdd.blankProject")}
         onClick={onSelectBlankLocation}
         iconColor="#2563eb"
         icon={
@@ -382,7 +385,7 @@ function ModePanel({
         }
       />
       <ModeItem
-        label="加入本地目录"
+        label={t("projectAdd.localDirectory")}
         onClick={onSelectLocal}
         iconColor="#2563eb"
         icon={
@@ -393,7 +396,7 @@ function ModePanel({
         }
       />
       <ModeItem
-        label="从 GitHub 导入"
+        label={t("projectAdd.githubImport")}
         onClick={onSelectGitHubLocation}
         icon={
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -423,6 +426,7 @@ function LocalPanel({
   | "localDisabledAddedRoot"
   | "localBrowseOnly"
 >) {
+  const { t } = useI18n();
   const actionDisabled =
     localState.loading ||
     !!localState.error ||
@@ -494,7 +498,7 @@ function LocalPanel({
       >
         {localState.loading ? (
           <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--text-secondary)" }}>
-            加载中...
+            {t("projectAdd.loading")}
           </div>
         ) : null}
         {!localState.loading && localState.error ? (
@@ -506,7 +510,7 @@ function LocalPanel({
         !localState.error &&
         localState.items.length === 0 ? (
           <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--text-secondary)" }}>
-            当前目录为空
+            {t("projectAdd.emptyDirectory")}
           </div>
         ) : null}
         {!localState.loading &&
@@ -612,7 +616,7 @@ function LocalPanel({
           cursor: actionCursor,
         }}
       >
-        {localState.adding ? "处理中..." : localActionLabel}
+        {localState.adding ? t("projectAdd.processing") : localActionLabel}
       </button>
     </div>
   );
@@ -626,6 +630,7 @@ function GitHubPanel({
   ProjectAddPopoverProps,
   "githubState" | "onGitHubUrlChange" | "onGitHubImport"
 >) {
+  const { t } = useI18n();
   const disabled = !githubState.url.trim() || githubState.running || githubState.submitting;
   return (
     <div style={popoverStyle}>
@@ -675,8 +680,8 @@ function GitHubPanel({
         ) : null}
         <span>
           {githubState.running || githubState.submitting
-            ? "克隆中"
-            : "导入"}
+            ? t("projectAdd.cloning")
+            : t("projectAdd.import")}
         </span>
       </button>
     </div>

@@ -6,6 +6,12 @@ type ErrorBoundaryProps = {
   fallback?: ReactNode;
   onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
   name?: string;
+  labels?: {
+    retry: string;
+    unknownError: string;
+    genericTitle: string;
+    titleWithName: (name: string) => string;
+  };
 };
 
 type ErrorBoundaryState = {
@@ -40,6 +46,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   render(): ReactNode {
     const { hasError, error } = this.state;
     const { children, fallback, name } = this.props;
+    const labels = this.props.labels || {
+      retry: translateNow("common.retry"),
+      unknownError: translateNow("common.unknownError"),
+      genericTitle: translateNow("error.boundary.genericTitle"),
+      titleWithName: (value: string) => translateNow("error.boundary.title", { name: value }),
+    };
 
     if (hasError) {
       if (fallback) {
@@ -73,30 +85,47 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 }
 
-// Specialized error boundaries
-export function MainViewErrorBoundary({ children }: { children: ReactNode }): React.ReactElement {
+function LocalizedErrorBoundary(props: ErrorBoundaryProps): React.ReactElement {
+  const { t } = useI18n();
   return (
     <ErrorBoundary
-      name="主视图"
+      {...props}
+      labels={{
+        retry: t("common.retry"),
+        unknownError: t("common.unknownError"),
+        genericTitle: t("error.boundary.genericTitle"),
+        titleWithName: (name) => t("error.boundary.title", { name }),
+      }}
+    />
+  );
+}
+
+// Specialized error boundaries
+export function MainViewErrorBoundary({ children }: { children: ReactNode }): React.ReactElement {
+  const { t } = useI18n();
+  return (
+    <LocalizedErrorBoundary
+      name={t("error.boundary.mainView")}
       onError={(error) => {
         // Could send to audit log here
         console.error("[MainView Error]", error);
       }}
     >
       {children}
-    </ErrorBoundary>
+    </LocalizedErrorBoundary>
   );
 }
 
 export function DrawerPanelErrorBoundary({ children }: { children: ReactNode }): React.ReactElement {
+  const { t } = useI18n();
   return (
-    <ErrorBoundary
-      name="抽屉"
+    <LocalizedErrorBoundary
+      name={t("error.boundary.drawer")}
       onError={(error) => {
         console.error("[DrawerPanel Error]", error);
       }}
     >
       {children}
-    </ErrorBoundary>
+    </LocalizedErrorBoundary>
   );
 }

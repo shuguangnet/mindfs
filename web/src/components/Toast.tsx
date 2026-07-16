@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Alert, Button, Space } from "antd";
 import { errorService, type AppError } from "../services/error";
+import { useI18n } from "../i18n";
 
 type ToastItem = {
   id: string;
@@ -103,6 +104,8 @@ function Toast({ error, onClose, onRetry }: ToastProps): React.ReactElement {
       : error.severity === "warning"
         ? "warning"
         : "info";
+
+  const message = error.usesDefaultMessage && error.messageKey ? t(error.messageKey) : error.message;
 
   return (
     <Alert

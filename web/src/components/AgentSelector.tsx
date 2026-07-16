@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { AgentIcon } from "./AgentIcon";
 import type { AgentStatus } from "../services/agents";
+import { useI18n } from "../i18n";
 
 type AgentSelectorProps = {
   agent: string;
@@ -137,6 +138,7 @@ export function AgentSelector({
   menuPlacement = "top",
   showChevron = false,
 }: AgentSelectorProps) {
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [submenuAgent, setSubmenuAgent] = useState<string | null>(null);
   const [errorAgent, setErrorAgent] = useState<string | null>(null);
@@ -582,7 +584,7 @@ export function AgentSelector({
                     {hasError ? (
                       <button
                         type="button"
-                        aria-label={`查看 ${a.name} 错误信息`}
+                        aria-label={t("agent.viewErrorInfo", { name: a.name })}
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
@@ -626,8 +628,8 @@ export function AgentSelector({
                         type="button"
                         aria-label={
                           isExpanded
-                            ? `收起 ${a.name} 模型列表`
-                            : `展开 ${a.name} 模型列表`
+                            ? t("agent.collapseModels", { name: a.name })
+                            : t("agent.expandModels", { name: a.name })
                         }
                         onClick={(event) => {
                           event.preventDefault();
@@ -712,13 +714,13 @@ export function AgentSelector({
                       textTransform: "uppercase",
                     }}
                   >
-                    错误信息
+                    {t("agent.errorInfo")}
                   </div>
                   {onAgentRestart && !errorAgentStatus.remote_server_id ? (
                     <button
                       type="button"
-                      aria-label={`重启 ${errorAgentStatus.name}`}
-                      title="重启 Agent"
+                      aria-label={t("agent.restart", { name: errorAgentStatus.name })}
+                      title={t("agent.restartAgent")}
                       disabled={restartingAgent === errorAgentStatus.name}
                       onClick={(event) => {
                         event.preventDefault();
@@ -810,7 +812,7 @@ export function AgentSelector({
             ) : submenuAgentStatus ? (
               <>
                 <SectionHeader
-                  title="模型"
+                  title={t("agent.model")}
                   expanded={modelSectionExpanded}
                   onToggle={() => setModelSectionExpanded((prev) => !prev)}
                   value={submenuSelectedModel?.id || undefined}
@@ -868,7 +870,7 @@ export function AgentSelector({
                 {submenuModes.length > 0 ? (
                   <>
                     <SectionHeader
-                      title="模式"
+                      title={t("agent.mode")}
                       expanded={modeSectionExpanded}
                       onToggle={() => setModeSectionExpanded((prev) => !prev)}
                       topBorder={
@@ -916,7 +918,7 @@ export function AgentSelector({
                 {submenuSupportsEffort ? (
                   <>
                     <SectionHeader
-                      title="思考等级"
+                      title={t("agent.effort")}
                       expanded={effortSectionExpanded}
                       onToggle={() => setEffortSectionExpanded((prev) => !prev)}
                       topBorder={
@@ -957,7 +959,7 @@ export function AgentSelector({
                 {submenuSupportsServiceTier ? (
                   <>
                     <SectionHeader
-                      title="Fast 模式"
+                      title={t("agent.fastMode")}
                       expanded={serviceTierSectionExpanded}
                       onToggle={() =>
                         setServiceTierSectionExpanded((prev) => !prev)
@@ -969,7 +971,7 @@ export function AgentSelector({
                         submenuModes.length > 0 ||
                         submenuSupportsEffort
                       }
-                      value={fastModeEnabled ? "开启" : "关闭"}
+                      value={fastModeEnabled ? t("agent.enabled") : t("agent.disabled")}
                     />
                     {serviceTierSectionExpanded ? (
                       <>
@@ -989,7 +991,7 @@ export function AgentSelector({
                                 fontWeight: 500,
                               }}
                             >
-                              {item === "on" ? "开启" : "关闭"}
+                              {item === "on" ? t("agent.enabled") : t("agent.disabled")}
                             </span>
                           </button>
                         ))}

@@ -675,7 +675,7 @@ func (s *session) SetModel(_ context.Context, model string) error {
 	return nil
 }
 
-func (s *session) SetPlanMode(_ context.Context, enabled bool) error {
+func (s *session) SetPlanMode(ctx context.Context, enabled bool) error {
 	if s == nil || s.client == nil {
 		return errors.New("codex session not initialized")
 	}
@@ -690,6 +690,9 @@ func (s *session) SetPlanMode(_ context.Context, enabled bool) error {
 	opts := s.threadOpts
 	opts.CollaborationMode = codexCollaborationMode(enabled)
 	thread := s.client.ResumeThread(threadID, opts)
+	if err := thread.SetCollaborationMode(ctx, opts.CollaborationMode); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	s.thread = thread
 	s.threadOpts = opts

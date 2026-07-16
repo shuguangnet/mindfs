@@ -32,6 +32,7 @@ import {
   type AppUpdateState,
 } from "../services/appUpdate";
 import { downloadURL } from "../services/download";
+import { useI18n, type MessageKey, type MessageParams } from "../i18n";
 
 type LoginProps = {
   onOpenNode: (nodeURL: string) => void;
@@ -124,18 +125,22 @@ function shouldShowAppUpdate(state: AppUpdateState): boolean {
   );
 }
 
-function appUpdateSummary(state: AppUpdateState): string {
+function appUpdateSummary(state: AppUpdateState, t: (key: MessageKey, params?: MessageParams) => string): string {
   const notes = String(state.notes || "").trim();
   if (notes) {
     return notes;
   }
   if (state.latest_version) {
-    return `发现 ${appPackageLabel(state.platform)} ${state.latest_version} 新版本`;
+    return t("login.updateAvailable", {
+      packageLabel: appPackageLabel(state.platform),
+      version: state.latest_version,
+    });
   }
   return "";
 }
 
 export function Login({ onOpenNode }: LoginProps): ReactElement {
+  const { t } = useI18n();
   const [nodes, setNodes] = useState<LauncherNode[]>(() => sortNodes(getStoredLauncherNodes()));
   const [composerOpen, setComposerOpen] = useState(false);
   const [nodeName, setNodeName] = useState("");
@@ -239,7 +244,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
       normalizeAppUpdateState({
         ...prev,
         status: "downloading",
-        message: `正在下载 ${packageLabel} 更新包`,
+        message: t("login.downloadingPackage", { packageLabel }),
       }),
     );
     try {
@@ -248,12 +253,12 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
         normalizeAppUpdateState({
           ...prev,
           status: "downloaded",
-          message: "更新包已开始下载，请在系统通知或下载目录中打开安装",
+          message: t("login.packageDownloadStarted"),
         }),
       );
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : `${packageLabel} 更新下载失败`;
+        error instanceof Error ? error.message : t("login.packageDownloadFailed", { packageLabel });
       setAppUpdateState((prev) =>
         normalizeAppUpdateState({
           ...prev,
@@ -362,16 +367,19 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
     appUpdateStatus === "downloaded";
   const appUpdateText =
     appUpdateStatus === "downloading"
-      ? "下载中..."
+      ? t("login.updateDownloading")
       : appUpdateStatus === "downloaded"
-        ? "已开始下载"
-        : "更新APP";
+        ? t("login.updateDownloaded")
+        : t("login.updateApp");
   const appUpdateHelp =
     appUpdateState.message ||
     (appUpdateState.latest_version
-      ? `当前 ${appUpdateState.current_version || "未知"}，最新 ${appUpdateState.latest_version}`
+      ? t("login.updateVersionHelp", {
+          current: appUpdateState.current_version || t("login.unknownVersion"),
+          latest: appUpdateState.latest_version,
+        })
       : "");
-  const appUpdateNotes = appUpdateSummary(appUpdateState);
+  const appUpdateNotes = appUpdateSummary(appUpdateState, t);
 
   return (
     <div

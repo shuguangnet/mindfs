@@ -9,6 +9,7 @@ type RightSidebarProps = {
 };
 
 export function RightSidebar({ children }: RightSidebarProps) {
+  const { t } = useI18n();
   return (
     <Layout style={{ flex: 1, minHeight: 0, background: "transparent" }}>
       <Header

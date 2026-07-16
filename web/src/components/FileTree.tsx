@@ -19,6 +19,7 @@ import {
   setAppearanceMode,
   type AppearanceMode,
 } from "../services/appearance";
+import { useI18n, type Locale, type MessageKey } from "../i18n";
 import { AgentMenuList } from "./AgentMenuList";
 import { AgentIcon } from "./AgentIcon";
 import { SymlinkBadge } from "./SymlinkBadge";
@@ -66,6 +67,20 @@ const APPEARANCE_OPTIONS: Array<{ value: AppearanceMode; label: string }> = [
   { value: "graphite", label: "石墨夜航" },
   { value: "system", label: "跟随系统" },
 ];
+
+const LOCALE_OPTIONS: Array<{ value: Locale; labelKey: MessageKey }> = [
+  { value: "zh-CN", labelKey: "locale.zhCN" },
+  { value: "en-US", labelKey: "locale.enUS" },
+];
+
+const DIRECTORY_SORT_LABEL_KEYS: Partial<Record<DirectorySortMode, MessageKey>> = {
+  "name-asc": "sort.nameAsc",
+  "name-desc": "sort.nameDesc",
+  "mtime-desc": "sort.mtimeDesc",
+  "mtime-asc": "sort.mtimeAsc",
+  "size-desc": "sort.sizeDesc",
+  "size-asc": "sort.sizeAsc",
+};
 
 type RelayTip = {
   id: string;
@@ -217,6 +232,7 @@ function InfoIcon() {
 }
 
 function WebPushMenuItem() {
+  const { t } = useI18n();
   const [status, setStatus] = React.useState<WebPushStatus | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
@@ -227,7 +243,7 @@ function WebPushMenuItem() {
       setStatus(await getWebPushStatus());
     } catch (error) {
       setStatus(null);
-      setMessage(error instanceof Error ? error.message : "通知状态读取失败");
+      setMessage(error instanceof Error ? error.message : t("fileTree.notificationStatusFailed"));
     }
   }, []);
 
@@ -246,11 +262,11 @@ function WebPushMenuItem() {
         setStatus(await unsubscribeWebPush());
       } else {
         await sendWebPushTest();
-        setMessage("测试通知已发送");
+        setMessage(t("fileTree.notificationSent"));
         await refresh();
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "通知操作失败");
+      setMessage(error instanceof Error ? error.message : t("fileTree.notificationActionFailed"));
       await refresh();
     } finally {
       setBusy(false);
@@ -260,13 +276,13 @@ function WebPushMenuItem() {
   const disabledReason = webPushReasonLabel(status?.reason);
   const enabled = Boolean(status?.enabled && status.supported);
   const subscribed = Boolean(status?.subscribed);
-  const label = subscribed ? "通知已开启" : "开启通知";
+  const label = subscribed ? t("fileTree.notificationEnabled") : t("fileTree.enableNotification");
   const subscriptionCount = status?.subscription_count || 0;
   const currentDeviceDetail = subscribed && subscriptionCount > 0
-    ? `已有 ${subscriptionCount} 个设备订阅`
+    ? t("fileTree.notificationSubscribedDevices", { count: subscriptionCount })
     : subscribed
-      ? "回复、需要输入和定时任务会通知"
-      : "iOS 需从主屏幕打开";
+      ? t("fileTree.notificationDetailSubscribed")
+      : t("fileTree.notificationDetailIOS");
   const detail = message || disabledReason || currentDeviceDetail;
 
   return (
@@ -302,12 +318,12 @@ function WebPushMenuItem() {
           }}
         >
           <NotificationIcon />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{busy ? "通知处理中" : label}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{busy ? t("fileTree.notificationBusy") : label}</span>
         </button>
         <button
           type="button"
-          aria-label="通知说明"
-          title="通知说明"
+          aria-label={t("fileTree.notificationInfo")}
+          title={t("fileTree.notificationInfo")}
           onClick={() => setExpanded((value) => !value)}
           style={{
             border: "none",
@@ -344,7 +360,7 @@ function WebPushMenuItem() {
                 cursor: busy ? "not-allowed" : "pointer",
               }}
             >
-              <span>发送测试通知</span>
+              <span>{t("fileTree.sendTestNotification")}</span>
             </button>
           ) : null}
         </>
@@ -629,10 +645,11 @@ function AgentConfigPopover({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   const agentTitle = flow === "backup"
-    ? "选择要备份配置的 agent"
-    : "选择要切换配置的 agent";
-  const confirmButtonLabel = flow === "backup" ? "继续备份" : "继续切换";
+    ? t("agentConfig.chooseBackupAgent")
+    : t("agentConfig.chooseSwitchAgent");
+  const confirmButtonLabel = flow === "backup" ? t("agentConfig.continueBackup") : t("agentConfig.continueSwitch");
   const selectedAgentStatus = agents.find((item) => item.name === selectedAgent);
   const supportsAPIProvider = Boolean(selectedAgentStatus?.supports_api_provider_switch);
   const addTabs: AgentConfigAddTab[] = supportsAPIProvider ? ["backup", "api"] : ["backup"];
@@ -661,9 +678,9 @@ function AgentConfigPopover({
       {step === "agent" ? (
         <>
           {busy ? (
-            <div style={agentConfigHintStyle}>加载中...</div>
+            <div style={agentConfigHintStyle}>{t("agentConfig.loading")}</div>
           ) : agents.length === 0 ? (
-            <div style={agentConfigHintStyle}>没有已安装 Agent</div>
+            <div style={agentConfigHintStyle}>{t("agentConfig.noInstalledAgents")}</div>
           ) : (
             <AgentMenuList
               agents={agents}
@@ -676,7 +693,7 @@ function AgentConfigPopover({
                 }
                 return (
                   <span
-                    title={`上次选择：${name}`}
+                    title={t("agentConfig.lastSelected", { name })}
                     style={{
                       maxWidth: "120px",
                       minWidth: 0,
@@ -699,11 +716,11 @@ function AgentConfigPopover({
       ) : step === "confirm" ? (
         <>
           <div style={{ ...agentConfigHintStyle, color: "#dc2626" }}>
-            {confirmMessage || "目标配置文件已存在，请确保已备份"}
+            {confirmMessage || t("agentConfig.targetExists")}
           </div>
           <div style={agentConfigActionRowStyle}>
             <button type="button" disabled={busy} onClick={onCancel} style={agentConfigSecondaryButtonStyle(busy)}>
-              取消
+              {t("common.cancel")}
             </button>
             <button type="button" disabled={busy} onClick={onConfirm} style={agentConfigPrimaryButtonStyle(busy)}>
               {confirmButtonLabel}
@@ -733,7 +750,7 @@ function AgentConfigPopover({
                       cursor: busy ? "default" : "pointer",
                     }}
                   >
-                    {tab === "backup" ? "配置备份" : "API 供应商"}
+                    {tab === "backup" ? t("agentConfig.backup") : t("agentConfig.apiProvider")}
                   </button>
                 );
               })}
@@ -742,7 +759,7 @@ function AgentConfigPopover({
           {effectiveAddTab === "backup" ? (
             <>
               <div style={agentConfigFieldStyle}>
-                <label style={agentConfigLabelStyle}>备份名称</label>
+                <label style={agentConfigLabelStyle}>{t("agentConfig.backupName")}</label>
                 <input
                   value={backupName}
                   onChange={(event) => onBackupNameChange(event.target.value)}
@@ -751,26 +768,26 @@ function AgentConfigPopover({
                 />
               </div>
               <div style={agentConfigFieldStyle}>
-                <label style={agentConfigLabelStyle}>配置来源</label>
+                <label style={agentConfigLabelStyle}>{t("agentConfig.fileSources")}</label>
                 <AgentConfigLineEditor
                   value={fileSourcesBody}
                   onChange={onFileSourcesChange}
-                  placeholder="每行一个文件路径"
+                  placeholder={t("agentConfig.fileSourcePlaceholder")}
                 />
               </div>
               <div style={agentConfigFieldStyle}>
-                <label style={agentConfigLabelStyle}>环境变量</label>
+                <label style={agentConfigLabelStyle}>{t("agentConfig.env")}</label>
                 <AgentConfigLineEditor
                   value={envBody}
                   onChange={onEnvBodyChange}
-                  placeholder="KEY=value，每行一个"
+                  placeholder={t("agentConfig.envPlaceholder")}
                 />
               </div>
             </>
           ) : (
             <>
               <div style={agentConfigFieldStyle}>
-                <label style={agentConfigLabelStyle}>供应商名称</label>
+                <label style={agentConfigLabelStyle}>{t("agentConfig.providerName")}</label>
                 <input
                   value={apiProviderName}
                   onChange={(event) => onAPIProviderNameChange(event.target.value)}
@@ -799,10 +816,10 @@ function AgentConfigPopover({
           )}
           <div style={agentConfigActionRowStyle}>
             <button type="button" disabled={busy} onClick={onCancel} style={agentConfigSecondaryButtonStyle(busy)}>
-              取消
+              {t("common.cancel")}
             </button>
             <button type="button" disabled={busy} onClick={onSave} style={agentConfigPrimaryButtonStyle(busy)}>
-              {effectiveAddTab === "backup" ? "保存" : "校验并保存"}
+              {effectiveAddTab === "backup" ? t("common.save") : t("agentConfig.validateAndSave")}
             </button>
           </div>
         </>
@@ -829,7 +846,7 @@ function AgentConfigPopover({
                       cursor: busy ? "default" : "pointer",
                     }}
                   >
-                    {tab === "backup" ? "配置备份" : "API 供应商"}
+                    {tab === "backup" ? t("agentConfig.backup") : t("agentConfig.apiProvider")}
                   </button>
                 );
               })}
@@ -837,12 +854,12 @@ function AgentConfigPopover({
           ) : null}
           <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "260px", overflow: "auto" }}>
             {busy ? (
-              <div style={agentConfigHintStyle}>加载中...</div>
+              <div style={agentConfigHintStyle}>{t("agentConfig.loading")}</div>
             ) : backups.length === 0 && (supportsAPIProvider ? apiProviders.length === 0 : true) ? (
-              <div style={agentConfigHintStyle}>暂无可切换配置</div>
+              <div style={agentConfigHintStyle}>{t("agentConfig.noSwitchableConfig")}</div>
             ) : effectiveSwitchTab === "backup" ? (
               backups.length === 0 ? (
-                <div style={agentConfigHintStyle}>暂无配置备份</div>
+                <div style={agentConfigHintStyle}>{t("agentConfig.noBackups")}</div>
               ) : backups.map((item) => {
                 const selected = item.id === selectedBackupID;
                 return (
@@ -863,8 +880,8 @@ function AgentConfigPopover({
                       <div style={{ minWidth: 0, flex: 1, fontSize: "12px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
                       <button
                         type="button"
-                        aria-label={`删除配置 ${item.name}`}
-                        title="删除"
+                        aria-label={t("agentConfig.deleteConfig", { name: item.name })}
+                        title={t("common.delete")}
                         disabled={busy}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -880,7 +897,7 @@ function AgentConfigPopover({
               })
             ) : (
 	              apiProviders.length === 0 ? (
-	                <div style={agentConfigHintStyle}>暂无适配的 API 供应商</div>
+	                <div style={agentConfigHintStyle}>{t("agentConfig.noAPIProviders")}</div>
               ) : apiProviders.map((item) => {
                 const selected = item.id === selectedAPIProviderID;
                 const summary = (item.modelFamilies || []).join(", ");
@@ -905,8 +922,8 @@ function AgentConfigPopover({
                       </div>
                       <button
                         type="button"
-                        aria-label={`删除 API 供应商 ${item.name}`}
-                        title="删除"
+                        aria-label={t("agentConfig.deleteAPIProvider", { name: item.name })}
+                        title={t("common.delete")}
                         disabled={busy}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -924,7 +941,7 @@ function AgentConfigPopover({
           </div>
           <div style={agentConfigActionRowStyle}>
             <button type="button" disabled={busy} onClick={onCancel} style={agentConfigSecondaryButtonStyle(busy)}>
-              取消
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -932,7 +949,7 @@ function AgentConfigPopover({
               onClick={onSwitch}
               style={agentConfigPrimaryButtonStyle(busy || (effectiveSwitchTab === "backup" ? !selectedBackupID : !selectedAPIProviderID))}
             >
-              切换
+              {t("agentConfig.switch")}
             </button>
           </div>
         </>
@@ -955,6 +972,7 @@ function AgentLifecyclePopover({
   error: string;
   onRun: (agent: AgentStatus, action: "install" | "update") => void;
 }) {
+  const { t } = useI18n();
   const [expandedDescriptions, setExpandedDescriptions] = React.useState<Set<string>>(() => new Set());
 
   return (
@@ -972,20 +990,20 @@ function AgentLifecyclePopover({
       }}
     >
       <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
-        Agent 安装和更新
+        {t("agentConfig.lifecycleTitle")}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "320px", overflow: "auto" }}>
         {busy && agents.length === 0 ? (
-          <div style={agentConfigHintStyle}>加载中...</div>
+          <div style={agentConfigHintStyle}>{t("agentConfig.loading")}</div>
         ) : agents.length === 0 ? (
-          <div style={agentConfigHintStyle}>暂无 Agent 配置</div>
+          <div style={agentConfigHintStyle}>{t("agentConfig.noAgents")}</div>
         ) : (
           agents.map((item) => {
             const action = item.installed ? "update" : "install";
             const commands = action === "install" ? item.install_commands || [] : item.update_commands || [];
             const disabled = busy || commands.length === 0;
-            const actionLabel = item.installed ? "更新" : "安装";
-            const description = item.brief || "未配置简介";
+            const actionLabel = item.installed ? t("agentConfig.update") : t("agentConfig.install");
+            const description = item.brief || t("agentConfig.noDescription");
             const descriptionExpanded = expandedDescriptions.has(item.name);
             return (
               <div
@@ -1013,7 +1031,7 @@ function AgentLifecyclePopover({
                     <button
                       type="button"
                       disabled={disabled}
-                      title={commands.length > 0 ? actionLabel : "agents.json 未配置命令"}
+                      title={commands.length > 0 ? actionLabel : t("agentConfig.noCommand")}
                       onClick={() => onRun(item, action)}
                       style={{
                         ...agentConfigPrimaryButtonStyle(disabled),
@@ -1027,7 +1045,7 @@ function AgentLifecyclePopover({
                         flexShrink: 0,
                       }}
                     >
-                      {runningAgent === item.name ? "启动中" : actionLabel}
+                      {runningAgent === item.name ? t("agentConfig.starting") : actionLabel}
                     </button>
                   </div>
                 </div>
@@ -1049,8 +1067,8 @@ function AgentLifecyclePopover({
                   </div>
                   <button
                     type="button"
-                    aria-label={descriptionExpanded ? "收起描述" : "展开描述"}
-                    title={descriptionExpanded ? "收起" : "展开"}
+                    aria-label={descriptionExpanded ? t("agentConfig.collapseDescription") : t("agentConfig.expandDescription")}
+                    title={descriptionExpanded ? t("common.collapse") : t("common.expand")}
                     onClick={() => {
                       setExpandedDescriptions((current) => {
                         const next = new Set(current);
@@ -1269,6 +1287,11 @@ export function FileTree({
   onGoHome,
   footerTopContent,
 }: FileTreeProps) {
+  const { locale, setLocale, t } = useI18n();
+  const sortLabel = React.useCallback((mode: DirectorySortMode): string => {
+    const key = DIRECTORY_SORT_LABEL_KEYS[mode];
+    return key ? t(key) : t("directory.defaultSort");
+  }, [t]);
   const expandedSet = new Set(expanded);
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [projectTreeTab, setProjectTreeTab] = React.useState<ProjectTreeTab>(() => {
@@ -1283,6 +1306,7 @@ export function FileTree({
     }
   });
   const [isAppearanceMenuOpen, setIsAppearanceMenuOpen] = React.useState(false);
+  const [isLocaleMenuOpen, setIsLocaleMenuOpen] = React.useState(false);
   const [isSortMenuOpen, setIsSortMenuOpen] = React.useState(false);
   const [appearanceMode, setAppearanceModeState] = React.useState<AppearanceMode>(() => getAppearanceMode());
   const [isUpdateNotesOpen, setIsUpdateNotesOpen] = React.useState(false);
@@ -1538,34 +1562,34 @@ export function FileTree({
   const isKnownInstalled = isInstalled || hasPersistedInstallState();
 
   const installLabel = isKnownInstalled
-    ? "已安装"
+    ? t("pwa.installed")
     : isIOS
-      ? "添加到主屏幕"
+      ? t("pwa.addToHomeScreen")
       : isMacSafari
-        ? "添加到 Dock"
+        ? t("pwa.addToDock")
       : isDesktopChromium && isInstallCapable
-        ? "安装应用"
+        ? t("pwa.installApp")
       : isAndroidChrome && !deferredInstallPrompt
-        ? "从菜单安装"
+        ? t("pwa.installFromMenu")
       : deferredInstallPrompt
-        ? "安装应用"
-        : "安装说明";
+        ? t("pwa.installApp")
+        : t("pwa.installInstructions");
 
   const installHelp = isInstalled
     ? ""
     : isKnownInstalled
-      ? "已安装，可从桌面或应用列表打开"
+      ? t("pwa.helpInstalled")
       : isIOS
-      ? "在 Safari 中用分享菜单安装"
+      ? t("pwa.helpIOS")
       : isMacSafari
-        ? "请用 Safari 菜单 File > Add to Dock"
+        ? t("pwa.helpMacSafari")
       : isDesktopChromium && isInstallCapable
-        ? "可从地址栏安装图标或浏览器菜单中安装"
+        ? t("pwa.helpDesktopChromium")
       : isAndroidChrome && !deferredInstallPrompt
-        ? "请在浏览器菜单中选择“添加到主屏幕”或“安装应用”"
+        ? t("pwa.helpAndroidChrome")
       : deferredInstallPrompt
-        ? "安装后可从桌面独立启动"
-        : "当前浏览器未提供安装弹窗";
+        ? t("pwa.helpDeferred")
+        : t("pwa.helpUnavailable");
 
   const shouldShowInstallButton = !isNativeApp && !isKnownInstalled && !(isAndroidChrome && !deferredInstallPrompt);
   const shouldShowInstallHelp = !isNativeApp && (!!installHelp) && (isKnownInstalled || isIOS || isMacSafari || isDesktopChromium || deferredInstallPrompt !== null || (isAndroidChrome && !deferredInstallPrompt));
@@ -1643,25 +1667,25 @@ export function FileTree({
       return;
     }
     if (isIOS && typeof window !== "undefined") {
-      window.alert("请在 Safari 中点击“分享”按钮，然后选择“添加到主屏幕”。");
+      window.alert(t("pwa.alertIOS"));
       return;
     }
     if (isMacSafari && typeof window !== "undefined") {
-      window.alert("请在 Safari 菜单中选择 File > Add to Dock。该浏览器不会从网页按钮直接弹出安装窗口。");
+      window.alert(t("pwa.alertMacSafari"));
       return;
     }
     if (isDesktopChromium && typeof window !== "undefined") {
-      window.alert("请使用地址栏右侧的安装图标，或在浏览器菜单中选择“安装 MindFS”。");
+      window.alert(t("pwa.alertDesktopChromium"));
       return;
     }
     if (isAndroidChrome && typeof window !== "undefined") {
-      window.alert("请在 Chrome 菜单中选择“添加到主屏幕”或“安装应用”。某些移动端场景下，Chrome 不会把安装弹窗权限直接暴露给网页按钮。");
+      window.alert(t("pwa.alertAndroidChrome"));
       return;
     }
     if (typeof window !== "undefined") {
-      window.alert("当前浏览器没有提供 PWA 安装弹窗。请改用 Safari、Chrome 或 Edge 打开。");
+      window.alert(t("pwa.alertUnavailable"));
     }
-  }, [deferredInstallPrompt, isAndroidChrome, isDesktopChromium, isIOS, isKnownInstalled, isMacSafari, persistInstallState]);
+  }, [deferredInstallPrompt, isAndroidChrome, isDesktopChromium, isIOS, isKnownInstalled, isMacSafari, persistInstallState, t]);
 
   React.useEffect(() => {
     if (!creatingRootName) {
@@ -1780,10 +1804,10 @@ export function FileTree({
         setAgentConfigAgents(items.filter((item) => item.installed));
       })
       .catch((error) => {
-        setAgentConfigError(error instanceof Error ? error.message : "加载 Agent 失败");
+        setAgentConfigError(error instanceof Error ? error.message : t("agentConfig.loadAgentFailed"));
       })
       .finally(() => setAgentConfigBusy(false));
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     if (!agentConfigSwitchRequest) {
@@ -1819,10 +1843,10 @@ export function FileTree({
         setAgentConfigAgents(items.filter((item) => item.installed));
       })
       .catch((error) => {
-        setAgentConfigError(error instanceof Error ? error.message : "加载 Agent 失败");
+        setAgentConfigError(error instanceof Error ? error.message : t("agentConfig.loadAgentFailed"));
       })
       .finally(() => setAgentConfigBusy(false));
-  }, [agentConfigSwitchRequest?.nonce]);
+  }, [agentConfigSwitchRequest?.nonce, t]);
 
   const closeAgentConfigFlow = React.useCallback(() => {
     setAgentConfigFlow(null);
@@ -1845,10 +1869,10 @@ export function FileTree({
         setAgentLifecycleAgents(items);
       })
       .catch((error) => {
-        setAgentLifecycleError(error instanceof Error ? error.message : "加载 Agent 失败");
+        setAgentLifecycleError(error instanceof Error ? error.message : t("agentConfig.loadAgentFailed"));
       })
       .finally(() => setAgentLifecycleBusy(false));
-  }, []);
+  }, [t]);
 
   const closeAgentLifecycleFlow = React.useCallback(() => {
     setAgentLifecycleOpen(false);
@@ -1919,7 +1943,7 @@ export function FileTree({
   const runAgentLifecycleCommand = React.useCallback(async (agent: AgentStatus, action: "install" | "update") => {
     const commands = action === "install" ? agent.install_commands || [] : agent.update_commands || [];
     if (commands.length === 0) {
-      setAgentLifecycleError("agents.json 未配置命令");
+      setAgentLifecycleError(t("agentConfig.noCommand"));
       return;
     }
     setAgentLifecycleBusy(true);
@@ -1929,12 +1953,12 @@ export function FileTree({
       await onRunAgentLifecycleCommand?.(agent.name, action);
       closeAgentLifecycleFlow();
     } catch (error) {
-      setAgentLifecycleError(error instanceof Error ? error.message : "发起命令失败");
+      setAgentLifecycleError(error instanceof Error ? error.message : t("agentConfig.commandStartFailed"));
     } finally {
       setAgentLifecycleBusy(false);
       setAgentLifecycleRunningAgent("");
     }
-  }, [closeAgentLifecycleFlow, onRunAgentLifecycleCommand]);
+  }, [closeAgentLifecycleFlow, onRunAgentLifecycleCommand, t]);
 
   const chooseAgentForConfig = React.useCallback(async (agentName: string) => {
     setAgentConfigAgent(agentName);
@@ -1971,15 +1995,15 @@ export function FileTree({
         setAgentConfigStep("details");
       }
     } catch (error) {
-      setAgentConfigError(error instanceof Error ? error.message : "加载配置失败");
+      setAgentConfigError(error instanceof Error ? error.message : t("agentConfig.loadConfigFailed"));
     } finally {
       setAgentConfigBusy(false);
     }
-  }, [agentConfigAgents, agentConfigFlow, agentConfigPreferredProviderIDs]);
+  }, [agentConfigAgents, agentConfigFlow, agentConfigPreferredProviderIDs, t]);
 
   const saveAgentConfigBackup = React.useCallback(async (overwrite = false) => {
     if (!agentConfigName.trim()) {
-      setAgentConfigError("请填写备份名称");
+      setAgentConfigError(t("agentConfig.backupNameRequired"));
       return;
     }
     const fileSources = agentConfigFileSourcesBody.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -1997,27 +2021,27 @@ export function FileTree({
       closeAgentConfigFlow();
     } catch (error) {
       if (isAgentConfigBackupConflict(error) && !overwrite) {
-        setAgentConfigConfirmMessage("同名配置已存在，继续将覆盖该备份");
+        setAgentConfigConfirmMessage(t("agentConfig.backupExistsOverwrite"));
         setAgentConfigStep("confirm");
         return;
       }
-      setAgentConfigError(error instanceof Error ? error.message : "保存备份失败");
+      setAgentConfigError(error instanceof Error ? error.message : t("agentConfig.saveBackupFailed"));
     } finally {
       setAgentConfigBusy(false);
     }
-  }, [agentConfigAgent, agentConfigEnvBody, agentConfigFileSourcesBody, agentConfigName, closeAgentConfigFlow]);
+  }, [agentConfigAgent, agentConfigEnvBody, agentConfigFileSourcesBody, agentConfigName, closeAgentConfigFlow, t]);
 
   const saveAgentAPIProvider = React.useCallback(async () => {
     if (!agentAPIProviderName.trim()) {
-      setAgentConfigError("请填写 API 供应商名称");
+      setAgentConfigError(t("agentConfig.providerNameRequired"));
       return;
     }
     if (!agentAPIProviderBaseURL.trim()) {
-      setAgentConfigError("请填写 Base URL");
+      setAgentConfigError(t("agentConfig.baseURLRequired"));
       return;
     }
     if (!agentAPIProviderAPIKey.trim()) {
-      setAgentConfigError("请填写 API Key");
+      setAgentConfigError(t("agentConfig.apiKeyRequired"));
       return;
     }
     setAgentConfigBusy(true);
@@ -2030,15 +2054,15 @@ export function FileTree({
       });
       closeAgentConfigFlow();
     } catch (error) {
-      setAgentConfigError(error instanceof Error ? error.message : "保存 API 供应商失败");
+      setAgentConfigError(error instanceof Error ? error.message : t("agentConfig.saveProviderFailed"));
     } finally {
       setAgentConfigBusy(false);
     }
-  }, [agentAPIProviderAPIKey, agentAPIProviderBaseURL, agentAPIProviderName, closeAgentConfigFlow]);
+  }, [agentAPIProviderAPIKey, agentAPIProviderBaseURL, agentAPIProviderName, closeAgentConfigFlow, t]);
 
   const runAgentConfigSwitch = React.useCallback(async (confirmOverwrite = false) => {
     if (!agentConfigSwitchSelection) {
-      setAgentConfigError("请选择配置");
+      setAgentConfigError(t("agentConfig.selectConfig"));
       return;
     }
     setAgentConfigBusy(true);
@@ -2051,17 +2075,17 @@ export function FileTree({
       }
       const result = await switchAgentConfig({ id: agentConfigSwitchSelection.id, confirmOverwrite });
       if (result.needs_confirm) {
-        setAgentConfigConfirmMessage(result.message || "目标配置文件已存在，请确保已备份");
+        setAgentConfigConfirmMessage(result.message || t("agentConfig.targetExists"));
         setAgentConfigStep("confirm");
         return;
       }
       closeAgentConfigFlow();
     } catch (error) {
-      setAgentConfigError(error instanceof Error ? error.message : "切换配置失败");
+      setAgentConfigError(error instanceof Error ? error.message : t("agentConfig.switchFailed"));
     } finally {
       setAgentConfigBusy(false);
     }
-  }, [agentConfigAgent, agentConfigSwitchSelection, closeAgentConfigFlow]);
+  }, [agentConfigAgent, agentConfigSwitchSelection, closeAgentConfigFlow, t]);
 
   const deleteSelectedAgentConfigBackup = React.useCallback(async (id: string) => {
     const trimmedID = String(id || "").trim();
@@ -2080,11 +2104,11 @@ export function FileTree({
         setAgentConfigSwitchSelection(null);
       }
     } catch (error) {
-      setAgentConfigError(error instanceof Error ? error.message : "删除配置失败");
+      setAgentConfigError(error instanceof Error ? error.message : t("agentConfig.deleteConfigFailed"));
     } finally {
       setAgentConfigBusy(false);
     }
-  }, [agentConfigAgent, agentConfigBackups, selectedAgentConfigID]);
+  }, [agentConfigAgent, agentConfigBackups, selectedAgentConfigID, t]);
 
   const deleteSelectedAgentAPIProvider = React.useCallback(async (id: string) => {
     const trimmedID = String(id || "").trim();
@@ -2103,11 +2127,11 @@ export function FileTree({
         setAgentConfigSwitchSelection(null);
       }
     } catch (error) {
-      setAgentConfigError(error instanceof Error ? error.message : "删除 API 供应商失败");
+      setAgentConfigError(error instanceof Error ? error.message : t("agentConfig.deleteProviderFailed"));
     } finally {
       setAgentConfigBusy(false);
     }
-  }, [agentAPIProviders, selectedAgentAPIProviderID]);
+  }, [agentAPIProviders, selectedAgentAPIProviderID, t]);
 
   const selectAgentConfigBackup = React.useCallback((id: string) => {
     setSelectedAgentConfigID(id);
@@ -2225,7 +2249,7 @@ export function FileTree({
                     opacity: creatingRootBusy ? 0.6 : 1,
                   }}
                 >
-                  创建
+                  {t("fileTree.create")}
                 </button>
                 <button
                   type="button"
@@ -2243,7 +2267,7 @@ export function FileTree({
                     opacity: creatingRootBusy ? 0.6 : 1,
                   }}
                 >
-                  取消
+                  {t("common.cancel")}
                 </button>
               </div>
             )}
@@ -2332,7 +2356,7 @@ export function FileTree({
             >
               <span
                 onClick={handleDirectoryIconClick}
-                title={entry.is_dir ? (isOpen ? "收起" : "展开") : undefined}
+                title={entry.is_dir ? (isOpen ? t("common.collapse") : t("common.expand")) : undefined}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -2365,8 +2389,8 @@ export function FileTree({
               </span>
               {showRootIndicator ? (
                 <span
-                  aria-label={isRootPending ? "已绑定会话，正在回复" : "已绑定会话"}
-                  title={isRootPending ? "已绑定会话，正在回复" : "已绑定会话"}
+                  aria-label={isRootPending ? t("fileTree.boundSessionReplying") : t("fileTree.boundSession")}
+                  title={isRootPending ? t("fileTree.boundSessionReplying") : t("fileTree.boundSession")}
                   style={{
                     width: "8px",
                     height: "8px",
@@ -2469,6 +2493,7 @@ export function FileTree({
                     }
                     setIsMenuOpen(false);
                     setIsAppearanceMenuOpen(false);
+                    setIsLocaleMenuOpen(false);
                     setIsSortMenuOpen(false);
                   }}
                   style={{
@@ -2490,7 +2515,7 @@ export function FileTree({
                     <path d="M12 5v14" />
                     <path d="M5 12h14" />
                   </svg>
-                  <span>添加项目</span>
+                  <span>{t("fileTree.addProject")}</span>
                 </button>
                 <button
                   type="button"
@@ -2498,7 +2523,7 @@ export function FileTree({
                   style={fileTreeMenuButtonStyle}
                 >
                   <ConfigArchiveIcon />
-                  <span>添加 Agent 配置</span>
+                  <span>{t("fileTree.addAgentConfig")}</span>
                 </button>
                 <button
                   type="button"
@@ -2506,7 +2531,7 @@ export function FileTree({
                   style={fileTreeMenuButtonStyle}
                 >
                   <ConfigSwitchIcon />
-                  <span>Agent 配置切换</span>
+                  <span>{t("fileTree.switchAgentConfig")}</span>
                 </button>
                 <button
                   type="button"
@@ -2514,7 +2539,7 @@ export function FileTree({
                   style={fileTreeMenuButtonStyle}
                 >
                   <AgentInstallIcon />
-                  <span>Agent 安装和更新</span>
+                  <span>{t("fileTree.agentInstallUpdate")}</span>
                 </button>
                 <button
                   type="button"
@@ -2548,6 +2573,7 @@ export function FileTree({
                     setAgentLifecycleOpen(false);
                     setIsMenuOpen(false);
                     setIsAppearanceMenuOpen(false);
+                    setIsLocaleMenuOpen(false);
                     setIsSortMenuOpen(false);
                   }}
                   style={fileTreeMenuButtonStyle}
@@ -2558,13 +2584,17 @@ export function FileTree({
                     <path d="M14 3h7v7" />
                     <path d="m21 3-9 9" />
                   </svg>
-                  <span>公网访问本地服务</span>
+                  <span>{t("fileTree.relayLocalServices")}</span>
                 </button>
                 {!isNativeApp ? <WebPushMenuItem /> : null}
                 <div style={{ height: "1px", background: "var(--border-color)", margin: "6px 4px" }} />
                 <button
                   type="button"
-                  onClick={() => setIsAppearanceMenuOpen((open) => !open)}
+                  onClick={() => {
+                    setIsAppearanceMenuOpen((open) => !open);
+                    setIsLocaleMenuOpen(false);
+                    setIsSortMenuOpen(false);
+                  }}
                   style={{
                     width: "100%",
                     border: "none",
@@ -2581,9 +2611,9 @@ export function FileTree({
                   }}
                   aria-expanded={isAppearanceMenuOpen}
                 >
-                  <span style={{ flex: 1 }}>外观</span>
+                  <span style={{ flex: 1 }}>{t("appearance.title")}</span>
                   <span style={{ color: "var(--text-secondary)", fontSize: "11px" }}>
-                    {APPEARANCE_OPTIONS.find((option) => option.value === appearanceMode)?.label || "跟随系统"}
+                    {t(APPEARANCE_OPTIONS.find((option) => option.value === appearanceMode)?.labelKey || "appearance.system")}
                   </span>
                   <ChevronRight isOpen={isAppearanceMenuOpen} />
                 </button>
@@ -2598,6 +2628,7 @@ export function FileTree({
                         setAppearanceModeState(option.value);
                         setIsMenuOpen(false);
                         setIsAppearanceMenuOpen(false);
+                        setIsLocaleMenuOpen(false);
                         setIsSortMenuOpen(false);
                       }}
                       style={{
@@ -2615,7 +2646,69 @@ export function FileTree({
                         fontSize: "12px",
                       }}
                     >
-                      <span>{option.label}</span>
+                      <span>{t(option.labelKey)}</span>
+                      <span style={{ fontSize: "11px", opacity: active ? 1 : 0 }}>✓</span>
+                    </button>
+                  );
+                }) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsLocaleMenuOpen((open) => !open);
+                    setIsAppearanceMenuOpen(false);
+                    setIsSortMenuOpen(false);
+                  }}
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--text-primary)",
+                    borderRadius: "8px",
+                    padding: "8px 10px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                  }}
+                  aria-expanded={isLocaleMenuOpen}
+                >
+                  <span style={{ flex: 1 }}>{t("locale.language")}</span>
+                  <span style={{ color: "var(--text-secondary)", fontSize: "11px" }}>
+                    {t(LOCALE_OPTIONS.find((option) => option.value === locale)?.labelKey || "locale.zhCN")}
+                  </span>
+                  <ChevronRight isOpen={isLocaleMenuOpen} />
+                </button>
+                {isLocaleMenuOpen ? LOCALE_OPTIONS.map((option) => {
+                  const active = option.value === locale;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        setLocale(option.value);
+                        setIsMenuOpen(false);
+                        setIsAppearanceMenuOpen(false);
+                        setIsLocaleMenuOpen(false);
+                        setIsSortMenuOpen(false);
+                      }}
+                      style={{
+                        width: "100%",
+                        border: "none",
+                        background: active ? "var(--selection-bg)" : "transparent",
+                        color: active ? "var(--accent-color)" : "var(--text-primary)",
+                        borderRadius: "8px",
+                        padding: "8px 10px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                      }}
+                    >
+                      <span>{t(option.labelKey)}</span>
                       <span style={{ fontSize: "11px", opacity: active ? 1 : 0 }}>✓</span>
                     </button>
                   );
@@ -2623,7 +2716,11 @@ export function FileTree({
                 <div style={{ height: "1px", background: "var(--border-color)", margin: "6px 4px" }} />
                 <button
                   type="button"
-                  onClick={() => setIsSortMenuOpen((open) => !open)}
+                  onClick={() => {
+                    setIsSortMenuOpen((open) => !open);
+                    setIsAppearanceMenuOpen(false);
+                    setIsLocaleMenuOpen(false);
+                  }}
                   style={{
                     width: "100%",
                     border: "none",
@@ -2640,9 +2737,9 @@ export function FileTree({
                   }}
                   aria-expanded={isSortMenuOpen}
                 >
-                  <span style={{ flex: 1 }}>全局排序</span>
+                  <span style={{ flex: 1 }}>{t("fileTree.globalSort")}</span>
                   <span style={{ color: "var(--text-secondary)", fontSize: "11px" }}>
-                    {DIRECTORY_SORT_OPTIONS.find((option) => option.value === sortMode)?.label || "默认"}
+                    {sortLabel(sortMode)}
                   </span>
                   <ChevronRight isOpen={isSortMenuOpen} />
                 </button>
@@ -2656,6 +2753,7 @@ export function FileTree({
                       onSortModeChange?.(option.value as DirectorySortMode);
                       setIsMenuOpen(false);
                       setIsAppearanceMenuOpen(false);
+                      setIsLocaleMenuOpen(false);
                       setIsSortMenuOpen(false);
                     }}
                     style={{
@@ -2673,7 +2771,7 @@ export function FileTree({
                       fontSize: "12px",
                     }}
                   >
-                    <span>{option.label}</span>
+                    <span>{sortLabel(option.value as DirectorySortMode)}</span>
                     <span style={{ fontSize: "11px", opacity: active ? 1 : 0 }}>✓</span>
                   </button>
                 );
@@ -2701,7 +2799,7 @@ export function FileTree({
                   fontSize: "12px",
                 }}
               >
-                <span>显示隐藏文件</span>
+                <span>{t("fileTree.showHiddenFiles")}</span>
                 <span style={{ fontSize: "11px", opacity: showHiddenFiles ? 1 : 0 }}>✓</span>
               </button>
               <button
@@ -2726,7 +2824,7 @@ export function FileTree({
                   fontSize: "12px",
                 }}
               >
-                <span>多项目会话列表</span>
+                <span>{t("fileTree.multiProjectSessions")}</span>
                 <span style={{ fontSize: "11px", opacity: multiProjectSessionsEnabled ? 1 : 0 }}>✓</span>
               </button>
               <button
@@ -2751,7 +2849,7 @@ export function FileTree({
                   fontSize: "12px",
                 }}
               >
-                <span>交换左右侧边栏</span>
+                <span>{t("fileTree.swapSidebars")}</span>
                 <span style={{ fontSize: "11px", opacity: sidebarsSwapped ? 1 : 0 }}>✓</span>
               </button>
               <button
@@ -2776,7 +2874,7 @@ export function FileTree({
                   fontSize: "12px",
                 }}
               >
-                <span>双栏 diff 视图</span>
+                <span>{t("fileTree.sideBySideDiff")}</span>
                 <span style={{ fontSize: "11px", opacity: gitDiffSideBySide ? 1 : 0 }}>✓</span>
               </button>
               {showEnterKeySendOption ? (
@@ -2802,7 +2900,7 @@ export function FileTree({
                     fontSize: "12px",
                   }}
                 >
-                  <span>回车键发送</span>
+                  <span>{t("fileTree.enterKeySend")}</span>
                   <span style={{ fontSize: "11px", opacity: enterKeySends ? 1 : 0 }}>✓</span>
                 </button>
               ) : null}
@@ -2970,7 +3068,7 @@ export function FileTree({
               lineHeight: 1.5,
             }}
           >
-            通过上面菜单中的添加项目，添加一个项目开始 vibe 吧
+            {t("fileTree.emptyProjectHint")}
           </div>
         ) : (
           renderEntries(entries, 0, rootId || "")
@@ -3064,7 +3162,7 @@ export function FileTree({
               {updateActionSummary ? (
                 <button
                   type="button"
-                  aria-label={isUpdateNotesOpen ? "隐藏更新说明" : "显示更新说明"}
+                  aria-label={isUpdateNotesOpen ? t("fileTree.hideUpdateNotes") : t("fileTree.showUpdateNotes")}
                   aria-expanded={isUpdateNotesOpen}
                   onClick={() => setIsUpdateNotesOpen((open) => !open)}
                   style={{
@@ -3160,7 +3258,7 @@ export function FileTree({
               {relayTip.dismissible !== false ? (
                 <button
                   type="button"
-                  aria-label="关闭广告"
+                  aria-label={t("fileTree.closeAd")}
                   onClick={dismissRelayTip}
                   style={{
                     position: "absolute",
@@ -3219,7 +3317,7 @@ export function FileTree({
                 {shouldShowNextRelayTip ? (
                   <button
                     type="button"
-                    aria-label="下一个提示"
+                    aria-label={t("fileTree.nextTip")}
                     onClick={showNextRelayTip}
                     style={{
                       border: "none",
@@ -3321,7 +3419,7 @@ export function FileTree({
               fontWeight: 600,
             }}
           >
-            <span>回到节点页</span>
+            <span>{t("fileTree.goHome")}</span>
           </button>
         ) : null}
         {shouldShowInstallButton ? (

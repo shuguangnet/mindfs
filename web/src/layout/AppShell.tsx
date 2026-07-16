@@ -100,6 +100,7 @@ export function AppShell({
   onOpenRight,
   sidebarsSwapped = false,
 }: AppShellProps) {
+  const { t } = useI18n();
   const { isMobile, isTablet } = useResponsive();
 
   const sidebarWidth = isMobile ? "0px" : (isTablet ? "200px" : "260px");
@@ -115,8 +116,8 @@ export function AppShell({
   const physicalLeftOpenHandler = sidebarsSwapped ? onOpenRight : onOpenLeft;
   const physicalRightClose = sidebarsSwapped ? onCloseLeft : onCloseRight;
   const physicalRightOpenHandler = sidebarsSwapped ? onOpenLeft : onOpenRight;
-  const physicalLeftLabel = sidebarsSwapped ? "会话侧栏" : "文件侧栏";
-  const physicalRightLabel = sidebarsSwapped ? "文件侧栏" : "会话侧栏";
+  const physicalLeftLabel = sidebarsSwapped ? t("sidebar.session") : t("sidebar.file");
+  const physicalRightLabel = sidebarsSwapped ? t("sidebar.file") : t("sidebar.session");
 
   const shellStyle: React.CSSProperties & {
     "--mindfs-actionbar-bottom-padding"?: string;
