@@ -80,6 +80,7 @@ type ActionBarProps = {
     content: string;
   } | null;
   queuedMessages?: QueuedMessageInfo[];
+  inputHistory?: string[];
   mobileEnterKeySends?: boolean;
   onSendMessage?: (
     message: string,
@@ -396,6 +397,7 @@ export function ActionBar({
   detachedBoundSession = false,
   editDraftRequest = null,
   queuedMessages = [],
+  inputHistory = [],
   onSendMessage,
   onSetPlanMode,
   onCancelCurrentTurn,
@@ -422,6 +424,7 @@ export function ActionBar({
   const [shells, setShells] = useState<ShellStatus[]>([]);
   const [shell, setShell] = useState("");
   const [serializedInput, setSerializedInput] = useState("");
+  const [inputHistoryIndex, setInputHistoryIndex] = useState<number | null>(null);
   const [activeToken, setActiveToken] = useState<{ type: "file" | "slash" | "prompt" | "command"; query: string } | null>(null);
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -449,6 +452,8 @@ export function ActionBar({
   const uploadAbortRef = useRef<AbortController | null>(null);
   const isComposingRef = useRef(false);
   const compositionGuardUntilRef = useRef(0);
+  const inputHistoryDraftRef = useRef("");
+  const applyingInputHistoryRef = useRef(false);
   const { isMobile } = useResponsive();
   const isConnected = status === "connected";
   const connectionMeta = wsStatusMeta(status, t);
@@ -578,6 +583,7 @@ export function ActionBar({
   const planModeActive = (!!currentSession?.plan_mode || pendingPlanMode) && mode !== "command";
   const planSessionKey = currentSession?.key || currentSession?.session_key || "";
   const planRootId = currentSession?.root_id || currentRootId || "";
+  const sessionHistoryKey = currentSession?.key || currentSession?.session_key || "";
 
   useEffect(() => {
     if (!supportsEffort) {
@@ -599,6 +605,18 @@ export function ActionBar({
       setFastService(getAgentDefaults(selectedAgent).fastService);
     }
   }, [supportsServiceTier, fastService, selectedAgent]);
+
+  useEffect(() => {
+    setInputHistoryIndex(null);
+    inputHistoryDraftRef.current = "";
+  }, [sessionHistoryKey]);
+
+  useEffect(() => {
+    if (inputHistoryIndex !== null && inputHistoryIndex >= inputHistory.length) {
+      setInputHistoryIndex(null);
+      inputHistoryDraftRef.current = "";
+    }
+  }, [inputHistory.length, inputHistoryIndex]);
 
   useEffect(() => () => candidateAbortRef.current?.abort(), []);
 
@@ -725,6 +743,10 @@ export function ActionBar({
     activeToken: { type: "file" | "slash" | "prompt" | "command"; query: string } | null;
   }) => {
     setSerializedInput(payload.serializedText);
+    if (!applyingInputHistoryRef.current && inputHistoryIndex !== null) {
+      setInputHistoryIndex(null);
+      inputHistoryDraftRef.current = payload.serializedText;
+    }
     if (mode === "command") {
       const query = payload.displayText.trim();
       if (!query) {
@@ -748,7 +770,48 @@ export function ActionBar({
       return;
     }
     requestAnimationFrame(syncEditorHeight);
-  }, [mode, syncEditorHeight]);
+  }, [inputHistoryIndex, mode, syncEditorHeight]);
+
+  const applyInputHistoryAt = useCallback((index: number | null) => {
+    const nextText = index === null ? inputHistoryDraftRef.current : inputHistory[index] || "";
+    applyingInputHistoryRef.current = true;
+    editorRef.current?.setText(nextText);
+    setSerializedInput(nextText);
+    setInputHistoryIndex(index);
+    setActiveToken(null);
+    setCandidates([]);
+    setActiveCandidateIndex(0);
+    requestAnimationFrame(() => {
+      applyingInputHistoryRef.current = false;
+      syncEditorHeight();
+    });
+  }, [inputHistory, syncEditorHeight]);
+
+  const navigateInputHistory = useCallback((direction: "previous" | "next"): boolean => {
+    if (inputHistory.length === 0) {
+      return false;
+    }
+    if (direction === "previous") {
+      if (inputHistoryIndex === null) {
+        inputHistoryDraftRef.current = serializedInput;
+        applyInputHistoryAt(inputHistory.length - 1);
+        return true;
+      }
+      if (inputHistoryIndex > 0) {
+        applyInputHistoryAt(inputHistoryIndex - 1);
+      }
+      return true;
+    }
+    if (inputHistoryIndex === null) {
+      return false;
+    }
+    if (inputHistoryIndex < inputHistory.length - 1) {
+      applyInputHistoryAt(inputHistoryIndex + 1);
+    } else {
+      applyInputHistoryAt(null);
+    }
+    return true;
+  }, [applyInputHistoryAt, inputHistory, inputHistoryIndex, serializedInput]);
 
   const applyCandidate = useCallback((candidate: CandidateItem) => {
     if (!activeToken) return;
@@ -833,6 +896,8 @@ export function ActionBar({
       );
       editorRef.current?.clear();
       setSerializedInput("");
+      setInputHistoryIndex(null);
+      inputHistoryDraftRef.current = "";
       setActiveToken(null);
       setCandidates([]);
       setActiveCandidateIndex(0);
@@ -937,7 +1002,18 @@ export function ActionBar({
         return;
       }
     }
-  }, [candidates, activeCandidateIndex, applyCandidate, isCompositionActive]);
+    if (!activeToken && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      if (e.key === "ArrowUp" && navigateInputHistory("previous")) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (e.key === "ArrowDown" && navigateInputHistory("next")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+  }, [candidates, activeCandidateIndex, applyCandidate, isCompositionActive, activeToken, navigateInputHistory]);
 
   const handleEditorEnter = useCallback((event: KeyboardEvent | null) => {
     if (isCompositionActive(event)) {

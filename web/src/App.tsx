@@ -401,6 +401,21 @@ function latestExchangeText(
   return "";
 }
 
+function sessionInputHistory(session: { exchanges?: Array<{ role?: string; content?: string }> } | null | undefined): string[] {
+  const exchanges = Array.isArray(session?.exchanges) ? session.exchanges : [];
+  const items: string[] = [];
+  for (const exchange of exchanges) {
+    if (exchange?.role !== "user") {
+      continue;
+    }
+    const content = String(exchange.content || "").trim();
+    if (content) {
+      items.push(content);
+    }
+  }
+  return items;
+}
+
 function toSessionItem(
   rootID: string | null | undefined,
   session: any,
@@ -10330,6 +10345,12 @@ export function App({ onGoHome }: AppProps) {
     (actionBarSession as any)?.key ||
     (actionBarSession as any)?.session_key ||
     "";
+  const actionBarInputHistory = sessionInputHistory(
+    getSessionSnapshot(
+      ((actionBarSession as any)?.root_id as string | undefined) || currentRootId,
+      actionBarSession as any,
+    ) || (actionBarSession as any),
+  );
   const isBoundSessionInMain =
     !!activeBoundSessionKey &&
     selectedKey === activeBoundSessionKey &&
@@ -13706,6 +13727,7 @@ export function App({ onGoHome }: AppProps) {
               detachedBoundSession={detachedBoundSession}
               editDraftRequest={editDraftRequest}
               queuedMessages={actionBarQueuedMessages}
+              inputHistory={actionBarInputHistory}
               onSendMessage={handleSendMessage}
               onSetPlanMode={handleSetPlanMode}
               onCancelCurrentTurn={handleCancelCurrentTurn}
