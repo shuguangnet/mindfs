@@ -14,7 +14,7 @@ require (
 	github.com/roasbeef/claude-agent-sdk-go v0.0.0-20260423113330-380f586b1dc2
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/crypto v0.52.0
-	golang.org/x/sys v0.45.0
+	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.34.5
