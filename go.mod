@@ -8,7 +8,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/fanwenlin/codex-go-sdk v0.0.0
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/go-chi/chi/v5 v5.2.2
+	github.com/go-chi/chi/v5 v5.2.4
 	github.com/gorilla/websocket v1.5.1
 	github.com/hashicorp/yamux v0.1.2
 	github.com/roasbeef/claude-agent-sdk-go v0.0.0-20260423113330-380f586b1dc2
