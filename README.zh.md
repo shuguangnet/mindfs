@@ -167,7 +167,7 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/shuguangnet/mindfs/mai
 
 如需同时删除用户级 MindFS 配置和日志，macOS/Linux 追加 `--purge`，Windows 追加 `-Purge`。项目目录中的 `.mindfs/` 不会被自动删除。
 
-**从源码编译**（需要 Go 1.22+、Node.js 20+）
+**从源码编译**（需要 Go 1.25+、Node.js 22.12+）
 ```bash
 git clone https://github.com/shuguangnet/mindfs.git
 cd mindfs

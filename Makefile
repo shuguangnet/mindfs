@@ -88,7 +88,7 @@ HARMONY_DIST_HAP ?= $(DIST_DIR)/mindfs_$(VERSION)_harmony_$(HARMONY_BUILD_MODE).
 RELEASE_ANDROID ?= 0
 RELEASE_UPLOAD_JOBS ?= 4
 RELEASE_REPO ?= shuguangnet/mindfs
-RELEASE_REMOTE ?= fork
+RELEASE_REMOTE ?= origin
 ANDROID_JAVA_HOME ?= $(shell if command -v /usr/libexec/java_home >/dev/null 2>&1; then /usr/libexec/java_home -v 21 2>/dev/null; fi)
 ANDROID_GRADLE_ENV :=
 ifneq ($(strip $(ANDROID_JAVA_HOME)),)

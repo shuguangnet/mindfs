@@ -165,7 +165,7 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/shuguangnet/mindfs/mai
 
 To also remove user-level MindFS config and logs, add `--purge` on macOS/Linux or `-Purge` on Windows. Project `.mindfs/` directories are never removed automatically.
 
-**Build from source** (requires Go 1.22+, Node.js 20+)
+**Build from source** (requires Go 1.25+, Node.js 22.12+)
 ```bash
 git clone https://github.com/shuguangnet/mindfs.git
 cd mindfs
