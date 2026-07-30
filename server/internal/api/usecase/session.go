@@ -739,17 +739,24 @@ func (s *Service) GetSessionContextWindow(ctx context.Context, in GetSessionCont
 	}
 	pool := s.Registry.GetAgentPool()
 	if pool == nil {
-		return agenttypes.ContextWindow{}, nil
+		return current.LastContextWindow, nil
 	}
 	agentName := strings.TrimSpace(session.InferAgentFromSession(current))
 	if agentName == "" {
-		return agenttypes.ContextWindow{}, nil
+		return current.LastContextWindow, nil
 	}
 	sess, ok := pool.Get(agentPoolSessionKey(in.Key, agentName))
 	if !ok || sess == nil {
-		return agenttypes.ContextWindow{}, nil
+		return current.LastContextWindow, nil
 	}
-	return sess.ContextWindow(ctx)
+	contextWindow, err := sess.ContextWindow(ctx)
+	if err != nil {
+		return agenttypes.ContextWindow{}, err
+	}
+	if contextWindow.TotalTokens <= 0 || contextWindow.ModelContextWindow <= 0 {
+		return current.LastContextWindow, nil
+	}
+	return contextWindow, nil
 }
 
 type GetSessionRelatedFilesInput struct {
@@ -1049,12 +1056,23 @@ type SendMessageInput struct {
 	Shell                  string
 	TerminalCols           int
 	Content                string
+	UserTimestamp          time.Time
 	ClientCtx              ClientContext
 	OnStart                func()
 	OnUpdate               func(agenttypes.Event)
 	OnSubSessionCreated    func(*session.Session)
 	OnSubSessionUpdate     func(sessionKey string, update agenttypes.Event)
 	OnAgentDefaultsChanged func(agentName string)
+}
+
+func sendMessageUserTimestamp(in SendMessageInput, fallback time.Time) time.Time {
+	if !in.UserTimestamp.IsZero() {
+		return in.UserTimestamp.UTC()
+	}
+	if fallback.IsZero() {
+		return time.Now().UTC()
+	}
+	return fallback.UTC()
 }
 
 type RunTransientSlashCommandInput struct {
@@ -1962,6 +1980,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	if err := s.ensureRegistry(); err != nil {
 		return err
 	}
+	userTimestamp := sendMessageUserTimestamp(in, time.Now().UTC())
 	sendLock := getSessionSendLock(in.Key)
 	sendLock.Lock()
 	defer sendLock.Unlock()
@@ -2026,6 +2045,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	})
 	var responseText string
 	sawAssistantChunk := false
+	var lastContextWindow agenttypes.ContextWindow
 	plannedAssistantSeq := len(current.Exchanges) + 2
 	auxBuffer := make([]session.ExchangeAux, 0, 8)
 	defer manager.ClearPendingExchangeAux(context.Background(), current.Key)
@@ -2160,6 +2180,10 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 					responseText = appendResponseChunk(responseText, lastResponseUpdateType, chunk.Content)
 					lastResponseUpdateType = string(update.Type)
 				}
+			} else if update.Type == agenttypes.EventTypeMessageDone {
+				if done, ok := update.Data.(agenttypes.MessageDone); ok {
+					lastContextWindow = done.ContextWindow
+				}
 			} else if update.Type == agenttypes.EventTypeThoughtChunk ||
 				update.Type == agenttypes.EventTypeToolCall ||
 				update.Type == agenttypes.EventTypeToolUpdate ||
@@ -2243,12 +2267,15 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	resolvedMode := resolveRuntimeMode(current, in.Mode)
 	modelDisplayName := s.resolveExchangeModelDisplayName(in.Agent, resolvedModel)
 	exchangeCtx := session.WithExchangeModelDisplayName(ctx, modelDisplayName)
-	if err := manager.AddExchangeForAgent(exchangeCtx, current, "user", in.Content, in.Agent, resolvedMode, resolvedEffort, resolvedFastService); err != nil {
+	if err := manager.AddExchangeForAgentAt(exchangeCtx, current, "user", in.Content, in.Agent, resolvedMode, resolvedEffort, resolvedFastService, userTimestamp); err != nil {
 		log.Printf("[session] persist.user.error root=%s session=%s agent=%s err=%v", in.RootID, current.Key, in.Agent, err)
 		return err
 	}
 	if err := manager.AddExchangeForAgent(exchangeCtx, current, "agent", responseText, in.Agent, resolvedMode, resolvedEffort, resolvedFastService); err != nil {
 		log.Printf("[session] persist.agent.error root=%s session=%s agent=%s err=%v", in.RootID, current.Key, in.Agent, err)
+		return err
+	}
+	if err := manager.UpdateLastContextWindow(ctx, current, lastContextWindow); err != nil {
 		return err
 	}
 	for _, aux := range dedupeExchangeAuxBuffer(auxBuffer) {
@@ -2958,6 +2985,7 @@ func (s *Service) sendCommandMessage(ctx context.Context, in SendMessageInput, m
 	if serverID, remoteShellID, ok := remote.ParseName(in.Shell); ok {
 		return s.sendRemoteCommandMessage(ctx, in, manager, current, serverID, remoteShellID)
 	}
+	userTimestamp := sendMessageUserTimestamp(in, time.Now().UTC())
 	root := manager.Root()
 	rootAbs, err := root.RootDir()
 	if err != nil {
@@ -3005,7 +3033,7 @@ func (s *Service) sendCommandMessage(ctx context.Context, in SendMessageInput, m
 			in.OnUpdate(agenttypes.Event{Type: agenttypes.EventTypeToolUpdate, Data: final})
 			in.OnUpdate(agenttypes.Event{Type: agenttypes.EventTypeMessageDone, Data: agenttypes.MessageDone{}})
 		}
-		if persistErr := persistCommandTurn(ctx, manager, current, in.Content, final, plannedAssistantSeq); persistErr != nil {
+		if persistErr := persistCommandTurn(ctx, manager, current, in.Content, final, plannedAssistantSeq, userTimestamp); persistErr != nil {
 			return persistErr
 		}
 		return err
@@ -3087,7 +3115,7 @@ func (s *Service) sendCommandMessage(ctx context.Context, in SendMessageInput, m
 		in.OnUpdate(agenttypes.Event{Type: agenttypes.EventTypeToolUpdate, Data: final})
 		in.OnUpdate(agenttypes.Event{Type: agenttypes.EventTypeMessageDone, Data: agenttypes.MessageDone{}})
 	}
-	if err := persistCommandTurn(context.Background(), manager, current, in.Content, final, plannedAssistantSeq); err != nil {
+	if err := persistCommandTurn(context.Background(), manager, current, in.Content, final, plannedAssistantSeq, userTimestamp); err != nil {
 		log.Printf("[command] persist.error root=%s session=%s call=%s err=%v", in.RootID, current.Key, callID, err)
 		return err
 	}
@@ -3164,6 +3192,7 @@ type remoteRegistry interface {
 }
 
 func (s *Service) sendRemoteCommandMessage(ctx context.Context, in SendMessageInput, manager *session.Manager, current *session.Session, serverID, remoteShellID string) error {
+	userTimestamp := sendMessageUserTimestamp(in, time.Now().UTC())
 	registry, ok := s.Registry.(remoteRegistry)
 	if !ok || registry.GetRemoteManager() == nil {
 		return errors.New("remote manager not configured")
@@ -3267,7 +3296,7 @@ func (s *Service) sendRemoteCommandMessage(ctx context.Context, in SendMessageIn
 	if err := manager.UpdateShell(context.Background(), current, remote.EncodeShellID(server.ID, remoteShellID)); err != nil {
 		log.Printf("[remote-command] shell.update.error root=%s session=%s shell=%q err=%v", in.RootID, current.Key, remoteShellID, err)
 	}
-	if err := persistCommandTurn(context.Background(), manager, current, in.Content, *final, plannedAssistantSeq); err != nil {
+	if err := persistCommandTurn(context.Background(), manager, current, in.Content, *final, plannedAssistantSeq, userTimestamp); err != nil {
 		return err
 	}
 	return nil
@@ -3353,8 +3382,8 @@ func configuredShells(registry Registry) []commandexec.ShellSpec {
 	return shells
 }
 
-func persistCommandTurn(ctx context.Context, manager *session.Manager, current *session.Session, command string, final agenttypes.ToolCall, plannedAssistantSeq int) error {
-	if err := manager.AddExchangeForAgent(ctx, current, "user", command, "", "", "", ""); err != nil {
+func persistCommandTurn(ctx context.Context, manager *session.Manager, current *session.Session, command string, final agenttypes.ToolCall, plannedAssistantSeq int, userTimestamp time.Time) error {
+	if err := manager.AddExchangeForAgentAt(ctx, current, "user", command, "", "", "", "", userTimestamp); err != nil {
 		return err
 	}
 	if err := manager.AddExchangeForAgent(ctx, current, "agent", "", "", "", "", ""); err != nil {
