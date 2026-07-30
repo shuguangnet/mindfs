@@ -26,7 +26,7 @@
     "@json-render/shadcn": "^0.11.0",
     "@lexical/plain-text": "^0.41.0",
     "@lexical/react": "^0.41.0",
-    "@lexical/selection": "^0.41.0",
+    "@lexical/selection": "^0.48.0",
     "@lexical/utils": "^0.41.0",
     "antd": "^6.5.0",
     "diff": "^9.0.0",
