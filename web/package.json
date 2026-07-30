@@ -28,7 +28,7 @@
     "@lexical/react": "^0.41.0",
     "@lexical/selection": "^0.41.0",
     "@lexical/utils": "^0.41.0",
-    "antd": "^6.5.0",
+    "antd": "^6.5.2",
     "diff": "^9.0.0",
     "katex": "^0.16.47",
     "lexical": "^0.41.0",
