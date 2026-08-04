@@ -1,3 +1,15 @@
+# MindFS v0.4.15
+
+## 新功能
+- 同步上游会话置顶和新会话创建 worktree 功能
+- 支持预览 DOCX、PPTX、XLSX 和 PDF 文件
+
+## 优化和修复
+- 优化 worktree 分支选择器和 Agent 选择器默认展开行为
+- 修复任务已启动仍显示排队中、任务会话模型显示和 Windows 状态检测问题
+- 保留 fork 的远程 Agent、受保护的 Agent 生命周期接口、Git 远端工作流、自定义主题和服务器部署能力
+
+
 # MindFS v0.4.14
 
 ## 新功能
