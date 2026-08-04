@@ -1806,6 +1806,7 @@ export function ActionBar({
                     }}
                     compact={true}
                     warnUnavailable={isSelectedAgentUnavailable}
+                    defaultExpandOptions
                   />
                 </div>
               ) : (
