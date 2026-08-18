@@ -34,7 +34,7 @@
     "docx-preview": "^0.4.0",
     "katex": "^0.16.47",
     "lexical": "^0.41.0",
-    "mermaid": "^11.14.0",
+    "mermaid": "^11.16.1",
     "pdfjs-dist": "^4.8.69",
     "pptx-preview": "^1.0.7",
     "prismjs": "^1.29.0",
