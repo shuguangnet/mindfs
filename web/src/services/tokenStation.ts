@@ -23,14 +23,6 @@ export type TokenStationInfo = {
   };
 };
 
-export type TokenStationBindStatus = {
-  bound?: boolean;
-  pending_code?: string;
-  relay_base_url?: string;
-  topup_url?: string;
-  last_error?: string;
-};
-
 export async function fetchTokenStationInfo(purpose: "balance" | "apply" = "balance"): Promise<TokenStationInfo> {
   const params = new URLSearchParams({ purpose });
   const target = appPath(`/api/token-station/userinfo?${params.toString()}`);
@@ -41,16 +33,4 @@ export async function fetchTokenStationInfo(purpose: "balance" | "apply" = "bala
     throw new Error(`token_station_info_failed_${response.status}`);
   }
   return e2eeService.parseProtectedJSONResponse<TokenStationInfo>(response);
-}
-
-export async function startTokenStationBinding(): Promise<TokenStationBindStatus> {
-  const target = appPath("/api/token-station/bind/start");
-  const init: RequestInit = { method: "POST" };
-  const response = e2eeService.isRequired()
-    ? await e2eeService.protectedFetch(target, init)
-    : await fetch(target, init);
-  if (!response.ok) {
-    throw new Error(`token_station_bind_failed_${response.status}`);
-  }
-  return e2eeService.parseProtectedJSONResponse<TokenStationBindStatus>(response);
 }

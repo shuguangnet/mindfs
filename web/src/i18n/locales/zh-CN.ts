@@ -553,8 +553,6 @@ export const zhCN = {
   "tokenStation.reading": "读取中",
   "tokenStation.unbound": "未绑定账户",
   "tokenStation.apply": "配置生效",
-  "tokenStation.processing": "处理中",
-  "tokenStation.topUp": "去加油",
 
   "plugin.loading": "加载中...",
   "plugin.rawFile": "原始文件",

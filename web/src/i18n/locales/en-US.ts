@@ -555,8 +555,6 @@ export const enUS = {
   "tokenStation.reading": "Reading",
   "tokenStation.unbound": "No account bound",
   "tokenStation.apply": "Apply config",
-  "tokenStation.processing": "Processing",
-  "tokenStation.topUp": "Top up",
 
   "plugin.loading": "Loading...",
   "plugin.rawFile": "Raw file",

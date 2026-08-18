@@ -31,7 +31,6 @@ import {
 } from "./services/bootstrap";
 import {
   fetchTokenStationInfo,
-  startTokenStationBinding,
   type TokenStationInfo,
 } from "./services/tokenStation";
 import { syncAgentAPIProviders } from "./services/agentConfig";
@@ -1340,17 +1339,6 @@ function parseFirstNumber(text: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function tokenStationWalletURL(baseURL: string): string {
-  const fallback = "http://localhost:3000";
-  const trimmed = String(baseURL || "").trim().replace(/\/+$/, "");
-  const target = `${trimmed || fallback}/wallet`;
-  try {
-    return new URL(target).toString();
-  } catch {
-    return `${fallback}/wallet`;
-  }
-}
-
 function normalizeTokenStationAPIKey(value: string): string {
   const apiKey = String(value || "").trim();
   if (!apiKey) {
@@ -2383,7 +2371,6 @@ export function App({ onGoHome }: AppProps) {
   const [tokenStationInfo, setTokenStationInfo] =
     useState<TokenStationInfo | null>(null);
   const [tokenStationLoading, setTokenStationLoading] = useState(false);
-  const [tokenStationBusy, setTokenStationBusy] = useState(false);
   const [tokenStationApplyBusy, setTokenStationApplyBusy] = useState(false);
   const [tokenStationErrorOpen, setTokenStationErrorOpen] = useState(false);
   const [agentConfigSwitchRequest, setAgentConfigSwitchRequest] =
@@ -13410,38 +13397,6 @@ export function App({ onGoHome }: AppProps) {
     void refreshTokenStationInfo();
   }, [refreshTokenStationInfo, selectedSession?.updated_at]);
 
-  const handleTokenStationAction = useCallback(async () => {
-    setTokenStationErrorOpen(false);
-    const topupURL = String(tokenStationInfo?.data?.topup_url || "http://localhost:3000");
-    const walletURL = tokenStationWalletURL(topupURL);
-    if (relayStatus?.relay_bound || relayStatus?.token_station_bound) {
-      window.open(walletURL, "_blank", "noopener,noreferrer");
-      return;
-    }
-    const pendingPopup = openPendingPopup();
-    setTokenStationBusy(true);
-    try {
-      const status = await startTokenStationBinding();
-      if (status.bound) {
-        window.open(tokenStationWalletURL(String(status.topup_url || topupURL)), "_blank", "noopener,noreferrer");
-        pendingPopup?.close();
-        return;
-      }
-      const pendingCode = String(status.pending_code || "");
-      const relayBaseURL = String(status.relay_base_url || relayStatus?.relay_base_url || "");
-      if (!pendingCode || !relayBaseURL) {
-        pendingPopup?.close();
-        return;
-      }
-      const target = new URL("/bind", relayBaseURL);
-      target.searchParams.set("code", pendingCode);
-      target.searchParams.set("purpose", "token_station");
-      navigatePopup(pendingPopup, target.toString());
-    } finally {
-      setTokenStationBusy(false);
-    }
-  }, [relayStatus, tokenStationInfo]);
-
   const handleTokenStationApply = useCallback(async () => {
     setTokenStationErrorOpen(false);
     setTokenStationApplyBusy(true);
@@ -13911,27 +13866,6 @@ export function App({ onGoHome }: AppProps) {
               <span style={{ fontSize: isTablet ? 10 : 11 }}>{t("tokenStation.apply")}</span>
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={() => void handleTokenStationAction()}
-            disabled={tokenStationBusy}
-            style={{
-              flex: "0 0 auto",
-              height: 23,
-              border: "none",
-              borderRadius: 6,
-              background: "var(--accent-color)",
-              color: "#fff",
-              fontSize: 11,
-              fontWeight: 650,
-              cursor: tokenStationBusy ? "default" : "pointer",
-              opacity: tokenStationBusy ? 0.65 : 1,
-              padding: "0 5px",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {tokenStationBusy ? t("tokenStation.processing") : t("tokenStation.topUp")}
-          </button>
         </div>
       </section>
   );
