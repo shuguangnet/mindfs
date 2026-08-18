@@ -1664,6 +1664,45 @@ func TestBuildUserPromptSelectionOnly(t *testing.T) {
 	}
 }
 
+func TestBuildPromptAddsReplyTipsOnlyWhenUserMessageFallbackIsRequested(t *testing.T) {
+	service := &Service{}
+
+	initial := service.BuildPrompt(BuildPromptInput{
+		Message:                       "hello",
+		IsInitial:                     true,
+		IncludeReplyTipsInUserMessage: true,
+	})
+	if initial != "hello\n\n"+replyTips {
+		t.Fatalf("initial prompt does not put the user message before reply tips: %q", initial)
+	}
+
+	followup := service.BuildPrompt(BuildPromptInput{
+		Message: "hello again",
+	})
+	if strings.Contains(followup, "[REPLY_TIPS]") {
+		t.Fatalf("follow-up prompt unexpectedly contains reply tips: %q", followup)
+	}
+
+	native := service.BuildPrompt(BuildPromptInput{
+		Message:   "hello",
+		IsInitial: true,
+	})
+	if native != "hello" {
+		t.Fatalf("native-instruction prompt changed the user message: %q", native)
+	}
+
+	plugin := service.BuildPrompt(BuildPromptInput{
+		Message:   "build a plugin",
+		IsInitial: true,
+		ClientContext: ClientContext{
+			PluginCatalog: "plugin catalog",
+		},
+	})
+	if strings.Contains(plugin, "[REPLY_TIPS]") {
+		t.Fatalf("plugin prompt unexpectedly contains reply tips: %q", plugin)
+	}
+}
+
 func TestSessionNameScore(t *testing.T) {
 	testCases := []struct {
 		name    string
