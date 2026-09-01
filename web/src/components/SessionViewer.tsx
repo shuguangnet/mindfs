@@ -7,7 +7,7 @@ import { AgentIcon } from "./AgentIcon";
 import { InlineTokenText } from "./InlineTokenText";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { fetchProofProtectedBlob } from "../services/file";
-import type { ExchangeAux, RelatedFile, ToolCall } from "../services/session";
+import type { ExchangeAux, RelatedFile, TokenUsage, ToolCall } from "../services/session";
 import { savePrompt } from "../services/prompts";
 import { reportError } from "../services/error";
 import { rootBadgeButtonStyle } from "./rootBadgeStyle";
@@ -15,6 +15,10 @@ import { copyText } from "../services/clipboard";
 import type { AgentStatus } from "../services/agents";
 import { useI18n, type Locale } from "../i18n";
 import { formatSessionDuration } from "../services/sessionDuration";
+import {
+  relatedFileStatKey,
+  useRelatedFileStats,
+} from "../hooks/useRelatedFileStats";
 
 type SessionItem = {
   key?: string;
@@ -43,6 +47,7 @@ type SessionItem = {
       totalTokens: number;
       modelContextWindow: number;
     };
+    token_usage?: TokenUsage;
   }>;
   closed_at?: string;
   source?: string;
@@ -91,6 +96,7 @@ type SessionViewerProps = {
   onForkAgentMessage?: (seq: number) => void | Promise<void>;
   targetSeqRequestKey?: string | number;
   agents?: AgentStatus[];
+  composerOverlayInset?: number;
 };
 
 type AskUserQuestionOption = {
@@ -250,6 +256,55 @@ function formatCompactTokenCount(value: number) {
   return String(Math.round(value));
 }
 
+function formatTurnTokenCount(value: number) {
+  const tokens = Math.max(0, Number(value || 0));
+  const compact = (amount: number, suffix: string) => {
+    const digits = amount >= 100 ? 0 : amount >= 10 ? 1 : 2;
+    return `${Number(amount.toFixed(digits))}${suffix}`;
+  };
+  if (tokens >= 1_000_000) {
+    return compact(tokens / 1_000_000, "m");
+  }
+  if (tokens >= 1_000) {
+    return compact(tokens / 1_000, "k");
+  }
+  return String(Math.round(tokens));
+}
+
+function TurnTokenUsage({ usage }: { usage?: TokenUsage }) {
+  if (!usage) {
+    return null;
+  }
+  const inputTokens = Math.max(0, Number(usage.inputTokens || 0));
+  const outputTokens = Math.max(0, Number(usage.outputTokens || 0));
+  if (!inputTokens && !outputTokens) {
+    return null;
+  }
+  const cacheReadReported = Number.isFinite(usage.cacheReadTokens);
+  const cacheReadTokens = Math.max(0, Number(usage.cacheReadTokens || 0));
+  const hitPercent = inputTokens > 0 && cacheReadReported
+    ? Math.round(Math.min(1, cacheReadTokens / inputTokens) * 100)
+    : null;
+  const cacheLabel = hitPercent === null ? "—" : `${hitPercent}%`;
+  return (
+    <span
+      title={`${inputTokens}(♻ ${cacheLabel})→${outputTokens}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        flexWrap: "wrap",
+        minWidth: 0,
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
+      <span>{formatTurnTokenCount(inputTokens)}</span>
+      <span>{`(♻ ${cacheLabel})`}</span>
+      <span>→</span>
+      <span>{formatTurnTokenCount(outputTokens)}</span>
+    </span>
+  );
+}
+
 function modelDisplayName(
   agents: AgentStatus[] | undefined,
   agentName?: string,
@@ -308,13 +363,15 @@ function ContextWindowBadge({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
+        flexWrap: "wrap",
+        minWidth: 0,
         color: hue,
         lineHeight: 1.1,
-        flexShrink: 0,
         fontSize: "10px",
         fontWeight: 700,
         letterSpacing: "0.01em",
         fontVariantNumeric: "tabular-nums",
+        overflowWrap: "anywhere",
       }}
     >
       <span>{metrics.percent}%</span>
@@ -1016,6 +1073,7 @@ function SessionViewerInner({
   onEditUserMessage,
   onForkAgentMessage,
   agents,
+  composerOverlayInset = 0,
 }: SessionViewerProps) {
   const { locale, t } = useI18n();
   const [relatedFilesCollapsed, setRelatedFilesCollapsed] = useState(false);
@@ -1435,6 +1493,15 @@ function SessionViewerInner({
       return { path, name, head, repo_path: repoPath, repo_name: repoName, repo_kind: repoKind, root_id: rootID };
     })
     .filter((f) => f.path);
+  const gitStatsRefreshKey = Object.entries(gitFileStatsByPath)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([path, stats]) => `${path}:${stats.status}:${stats.additions}:${stats.deletions}`)
+    .join("|");
+  const relatedFileStatsByKey = useRelatedFileStats(
+    rootId,
+    relatedFiles,
+    gitStatsRefreshKey,
+  );
   const activeAskUserCallId = (() => {
     if (!isAwaiting) {
       return "";
@@ -2025,8 +2092,11 @@ function SessionViewerInner({
                 style={{
                   alignSelf: "flex-start",
                   display: "inline-flex",
+                  flexWrap: "nowrap",
                   alignItems: "center",
-                  gap: "6px",
+                  gap: "8px",
+                  maxWidth: "100%",
+                  minWidth: 0,
                   fontSize: "10px",
                   color: "var(--text-secondary)",
                   opacity: 0.5,
@@ -2034,103 +2104,170 @@ function SessionViewerInner({
                   marginBottom: "4px",
                 }}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!assistantMarkdownContent) {
-                      reportError(
-                        "clipboard.write_failed",
-                        t("session.emptyMessageCannotCopy"),
-                      );
-                      return;
-                    }
-                    void copyText(assistantMarkdownContent)
-                      .then(() => {
-                        setCopiedMessageKeys((prev) => ({
-                          ...prev,
-                          [promptKey]: true,
-                        }));
-                        if (copyResetTimersRef.current[promptKey]) {
-                          window.clearTimeout(
-                            copyResetTimersRef.current[promptKey],
-                          );
-                        }
-                        copyResetTimersRef.current[promptKey] =
-                          window.setTimeout(() => {
-                            setCopiedMessageKeys((prev) => {
-                              const next = { ...prev };
-                              delete next[promptKey];
-                              return next;
-                            });
-                            delete copyResetTimersRef.current[promptKey];
-                          }, 1000);
-                      })
-                      .catch((err) => {
-                        reportError(
-                          "clipboard.write_failed",
-                          String((err as Error)?.message || t("session.copyFailed")),
-                        );
-                      });
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "3px",
+                    flexShrink: 0,
                   }}
-                  style={userMetaButtonStyle}
-                  aria-label={t("session.copyMarkdown")}
-                  title={t("session.copyMarkdown")}
                 >
-                  {copySucceeded ? (
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        fontSize: "13px",
-                        fontWeight: 800,
-                        lineHeight: 1,
-                      }}
-                    >
-                      ✓
-                    </span>
-                  ) : (
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fill="currentColor"
-                        d="M20 2H10c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2m0 12H10V4h10z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M14 20H4V10h2V8H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-2h-2z"
-                      />
-                    </svg>
-                  )}
-                </button>
-                {canForkAgentMessage ? (
                   <button
                     type="button"
                     onClick={() => {
-                      const seq = Number(item.seq || 0);
-                      if (seq > 0) {
-                        void onForkAgentMessage?.(seq);
+                      if (!assistantMarkdownContent) {
+                        reportError(
+                          "clipboard.write_failed",
+                          t("session.emptyMessageCannotCopy"),
+                        );
+                        return;
                       }
+                      void copyText(assistantMarkdownContent)
+                        .then(() => {
+                          setCopiedMessageKeys((prev) => ({
+                            ...prev,
+                            [promptKey]: true,
+                          }));
+                          if (copyResetTimersRef.current[promptKey]) {
+                            window.clearTimeout(
+                              copyResetTimersRef.current[promptKey],
+                            );
+                          }
+                          copyResetTimersRef.current[promptKey] =
+                            window.setTimeout(() => {
+                              setCopiedMessageKeys((prev) => {
+                                const next = { ...prev };
+                                delete next[promptKey];
+                                return next;
+                              });
+                              delete copyResetTimersRef.current[promptKey];
+                            }, 1000);
+                        })
+                        .catch((err) => {
+                          reportError(
+                            "clipboard.write_failed",
+                            String((err as Error)?.message || t("session.copyFailed")),
+                          );
+                        });
                     }}
                     style={userMetaButtonStyle}
-                    aria-label={t("session.forkFromMessage")}
-                    title={t("session.forkFromMessage")}
+                    aria-label={t("session.copyMarkdown")}
+                    title={t("session.copyMarkdown")}
                   >
-                    <ForkIcon />
+                    {copySucceeded ? (
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          fontSize: "13px",
+                          fontWeight: 800,
+                          lineHeight: 1,
+                        }}
+                      >
+                        ✓
+                      </span>
+                    ) : (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fill="currentColor"
+                          d="M20 2H10c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2m0 12H10V4h10z"
+                        />
+                        <path
+                          fill="currentColor"
+                          d="M14 20H4V10h2V8H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-2h-2z"
+                        />
+                      </svg>
+                    )}
                   </button>
-                ) : null}
-                <AgentIcon
-                  agentName={item.agent || ""}
-                  style={{ width: "12px", height: "12px" }}
-                />
-                {assistantExchangeMeta ? (
-                  <span>{assistantExchangeMeta}</span>
-                ) : null}
-                <span>{time}{assistantDurationLabel ? ` ${assistantDurationLabel}` : ""}</span>
-                <ContextWindowBadge contextWindow={item.contextWindow} />
+                  {canForkAgentMessage ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const seq = Number(item.seq || 0);
+                        if (seq > 0) {
+                          void onForkAgentMessage?.(seq);
+                        }
+                      }}
+                      style={userMetaButtonStyle}
+                      aria-label={t("session.forkFromMessage")}
+                      title={t("session.forkFromMessage")}
+                    >
+                      <ForkIcon />
+                    </button>
+                  ) : null}
+                  <AgentIcon
+                    agentName={item.agent || ""}
+                    style={{ width: "12px", height: "12px", flexShrink: 0 }}
+                  />
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    flex: "1 1 auto",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    gap: "0 8px",
+                    minWidth: 0,
+                    lineHeight: "16px",
+                  }}
+                >
+                  {assistantExchangeMeta ? (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        minHeight: "16px",
+                        minWidth: 0,
+                        maxWidth: "100%",
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {assistantExchangeMeta}
+                    </span>
+                  ) : null}
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      minHeight: "16px",
+                      minWidth: 0,
+                      maxWidth: "100%",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    <TurnTokenUsage usage={item.tokenUsage} />
+                  </span>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      minHeight: "16px",
+                      minWidth: 0,
+                      maxWidth: "100%",
+                      fontVariantNumeric: "tabular-nums",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {time}{assistantDurationLabel ? ` ${assistantDurationLabel}` : ""}
+                  </span>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      minHeight: "16px",
+                      minWidth: 0,
+                      maxWidth: "100%",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    <ContextWindowBadge contextWindow={item.contextWindow} />
+                  </span>
+                </span>
               </span>
             )}
           </div>
@@ -2624,7 +2761,11 @@ function SessionViewerInner({
                                   : group.repoName || t("session.currentProject")}
                             </div>
                           ) : null}
-                          {group.files.map((file) => (
+                          {group.files.map((file) => {
+                            const stats =
+                              relatedFileStatsByKey[relatedFileStatKey(file)] ||
+                              gitFileStatsByPath[file.path];
+                            return (
                           <div
                             key={`${file.head || "legacy"}:${file.path}`}
                             style={{
@@ -2687,7 +2828,7 @@ function SessionViewerInner({
                               >
                                 {file.name}
                               </div>
-                              {gitFileStatsByPath[file.path] ? (
+                              {stats ? (
                                 <div
                                   style={{
                                     display: "inline-flex",
@@ -2704,7 +2845,7 @@ function SessionViewerInner({
                                       fontVariantNumeric: "tabular-nums",
                                     }}
                                   >
-                                    +{gitFileStatsByPath[file.path].additions}
+                                    +{stats.additions}
                                   </span>
                                   <span
                                     style={{
@@ -2712,7 +2853,7 @@ function SessionViewerInner({
                                       fontVariantNumeric: "tabular-nums",
                                     }}
                                   >
-                                    -{gitFileStatsByPath[file.path].deletions}
+                                    -{stats.deletions}
                                   </span>
                                 </div>
                               ) : null}
@@ -2744,7 +2885,8 @@ function SessionViewerInner({
                               x
                             </button>
                           </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       );
                     })}
@@ -2761,7 +2903,7 @@ function SessionViewerInner({
             style={{
               position: "absolute",
               right: "16px",
-              bottom: "16px",
+              bottom: `${16 + composerOverlayInset}px`,
               zIndex: 4,
               display: "flex",
               alignItems: "center",
@@ -2991,6 +3133,7 @@ export const SessionViewer = memo(
     prev.interactionMode === next.interactionMode &&
     prev.targetSeq === next.targetSeq &&
     prev.targetSeqRequestKey === next.targetSeqRequestKey &&
+    prev.composerOverlayInset === next.composerOverlayInset &&
     prev.gitFileStatsByPath === next.gitFileStatsByPath &&
     prev.onRootClick === next.onRootClick,
 );

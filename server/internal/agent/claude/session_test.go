@@ -25,6 +25,26 @@ func TestClaudeModelInfoSupportsEffortWithoutModelNameWhitelist(t *testing.T) {
 	}
 }
 
+func TestClaudeTokenUsageIncludesCacheReadAndCreationInLogicalInput(t *testing.T) {
+	got := claudeTokenUsage(claudeagent.ResultMessage{
+		Usage: &claudeagent.NonNullableUsage{
+			InputTokens:              50,
+			OutputTokens:             1_100,
+			CacheReadInputTokens:     10_000,
+			CacheCreationInputTokens: 2_350,
+		},
+	})
+	if got == nil || got.InputTokens != 12_400 || got.OutputTokens != 1_100 {
+		t.Fatalf("usage = %#v", got)
+	}
+	if got.CacheReadTokens == nil || *got.CacheReadTokens != 10_000 {
+		t.Fatalf("cache read = %#v", got.CacheReadTokens)
+	}
+	if got.CacheWriteTokens == nil || *got.CacheWriteTokens != 2_350 {
+		t.Fatalf("cache write = %#v", got.CacheWriteTokens)
+	}
+}
+
 func TestAppendClaudeDeveloperInstructionsUsesCLIAppendSystemPrompt(t *testing.T) {
 	options := claudeagent.DefaultOptions()
 	for _, apply := range appendClaudeDeveloperInstructions(nil, "render markdown") {
@@ -195,6 +215,29 @@ func TestClaudeLocalBashTaskLifecycleIsIgnored(t *testing.T) {
 
 	if len(events) != 0 {
 		t.Fatalf("events = %#v, want none", events)
+	}
+}
+
+func TestSummarizeExecuteToolCallPrefersNaturalLanguageDescription(t *testing.T) {
+	title, meta := summarizeExecuteToolCall("Bash", json.RawMessage(`{
+		"command":"go test ./...",
+		"description":"Run the test suite"
+	}`), nil)
+	if title != "Run the test suite" {
+		t.Fatalf("title = %q, want tool description", title)
+	}
+	if meta["command"] != "go test ./..." || meta["description"] != "Run the test suite" {
+		t.Fatalf("meta = %#v, want command and description", meta)
+	}
+}
+
+func TestSummarizeExecuteToolCallFallsBackToNaturalLanguageTitle(t *testing.T) {
+	title, meta := summarizeExecuteToolCall("Bash", json.RawMessage(`{"command":"go test ./..."}`), nil)
+	if title != "Run command" {
+		t.Fatalf("title = %q, want natural-language fallback", title)
+	}
+	if meta["command"] != "go test ./..." {
+		t.Fatalf("meta = %#v, want original command in details", meta)
 	}
 }
 

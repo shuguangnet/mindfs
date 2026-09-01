@@ -669,7 +669,9 @@ func copyForkHistory(ctx context.Context, manager *session.Manager, from, to *se
 		if agentName == "" {
 			agentName = strings.TrimSpace(fallbackAgent)
 		}
-		if err := manager.AddExchangeForAgentAt(ctx, to, exchange.Role, exchange.Content, agentName, exchange.Mode, exchange.Effort, exchange.FastService, exchange.Timestamp); err != nil {
+		exchangeCtx := session.WithExchangeModelDisplayName(ctx, exchange.ModelDisplayName)
+		exchangeCtx = session.WithExchangeTokenUsage(exchangeCtx, exchange.TokenUsage)
+		if err := manager.AddExchangeForAgentAt(exchangeCtx, to, exchange.Role, exchange.Content, agentName, exchange.Mode, exchange.Effort, exchange.FastService, exchange.Timestamp); err != nil {
 			return copied, err
 		}
 		copied++
@@ -1119,10 +1121,11 @@ type SendMessageInput struct {
 }
 
 type MessageStart struct {
-	Model       string
-	Mode        string
-	Effort      string
-	FastService string
+	Model           string
+	Mode            string
+	Effort          string
+	FastService     string
+	BaseExchangeSeq int
 }
 
 func applyMessageRuntimeDefaultsFromStatus(
@@ -1428,6 +1431,9 @@ func (s *Service) SuggestSessionName(ctx context.Context, in SuggestSessionNameI
 	model := strings.TrimSpace(in.Model)
 	if prefs := s.Registry.GetPreferences(); prefs != nil {
 		namingDefaults := prefs.SessionNamingDefaults()
+		if namingDefaults.Disabled {
+			return nil, nil
+		}
 		if strings.TrimSpace(namingDefaults.Agent) != "" {
 			agentName = strings.TrimSpace(namingDefaults.Agent)
 			model = strings.TrimSpace(namingDefaults.Model)
@@ -2126,10 +2132,11 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	resolvedFastService := resolveRuntimeFastService(in.Agent, current, in.FastService)
 	if in.OnStart != nil {
 		in.OnStart(MessageStart{
-			Model:       in.Model,
-			Mode:        resolvedMode,
-			Effort:      in.Effort,
-			FastService: resolvedFastService,
+			Model:           in.Model,
+			Mode:            resolvedMode,
+			Effort:          in.Effort,
+			FastService:     resolvedFastService,
+			BaseExchangeSeq: len(current.Exchanges),
 		})
 	}
 	if current.Type == session.TypeCommand {
@@ -2183,6 +2190,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	var responseText string
 	sawAssistantChunk := false
 	var lastContextWindow agenttypes.ContextWindow
+	var turnTokenUsage *agenttypes.TokenUsage
 	plannedAssistantSeq := len(current.Exchanges) + 2
 	auxBuffer := make([]session.ExchangeAux, 0, 8)
 	defer manager.ClearPendingExchangeAux(context.Background(), current.Key)
@@ -2320,6 +2328,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 			} else if update.Type == agenttypes.EventTypeMessageDone {
 				if done, ok := update.Data.(agenttypes.MessageDone); ok {
 					lastContextWindow = done.ContextWindow
+					turnTokenUsage = done.TokenUsage
 				}
 			} else if update.Type == agenttypes.EventTypeThoughtChunk ||
 				update.Type == agenttypes.EventTypeToolCall ||
@@ -2402,6 +2411,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	}
 	modelDisplayName := s.resolveExchangeModelDisplayName(in.Agent, resolvedModel)
 	exchangeCtx := session.WithExchangeModelDisplayName(ctx, modelDisplayName)
+	agentExchangeCtx := session.WithExchangeTokenUsage(exchangeCtx, turnTokenUsage)
 	if err := manager.UpdateModel(ctx, current, resolvedModel); err != nil {
 		return err
 	}
@@ -2409,7 +2419,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		log.Printf("[session] persist.user.error root=%s session=%s agent=%s err=%v", in.RootID, current.Key, in.Agent, err)
 		return err
 	}
-	if err := manager.AddExchangeForAgent(exchangeCtx, current, "agent", responseText, in.Agent, resolvedMode, resolvedEffort, resolvedFastService); err != nil {
+	if err := manager.AddExchangeForAgent(agentExchangeCtx, current, "agent", responseText, in.Agent, resolvedMode, resolvedEffort, resolvedFastService); err != nil {
 		log.Printf("[session] persist.agent.error root=%s session=%s agent=%s err=%v", in.RootID, current.Key, in.Agent, err)
 		return err
 	}
