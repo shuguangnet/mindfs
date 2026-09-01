@@ -1,4 +1,4 @@
-# MindFS v0.4.17
+# MindFS v0.5.0
 
 ## 新功能
 - 同步上游 CodeBuddy Agent 支持、Token 用量与缓存命中率展示
