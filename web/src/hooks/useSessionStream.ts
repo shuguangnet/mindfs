@@ -19,6 +19,7 @@ type ExchangeLike = {
   effort?: string;
   fast_service?: string;
   content?: string;
+  error?: string;
   thought_id?: string;
   context_window?: {
     totalTokens: number;
@@ -54,6 +55,7 @@ export type TimelineItem =
       };
       tokenUsage?: TokenUsage;
     }
+  | { id: string; type: "error"; content: string; timestamp?: string; agent?: string }
   | { id: string; type: "thought"; content: string }
   | { id: string; type: "tool"; toolCall: ToolCall }
   | { id: string; type: "todo"; todoUpdate: TodoUpdate; timestamp?: string }
@@ -178,6 +180,16 @@ function buildAssistantTimeline(
   const content = ex.content || "";
   if (!auxList.length) {
     const single = assistantSegmentItem(index, ex, content, 0, true);
+    if (ex.error) {
+      const errorItem: TimelineItem = {
+        id: stableTimelineID("error", index, ex.error, ex.timestamp, ex.agent),
+        type: "error",
+        content: ex.error,
+        timestamp: ex.timestamp,
+        agent: ex.agent,
+      };
+      return single ? [single, errorItem] : [errorItem];
+    }
     return single ? [single] : [];
   }
 
@@ -317,6 +329,16 @@ function buildAssistantTimeline(
         break;
       }
     }
+  }
+
+  if (ex.error) {
+    out.push({
+      id: stableTimelineID("error", index, ex.error, ex.timestamp, ex.agent),
+      type: "error",
+      content: ex.error,
+      timestamp: ex.timestamp,
+      agent: ex.agent,
+    });
   }
 
   return out;

@@ -573,6 +573,7 @@ type Exchange = {
   effort?: string;
   fast_service?: "" | "on" | "off";
   content?: string;
+  error?: string;
   thought_id?: string;
   context_window?: {
     totalTokens: number;
@@ -4134,6 +4135,50 @@ export function App({ onGoHome }: AppProps) {
       bumpCacheVersion();
     },
     [rootSessionKey, resolveRuntimeMetaForSession, bumpCacheVersion],
+  );
+
+  const attachErrorToLatestAssistant = useCallback(
+    (rootID: string, sessionKey: string, message: string) => {
+      const trimmed = (message || "").trim();
+      if (!trimmed) return;
+      const now = new Date().toISOString();
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      const stampList = (prevList: Exchange[]) => {
+        const list = [...(prevList || [])];
+        for (let i = list.length - 1; i >= 0; i -= 1) {
+          const item = list[i];
+          if (item?.role === "agent" || item?.role === "assistant") {
+            list[i] = { ...item, error: trimmed };
+            return list;
+          }
+        }
+        list.push({
+          role: "agent",
+          content: "",
+          error: trimmed,
+          timestamp: now,
+        });
+        return list;
+      };
+      const cached = sessionCacheRef.current[cacheKey];
+      const base =
+        cached ||
+        ({
+          key: sessionKey,
+          type: "chat",
+          name: "",
+          created_at: now,
+          updated_at: now,
+          exchanges: [],
+        } as any);
+      sessionCacheRef.current[cacheKey] = {
+        ...(base as any),
+        exchanges: stampList((((base as any).exchanges || []) as Exchange[])),
+        updated_at: now,
+      } as Session;
+      bumpCacheVersion();
+    },
+    [rootSessionKey, bumpCacheVersion],
   );
 
   const appendThoughtChunkForSession = useCallback(
@@ -9412,9 +9457,14 @@ export function App({ onGoHome }: AppProps) {
           setCodexRateLimitsRefreshToken((value) => value + 1);
           break;
         case "error":
+          attachErrorToLatestAssistant(
+            activeRoot,
+            streamKey,
+            typeof event.data?.message === "string" ? event.data.message : "",
+          );
           reportError(
-            "session.resume_failed",
-            event.data?.message || t("session.resumeFailed"),
+            "session.turn_failed",
+            event.data?.message || t("session.turnFailed"),
             {
               details: {
                 rootId: activeRoot,
@@ -9424,6 +9474,7 @@ export function App({ onGoHome }: AppProps) {
             },
           );
           handleSessionStreamDone(activeRoot, streamKey);
+          updateDrawerIfShowingStream();
           break;
       }
     };

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	agenttypes "mindfs/server/internal/agent/types"
@@ -339,4 +340,41 @@ func TestHandleUnknownPlanAndContextCompactionItems(t *testing.T) {
 	if !ok || compact.ID != "compact-1" || compact.Status != "complete" {
 		t.Fatalf("compact notice = %#v", updates[1].Data)
 	}
+}
+
+func TestHandleStreamedEventsRequiresTurnCompletion(t *testing.T) {
+	s := &session{sessionKey: "test-session"}
+
+	// Stream ends without TurnCompleted/TurnFailed: must surface an error in
+	// SendMessage paths (requireTurnCompletion = true).
+	err := s.handleStreamedEvents(makeEventsChannel(), true)
+	if err == nil {
+		t.Fatal("expected error when stream ends without turn completion")
+	}
+
+	// Background subscriptions stay permissive (stream end is a normal lifecycle).
+	if err := s.handleStreamedEvents(makeEventsChannel(), false); err != nil {
+		t.Fatalf("background subscription should not fail on stream end, got %v", err)
+	}
+}
+
+func TestHandleStreamedEventsSurfacesErrorNotice(t *testing.T) {
+	s := &session{sessionKey: "test-session"}
+	events := make(chan codexsdk.ThreadEvent, 2)
+	events <- &codexsdk.RawEvent{Type: "error", Raw: json.RawMessage(`{"message":"provider overloaded"}`)}
+	close(events)
+
+	err := s.handleStreamedEvents(events, true)
+	if err == nil {
+		t.Fatal("expected error to include the server error notice")
+	}
+	if !strings.Contains(err.Error(), "provider overloaded") {
+		t.Fatalf("error = %v, want it to contain the server notice", err)
+	}
+}
+
+func makeEventsChannel() <-chan codexsdk.ThreadEvent {
+	events := make(chan codexsdk.ThreadEvent)
+	close(events)
+	return events
 }

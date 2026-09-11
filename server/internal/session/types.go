@@ -45,6 +45,7 @@ type Exchange struct {
 	Effort           string                 `json:"effort,omitempty"`
 	FastService      string                 `json:"fast_service,omitempty"`
 	Content          string                 `json:"content"`
+	Error            string                 `json:"error,omitempty"`
 	TokenUsage       *agenttypes.TokenUsage `json:"token_usage,omitempty"`
 	Timestamp        time.Time              `json:"timestamp"`
 }

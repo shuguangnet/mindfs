@@ -2189,6 +2189,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	})
 	var responseText string
 	sawAssistantChunk := false
+	sawMessageDone := false
 	var lastContextWindow agenttypes.ContextWindow
 	var turnTokenUsage *agenttypes.TokenUsage
 	plannedAssistantSeq := len(current.Exchanges) + 2
@@ -2326,6 +2327,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 					lastResponseUpdateType = string(update.Type)
 				}
 			} else if update.Type == agenttypes.EventTypeMessageDone {
+				sawMessageDone = true
 				if done, ok := update.Data.(agenttypes.MessageDone); ok {
 					lastContextWindow = done.ContextWindow
 					turnTokenUsage = done.TokenUsage
@@ -2393,6 +2395,12 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	}
 	flushThought()
 	claudeSubagents.FinishAll()
+	if sendErr == nil && !sawAssistantChunk && !sawMessageDone && !isCanceledTurnError(turnCtx.Err()) {
+		// The turn neither streamed any content nor finished properly: surface it
+		// instead of silently persisting an empty assistant reply.
+		log.Printf("[session] turn.empty_response root=%s session=%s agent=%s", in.RootID, current.Key, in.Agent)
+		sendErr = errors.New("model returned no content (the model service may have failed)")
+	}
 	if sendErr != nil && !isCanceledTurnError(sendErr) {
 		log.Printf("[session] turn.send.error root=%s session=%s agent=%s err=%v", in.RootID, current.Key, in.Agent, sendErr)
 	}
@@ -2412,6 +2420,9 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	modelDisplayName := s.resolveExchangeModelDisplayName(in.Agent, resolvedModel)
 	exchangeCtx := session.WithExchangeModelDisplayName(ctx, modelDisplayName)
 	agentExchangeCtx := session.WithExchangeTokenUsage(exchangeCtx, turnTokenUsage)
+	if sendErr != nil && !isCanceledTurnError(sendErr) {
+		agentExchangeCtx = session.WithExchangeError(agentExchangeCtx, sendErr.Error())
+	}
 	if err := manager.UpdateModel(ctx, current, resolvedModel); err != nil {
 		return err
 	}

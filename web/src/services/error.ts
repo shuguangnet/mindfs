@@ -7,6 +7,7 @@ export type ErrorCode =
   | "session.create_failed"
   | "session.closed"
   | "session.resume_failed"
+  | "session.turn_failed"
   | "session.delete_failed"
   | "session.import_failed"
   | "session.rename_failed"
@@ -139,6 +140,11 @@ class ErrorService {
         messageKey: "error.session.resumeFailed",
         severity: "error",
         recoverable: true,
+      },
+      "session.turn_failed": {
+        messageKey: "error.session.turnFailed",
+        severity: "error",
+        recoverable: false,
       },
       "session.delete_failed": {
         messageKey: "error.session.deleteFailed",

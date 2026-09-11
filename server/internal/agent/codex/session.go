@@ -240,7 +240,11 @@ func (s *session) SendMessage(ctx context.Context, content string) error {
 		return err
 	}
 
-	if err := s.handleStreamedEvents(streamed.Events); err != nil {
+	if err := s.handleStreamedEvents(streamed.Events, true); err != nil {
+		if turnCtx.Err() != nil {
+			// The user cancelled the turn; report cancellation instead of a stream error.
+			return turnCtx.Err()
+		}
 		return err
 	}
 	s.updateThreadIDFromThread()
@@ -305,11 +309,13 @@ func (s *session) SubscribeThreadEvents(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return s.handleStreamedEvents(streamed.Events)
+	return s.handleStreamedEvents(streamed.Events, false)
 }
 
-func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent) error {
+func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent, requireTurnCompletion bool) error {
 	textByID := map[string]string{}
+	turnCompleted := false
+	lastErrorNotice := ""
 	for event := range events {
 		raw, _ := json.Marshal(event)
 		switch e := event.(type) {
@@ -376,6 +382,7 @@ func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent) error
 			}
 			logUnhandledEvent(s.sessionKey, "item.completed", raw)
 		case *codexsdk.TurnCompletedEvent:
+			turnCompleted = true
 			s.updateThreadIDFromThread()
 			log.Printf("[agent/codex] output.done session=%s", s.sessionKey)
 			contextWindow, _ := s.ContextWindow(context.Background())
@@ -392,6 +399,17 @@ func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent) error
 			log.Printf("[agent/codex] send.error session=%s err=%s", s.sessionKey, e.Message)
 			return errors.New("codex thread error: " + e.Message)
 		case *codexsdk.RawEvent:
+			if normalizeEventType(e.Type) == "error" {
+				// Server-pushed error notification. Do not fail immediately: the
+				// stream may still deliver turn/failed with a better message, or
+				// recover on its own. Remember it and surface it if the turn ends
+				// without an explicit completion.
+				if msg := rawErrorMessage(e.Raw); msg != "" {
+					lastErrorNotice = msg
+					log.Printf("[agent/codex] stream.error session=%s err=%s", s.sessionKey, msg)
+				}
+				continue
+			}
 			if s.handleRawEvent(e) {
 				continue
 			}
@@ -400,7 +418,35 @@ func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent) error
 			logUnhandledEvent(s.sessionKey, "event", raw)
 		}
 	}
+	if requireTurnCompletion && !turnCompleted {
+		if lastErrorNotice != "" {
+			return errors.New("codex stream error: " + lastErrorNotice)
+		}
+		return errors.New("codex stream ended without turn completion")
+	}
 	return nil
+}
+
+func rawErrorMessage(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload struct {
+		Message string `json:"message"`
+		Error   *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	if msg := strings.TrimSpace(payload.Message); msg != "" {
+		return msg
+	}
+	if payload.Error != nil {
+		return strings.TrimSpace(payload.Error.Message)
+	}
+	return ""
 }
 
 func (s *session) handleNonToolItem(item codexsdk.ThreadItem, started bool) bool {

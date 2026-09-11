@@ -135,6 +135,7 @@ export type Session = {
     effort?: string;
     fast_service?: string;
     content?: string;
+    error?: string;
     context_window?: {
       totalTokens: number;
       modelContextWindow: number;

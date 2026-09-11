@@ -540,6 +540,39 @@ function CompactNoticeCard({
   );
 }
 
+function ErrorNoticeCard({ message }: { message?: string }) {
+  const { t } = useI18n();
+  return (
+    <div
+      style={{
+        width: "100%",
+        minWidth: 0,
+        borderRadius: "10px",
+        border: "1px solid rgba(239, 68, 68, 0.35)",
+        background: "rgba(239, 68, 68, 0.08)",
+        padding: "10px",
+        fontSize: "13px",
+        overflowWrap: "anywhere",
+      }}
+    >
+      <div style={{ fontWeight: 600, color: "#ef4444" }}>
+        ⚠️ {t("session.turnFailed")}
+      </div>
+      {message ? (
+        <div
+          style={{
+            marginTop: "6px",
+            color: "var(--text-secondary)",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {message}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TodoUpdateCard({ todoUpdate }: { todoUpdate: TodoUpdate }) {
   const items = Array.isArray(todoUpdate?.items) ? todoUpdate.items : [];
   return (
@@ -1733,6 +1766,13 @@ function SessionViewerInner({
             status={item.compactNotice?.status}
             summary={item.compactNotice?.summary}
           />
+        </div>
+      );
+    }
+    if (item.type === "error") {
+      return (
+        <div key={timelineItemKey} style={{ marginTop: spacing }}>
+          <ErrorNoticeCard message={item.content} />
         </div>
       );
     }
