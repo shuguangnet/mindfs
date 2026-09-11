@@ -1,3 +1,9 @@
+# MindFS v0.5.5
+
+## 修复
+- 修复侧栏顶部「文件 / git / 工作树 / 关联文件」标签切换栏丢失的问题（多次合并上游时被意外删除，导致 v0.5.0 以来无法进入 git 标签页，git 状态面板与 commit/pull/push 按钮不可达）
+- 修复非英文 locale（如德文）系统上非 Git 仓库目录检测失败的问题：`/api/dirs` 缺失 `is_git_repo` 字段、`/api/git/status` 误报 400，现在以 git 退出码为准，与系统语言无关
+
 # MindFS v0.5.4
 
 ## 修复
