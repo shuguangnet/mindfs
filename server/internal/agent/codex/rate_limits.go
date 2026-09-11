@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	codexsdk "github.com/fanwenlin/codex-go-sdk/codex"
@@ -112,6 +113,10 @@ func readRateLimits(ctx context.Context, client *codexsdk.Codex) (RateLimitStatu
 	}
 	usesChatGPTPlan, err := readUsesChatGPTPlan(ctx, client)
 	if err != nil {
+		if isCodexRateLimitUnavailable(err) {
+			log.Printf("[codex] rate limits unavailable: %v", err)
+			return RateLimitStatus{}, nil
+		}
 		return RateLimitStatus{}, err
 	}
 	if !usesChatGPTPlan {
@@ -119,11 +124,36 @@ func readRateLimits(ctx context.Context, client *codexsdk.Codex) (RateLimitStatu
 	}
 	var response rawRateLimitResponse
 	if err := client.AppServerRPCTyped(ctx, "account/rateLimits/read", nil, &response); err != nil {
+		if isCodexRateLimitUnavailable(err) {
+			log.Printf("[codex] rate limits unavailable: %v", err)
+			return RateLimitStatus{}, nil
+		}
 		return RateLimitStatus{}, err
 	}
 	status := normalizeRateLimitStatus(response)
 	status.UsesChatGPTPlan = true
 	return status, nil
+}
+
+// isCodexRateLimitUnavailable reports whether the codex app-server rejected the
+// account/rate-limit probe because ChatGPT plan data is unavailable (not logged
+// in with a ChatGPT account, older CLI, or an invalid/unsupported request).
+// These are expected states for API-key users and must degrade to an empty
+// status instead of surfacing 502 errors in the UI.
+func isCodexRateLimitUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "app server error (-32600)") ||
+		strings.Contains(msg, "invalid request") ||
+		strings.Contains(msg, "chatgpt authentication") ||
+		strings.Contains(msg, "not logged in") ||
+		strings.Contains(msg, "requires openai auth") ||
+		strings.Contains(msg, "requiresopenaiauth") {
+		return true
+	}
+	return false
 }
 
 func readUsesChatGPTPlan(ctx context.Context, client *codexsdk.Codex) (bool, error) {

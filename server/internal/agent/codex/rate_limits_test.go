@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -105,6 +106,30 @@ func TestUsesChatGPTPlanRequiresOfficialProviderAndChatGPTAccount(t *testing.T) 
 		t.Run(test.name, func(t *testing.T) {
 			if got := usesChatGPTPlan(test.response); got != test.want {
 				t.Fatalf("usesChatGPTPlan() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestIsCodexRateLimitUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "app server invalid request", err: errors.New("app server error (-32600): Invalid request"), want: true},
+		{name: "chatgpt auth required", err: errors.New("app server error (-32600): chatgpt authentication required to read rate limits"), want: true},
+		{name: "plain invalid request", err: errors.New("Invalid request"), want: true},
+		{name: "not logged in", err: errors.New("not logged in"), want: true},
+		{name: "unrelated error", err: errors.New("connection refused"), want: false},
+		{name: "context deadline", err: errors.New("context deadline exceeded"), want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isCodexRateLimitUnavailable(test.err); got != test.want {
+				t.Fatalf("isCodexRateLimitUnavailable(%v) = %t, want %t", test.err, got, test.want)
 			}
 		})
 	}

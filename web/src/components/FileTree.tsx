@@ -2671,11 +2671,10 @@ export function FileTree({
     const hiddenFiltered = showHiddenFiles
       ? items
       : items.filter((entry) => !entry.name.startsWith("."));
-    if (projectTreeTab !== "related" || depth !== 0) {
-      return hiddenFiltered;
-    }
-    return hiddenFiltered.filter((entry) => !!rootId && entry.path === rootId);
-  }, [projectTreeTab, rootId, showHiddenFiles]);
+    // related 视图只聚焦当前 root 的会话关联内容，但其余 roots 必须保留在顶层，
+    // 否则用户会误以为其它项目文件夹消失了。
+    return hiddenFiltered;
+  }, [showHiddenFiles]);
 
   const fontSizeRows: Array<{ region: FontSizeRegion; labelKey: MessageKey }> = [
     { region: "fileSidebar", labelKey: "fileTree.fontSizeFileSidebar" },
@@ -2834,7 +2833,13 @@ export function FileTree({
               ? renderRootRelatedContent?.(entry.path)
               : null
           : null;
-        const shouldRenderChildren = projectTreeTab === "files" || !isManagedRootNode;
+        // related 视图下，当前 root 展示会话关联内容（rootExtraContent），
+        // 其它 roots 展开时照常显示文件树，避免被误认为丢失。
+        const shouldRenderChildren =
+          !isManagedRootNode ||
+          (projectTreeTab !== "git" &&
+            projectTreeTab !== "worktrees" &&
+            entry.path !== rootId);
 
         return (
           <li key={expandedKey}>
