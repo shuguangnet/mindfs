@@ -2946,13 +2946,66 @@ export function FileTree({
             data-onboarding="project-tabs"
             aria-label={t("fileTree.projectTabs")}
             style={{
-              maxWidth: "100%",
+              display: "flex",
+              alignItems: "center",
+              gap: 0,
+              padding: "2px",
+              borderRadius: "8px",
+              border: "1px solid rgba(100, 116, 139, 0.36)",
               background: "rgba(148, 163, 184, 0.10)",
-              border: "1px solid rgba(100, 116, 139, 0.22)",
-              fontSize: 11,
-              fontWeight: 700,
+              minWidth: 0,
+              width: "100%",
             }}
-          />
+          >
+            {([
+              ["files", t("fileTree.files")],
+              ["git", "git"],
+              ["worktrees", t("fileTree.worktrees")],
+              ["related", t("fileTree.relatedFiles")],
+            ] as const).map(([value, label], index) => {
+              const active = projectTreeTab === value;
+              const flexGrow = value === "related" ? 1.45 : value === "worktrees" ? 1.15 : 0.85;
+              return (
+                <React.Fragment key={value}>
+                  {index > 0 ? (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: "1px",
+                        height: "16px",
+                        background: "rgba(100, 116, 139, 0.32)",
+                        margin: "0 1px",
+                        flexShrink: 0,
+                      }}
+                    />
+                  ) : null}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setProjectTreeTab(value)}
+                    style={{
+                      border: "none",
+                      borderRadius: "6px",
+                      background: active ? "var(--accent-color)" : "transparent",
+                      color: active ? "#fff" : "var(--text-secondary)",
+                      padding: "3px 5px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      lineHeight: "14px",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                      minWidth: 0,
+                      flex: `${flexGrow} 1 auto`,
+                      boxShadow: active ? "0 1px 3px rgba(37, 99, 235, 0.28)" : "none",
+                    }}
+                  >
+                    {label}
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </div>
         </div>
         <button
           type="button"
