@@ -1343,8 +1343,18 @@ func formatGitError(err error, output []byte) error {
 }
 
 func isNotRepoError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// git 在非仓库目录执行 rev-parse 时退出码恒为 128，与 locale 无关；
+	// 错误文本因系统语言而异（英文 "not a git repository"、德文
+	// "Kein Git-Repository" 等），不能只匹配英文文本。
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "not a git repository")
+	return strings.Contains(msg, "not a git repository") || strings.Contains(msg, "kein git-repository")
 }
 
 func pathJoinSlash(parts ...string) string {
