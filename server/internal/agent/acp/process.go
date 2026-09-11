@@ -80,7 +80,13 @@ type sessionState struct {
 	contextWindow types.ContextWindow
 	lastUsage     cumulativeTokenUsage
 	onUpdate      func(SessionUpdate)
-	mu            sync.RWMutex
+	// promptSawContent tracks whether the current prompt produced any visible
+	// agent activity (message/thought chunks, tool calls, plan updates). ACP
+	// agents may end a turn "successfully" (stopReason end_turn) even when the
+	// underlying model request failed, so content absence is the only reliable
+	// failure signal.
+	promptSawContent bool
+	mu               sync.RWMutex
 }
 
 type cumulativeTokenUsage struct {
@@ -103,6 +109,24 @@ func (s *sessionState) setOnUpdate(onUpdate func(SessionUpdate)) {
 	s.mu.Lock()
 	s.onUpdate = onUpdate
 	s.mu.Unlock()
+}
+
+func (s *sessionState) markPromptContent() {
+	s.mu.Lock()
+	s.promptSawContent = true
+	s.mu.Unlock()
+}
+
+func (s *sessionState) clearPromptContent() {
+	s.mu.Lock()
+	s.promptSawContent = false
+	s.mu.Unlock()
+}
+
+func (s *sessionState) promptContentSeen() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.promptSawContent
 }
 
 func (s *sessionState) getOnUpdate() func(SessionUpdate) {
@@ -279,6 +303,10 @@ func (c *mindfsClient) SessionUpdate(ctx context.Context, params acp.SessionNoti
 	}
 
 	internalUpdate := wrapSessionUpdate(string(params.SessionId), params.Update)
+	switch internalUpdate.Type {
+	case UpdateTypeMessageChunk, UpdateTypeThoughtChunk, UpdateTypeToolCall, UpdateTypeToolUpdate, UpdateTypePlan:
+		session.markPromptContent()
+	}
 	if params.Update.AvailableCommandsUpdate != nil {
 		session.setCommands(params.Update.AvailableCommandsUpdate.AvailableCommands)
 		c.proc.mu.Lock()
@@ -644,6 +672,8 @@ func (p *Process) SendMessage(ctx context.Context, sessionKey, content string) e
 		promptCancel()
 	}()
 
+	// Reset before the prompt: session updates stream in while Prompt blocks.
+	sess.clearPromptContent()
 	resp, err := p.conn.Prompt(promptCtx, acp.PromptRequest{
 		SessionId: sess.ID,
 		Prompt: []acp.ContentBlock{
@@ -652,6 +682,13 @@ func (p *Process) SendMessage(ctx context.Context, sessionKey, content string) e
 	})
 	if err != nil {
 		return p.wrapPromptError(sessionKey, string(sess.ID), err)
+	}
+	// Some ACP agents swallow model errors and end the turn cleanly with
+	// stopReason "end_turn" and no updates at all. Treat a content-less turn
+	// as a failure so the user gets feedback instead of an empty reply.
+	if err == nil && resp.StopReason != acp.StopReasonCancelled && !sess.promptContentSeen() {
+		log.Printf("[agent/acp] send.empty_response agent=%s session_key=%s stop_reason=%s duration_ms=%d", p.agentLabel(), sessionKey, resp.StopReason, time.Since(start).Milliseconds())
+		return fmt.Errorf("%s agent completed the turn without producing any content (the model request may have failed; check the agent logs)", p.agentLabel())
 	}
 	var tokenUsage *types.TokenUsage
 	if resp.Usage != nil {
