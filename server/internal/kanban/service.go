@@ -31,12 +31,14 @@ type Service struct {
 	stores       map[string]*TaskStore
 	scheduleRun  map[string]bool
 	schedulePend map[string]bool
+	execRun      map[string]bool
+	execPend     map[string]bool
 }
 
 var errStopTaskExecution = errors.New("stop task execution")
 
 func NewService(templates *TemplateStore, roots RootProvider) *Service {
-	return &Service{Templates: templates, Roots: roots, stores: map[string]*TaskStore{}, scheduleRun: map[string]bool{}, schedulePend: map[string]bool{}}
+	return &Service{Templates: templates, Roots: roots, stores: map[string]*TaskStore{}, scheduleRun: map[string]bool{}, schedulePend: map[string]bool{}, execRun: map[string]bool{}, execPend: map[string]bool{}}
 }
 
 func (s *Service) SetRunner(runner Runner) {
@@ -557,11 +559,47 @@ func (s *Service) RunTask(rootID, taskID string) {
 	if rootID == "" || taskID == "" {
 		return
 	}
+	key := rootID + "\x00" + taskID
+	s.mu.Lock()
+	if s.execRun == nil {
+		s.execRun = map[string]bool{}
+	}
+	if s.execPend == nil {
+		s.execPend = map[string]bool{}
+	}
+	if s.execRun[key] {
+		s.execPend[key] = true
+		s.mu.Unlock()
+		return
+	}
+	s.execRun[key] = true
+	s.mu.Unlock()
 	go func() {
-		if err := s.executeTask(context.Background(), rootID, taskID); err != nil {
-			log.Printf("[kanban] task.execute.error root=%s task=%s err=%v", rootID, taskID, err)
+		for {
+			if err := s.executeTask(context.Background(), rootID, taskID); err != nil {
+				log.Printf("[kanban] task.execute.error root=%s task=%s err=%v", rootID, taskID, err)
+			}
+			s.mu.Lock()
+			pending := s.execPend[key]
+			delete(s.execPend, key)
+			delete(s.execRun, key)
+			s.mu.Unlock()
+			if !pending {
+				s.Schedule(rootID)
+				return
+			}
+			// A duplicate request arrived while executing: run once more so the
+			// latest task state is picked up. Re-acquire the slot first; if another
+			// goroutine already won it, let that one drive execution.
+			s.mu.Lock()
+			if s.execRun[key] {
+				s.mu.Unlock()
+				s.Schedule(rootID)
+				return
+			}
+			s.execRun[key] = true
+			s.mu.Unlock()
 		}
-		s.Schedule(rootID)
 	}()
 }
 

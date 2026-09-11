@@ -920,6 +920,112 @@ func TestSchedulerRunsAgentStageAndStoresSessionKey(t *testing.T) {
 	}
 }
 
+func TestRunTaskDuplicateRequestExecutesStageOnce(t *testing.T) {
+	ctx := context.Background()
+	root := fs.NewRootInfo("root", "root", t.TempDir())
+	store := NewTemplateStoreAt(t.TempDir())
+	svc := NewService(store, testRoots{root: root})
+	runner := &blockingRunner{
+		fakeRunner: fakeRunner{},
+		entered:    make(chan int, 8),
+		release:    make(chan struct{}),
+	}
+	svc.SetRunner(runner)
+	tmpl, err := store.SaveTaskTemplate(TaskTemplate{
+		Name: "Duplicate Trigger",
+		Stages: []TaskTemplateStage{{
+			Position: 0,
+			Snapshot: StageTemplate{
+				Name:        "Describe",
+				Role:        RoleUser,
+				AutoAdvance: false,
+			},
+		}, {
+			Position: 1,
+			Snapshot: StageTemplate{
+				Name:           "Fix",
+				Role:           RoleAgent,
+				AutoAdvance:    false,
+				Agent:          "codex",
+				Model:          "gpt-5",
+				PromptTemplate: "Fix {previous_input}",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SaveTaskTemplate: %v", err)
+	}
+	detail, err := svc.CreateTask(ctx, CreateTaskInput{RootID: root.ID, TaskTemplateID: tmpl.ID, Input: "dup"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	taskID := detail.Task.ID
+	// Next() triggers Schedule + RunTask internally; the scheduler admits the
+	// task and starts the agent stage. The runner blocks inside
+	// RunAgentStage until we release it.
+	if _, err := svc.Next(ctx, MoveInput{RootID: root.ID, TaskID: taskID}); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	select {
+	case <-runner.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("agent stage did not start")
+	}
+	// Fire duplicate triggers while the stage is executing. The in-flight
+	// execution guard must swallow them instead of running a second
+	// concurrent executeTask loop (double LLM calls in production).
+	svc.RunTask(root.ID, taskID)
+	svc.RunTask(root.ID, taskID)
+	time.Sleep(150 * time.Millisecond)
+	select {
+	case n := <-runner.entered:
+		t.Fatalf("agent stage executed %d times concurrently, want 1", n)
+	default:
+	}
+	close(runner.release)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		detail, err = svc.GetTask(ctx, root.ID, taskID)
+		if err == nil && detail.Task.Status == StatusWaitingUser {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if detail.Task.Status != StatusWaitingUser {
+		t.Fatalf("task status = %s, want waiting_user", detail.Task.Status)
+	}
+	runner.mu.Lock()
+	execCount := len(runner.execs)
+	runner.mu.Unlock()
+	if execCount != 1 {
+		t.Fatalf("agent exec count = %d, want 1", execCount)
+	}
+}
+
+type blockingRunner struct {
+	fakeRunner
+	entered chan int
+	release chan struct{}
+	n       int
+}
+
+func (r *blockingRunner) RunAgentStage(ctx context.Context, exec AgentStageExecution) error {
+	r.mu.Lock()
+	r.execs = append(r.execs, exec)
+	r.n++
+	n := r.n
+	r.mu.Unlock()
+	select {
+	case r.entered <- n:
+	default:
+	}
+	<-r.release
+	return nil
+}
+
 func TestAgentStageSessionErrorWaitsForUser(t *testing.T) {
 	ctx := context.Background()
 	root := fs.NewRootInfo("root", "root", t.TempDir())
