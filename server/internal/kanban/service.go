@@ -859,6 +859,13 @@ func (s *Service) executeTask(ctx context.Context, rootID, taskID string) error 
 		if run.Status == StageStatusWaitingUser {
 			return nil
 		}
+		if run.Status == StageStatusFail && strings.TrimSpace(task.AuxFlags.SessionError) != "" {
+			// Session-error failures park the task in waiting_user. Stale
+			// triggers (scheduler race, duplicate RunTask, replayed requests)
+			// must not re-run the stage automatically; user moves and input
+			// updates clear SessionError, which re-enables execution.
+			return nil
+		}
 		if err := s.runAgentStage(ctx, store, task, tmpl, stage, run); err != nil {
 			if errors.Is(err, errStopTaskExecution) {
 				return nil
