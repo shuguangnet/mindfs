@@ -68,6 +68,7 @@
 - **Relay 远程模式**：无需开放防火墙端口，通过relayer从公网任意设备访问本地实例，实现随时随地的 agent 访问。（本地模式页面中点击绑定按钮）
 - **私有通道**：通过私有通道（tailscale等），直接通过 ip:port 访问。
 - **端到端加密**：会话、文件支持端到端加密保护。
+- **可选登录验证**：服务暴露到公网时，可开启单账号用户名/密码登录拦截。
 
 ### 插件系统
 
@@ -271,6 +272,35 @@ MindFS 会自动探测已安装 Agent 的可用性，通常需要大约一分钟
 2. 登录 relayer，确认绑定。
 3. 打开节点。
 
+### 登录验证（可选）
+
+MindFS 支持开启单账号的用户名/密码登录，用于将服务暴露在公网、又不想配置 IP 白名单的场景。该功能默认关闭，只拦截 `/api/*` 与 WebSocket 请求；前端静态资源不拦截，以便登录页能够加载。
+
+在网页界面中开启：
+
+1. 用浏览器打开 MindFS。
+2. 点击侧边栏顶栏的账号图标。
+3. 选择 **认证设置**，填写用户名和密码，然后打开 **启用登录验证**。
+
+行为说明：
+
+- 会话使用 HttpOnly Cookie。勾选 **记住我** 有效期 30 天，否则关闭浏览器即失效。
+- 开启后账号菜单中会出现 **退出登录**。
+- 修改或重置密码会使所有已登录会话失效。
+- 关闭登录验证会清空所有会话。
+- 登录失败次数在内存中限流：同一 IP 连续失败 5 次后锁定 5 分钟。
+- 本地 CLI 请求与中继请求不受登录拦截。
+
+如果忘记密码，可在服务器主机上重置：
+
+```bash
+mindfs auth set-password                                  # 交互式输入用户名和密码
+mindfs auth set-password -username alice                  # 只输入密码
+mindfs auth set-password -username alice -password 'new-secret'  # 非交互式
+```
+
+认证状态保存在用户配置目录下的 `auth.json`（例如 `~/.config/mindfs/auth.json`），权限仅限当前用户。服务运行期间，用 CLI 重置密码会立即生效，无需重启。由于纯 HTTP 会明文传输密码，当服务器可从不受信任的网络访问时，请启用 `-tls`。
+
 ### 自定义 ACP Agent
 
 MindFS 可以额外加载一个 `agents.json`，用于支持实现 ACP 协议的自定义 Agent CLI。适合测试新的 Agent，或把项目专用 Agent 定义放在内置默认配置之外。
@@ -324,6 +354,7 @@ mindfs -stop
 mindfs -restart
 mindfs -remove /path/to/project
 mindfs -agent-config /path/to/agents.json
+mindfs auth set-password
 ```
 
 #### 参数说明

@@ -27,6 +27,7 @@ import { AgentSelector } from "./AgentSelector";
 import { SymlinkBadge } from "./SymlinkBadge";
 import { RelayLocalServicesDialog } from "./RelayLocalServicesDialog";
 import { RemoteServersDialog } from "./RemoteServersDialog";
+import { AuthMenuButton } from "./AuthMenuButton";
 import { fetchAgentCatalog, fetchAgents, type AgentStatus } from "../services/agents";
 import {
   createAgentAPIProvider,
@@ -3059,6 +3060,7 @@ export function FileTree({
             </svg>
           </span>
         </button>
+        <AuthMenuButton />
         <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
           <button
             type="button"

@@ -7,6 +7,8 @@ import { registerServiceWorker } from "./registerServiceWorker";
 import { applyAppearanceMode, getAppearanceMode } from "./services/appearance";
 import { isHarmonyRuntime, isNativeShellRuntime } from "./services/runtime";
 import { Login } from "./components/Login";
+import { AuthLogin } from "./components/AuthLogin";
+import { fetchAuthStatus, subscribeUnauthenticated } from "./services/auth";
 import { I18nProvider, translateNow } from "./i18n";
 import { MindFSAntdProvider } from "./theme/AntdProvider";
 
@@ -391,6 +393,33 @@ function installIOSKeyboardPanLock(): () => void {
 
 function AppRoot() {
   const [ready] = useState(() => !isNativeLauncherOrigin());
+  // null = still checking, true = login required, false = allowed through.
+  const [authLocked, setAuthLocked] = useState<boolean | null>(ready ? null : false);
+
+  useEffect(() => {
+    if (!ready) {
+      return;
+    }
+    let cancelled = false;
+    void fetchAuthStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setAuthLocked(Boolean(status.enabled && !status.authenticated));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAuthLocked(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready]);
+
+  useEffect(() => {
+    return subscribeUnauthenticated(() => setAuthLocked(true));
+  }, []);
 
   const goToLauncher = () => {
     if (typeof window === "undefined") {
@@ -609,6 +638,30 @@ function AppRoot() {
     return (
       <MindFSAntdProvider>
         <Login onOpenNode={(nodeURL) => window.location.assign(nodeURL)} />
+      </MindFSAntdProvider>
+    );
+  }
+  if (authLocked === null) {
+    return (
+      <MindFSAntdProvider>
+        <div
+          style={{
+            minHeight: "100dvh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "var(--mindfs-system-bar-bg, #f8fafc)",
+          }}
+        >
+          <span style={{ width: 22, height: 22, border: "3px solid rgba(100,116,139,0.3)", borderTopColor: "var(--accent-color, #2563eb)", borderRadius: "50%", animation: "mindfs-update-spin 0.8s linear infinite" }} />
+        </div>
+      </MindFSAntdProvider>
+    );
+  }
+  if (authLocked) {
+    return (
+      <MindFSAntdProvider>
+        <AuthLogin onSuccess={() => setAuthLocked(false)} />
       </MindFSAntdProvider>
     );
   }

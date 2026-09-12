@@ -67,6 +67,7 @@ Access your personal AI agents and workstation data anywhere, anytime through Mi
 - **Relay remote mode**: Access your local instance from anywhere on the public internet without opening firewall ports, via an encrypted tunnel through [a9gent.com](https://a9gent.com). Click the bind button in the local UI to activate.
 - **Private channel**: Use a private network (e.g. Tailscale) and access directly via `ip:port`.
 - **End-to-end encryption**: Sessions and files can be protected with end-to-end encryption.
+- **Optional login**: Enable a single-account username/password gate when exposing the server on the public internet.
 
 ### Plugin System
 
@@ -255,6 +256,35 @@ MindFS automatically detects the availability of installed agents. This usually 
 3. Open your node — it is now accessible from any device.
 
 
+### Login (Optional)
+
+MindFS can gate access behind a single-account username/password login. This is useful when the server is exposed on the public internet and IP allow-listing is impractical. The gate is disabled by default and only protects `/api/*` and WebSocket traffic; static frontend assets stay public so the login page can load.
+
+Enable it from the web UI:
+
+1. Open MindFS in a browser.
+2. Click the account icon in the sidebar top bar.
+3. Choose **Auth settings**, set a username and password, and turn on **Enable login**.
+
+Behavior:
+
+- Sessions use an HttpOnly cookie. **Remember me** lasts 30 days; otherwise the cookie expires when the browser closes.
+- The account menu also offers **Sign out** while the gate is on.
+- Changing or resetting the password invalidates every existing session.
+- Turning the gate off clears all sessions.
+- Login attempts are rate limited in memory: after 5 consecutive failures an IP is locked out for 5 minutes.
+- Local CLI requests and relayed requests are exempt from the gate.
+
+If you lose the password, reset it from the server host:
+
+```bash
+mindfs auth set-password                                  # prompts for username and password
+mindfs auth set-password -username alice                  # prompts for the password only
+mindfs auth set-password -username alice -password 'new-secret'  # non-interactive
+```
+
+Auth state is stored in `auth.json` under the user config directory (for example `~/.config/mindfs/auth.json`) with user-only permissions. While the server is running, a CLI password reset takes effect immediately without a restart. Because plain HTTP transmits the password in cleartext, enable `-tls` when the server is reachable over an untrusted network.
+
 ### Custom ACP Agents
 
 MindFS can load an extra `agents.json` for agent CLIs that speak the ACP protocol. This is useful when you are testing a new agent or want to keep project-specific agent definitions outside the bundled defaults.
@@ -308,6 +338,7 @@ mindfs -stop
 mindfs -restart
 mindfs -remove /path/to/project
 mindfs -agent-config /path/to/agents.json
+mindfs auth set-password
 ```
 
 #### Flags

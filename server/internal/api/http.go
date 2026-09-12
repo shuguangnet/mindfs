@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"mindfs/server/auth"
 	"mindfs/server/internal/agent"
 	agenttypes "mindfs/server/internal/agent/types"
 	"mindfs/server/internal/api/usecase"
@@ -46,6 +47,7 @@ type HTTPHandler struct {
 	StaticDir     string
 	Version       string
 	LocalCLIToken string
+	Auth          *auth.Manager
 }
 
 type protectedResponseWriter struct {
@@ -283,6 +285,11 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/", h.handleFrontend)
 	r.Get("/health", h.handleHealth)
 	r.Get("/api/tree", h.protectedEndpoint(h.handleTree))
+	r.Get("/api/auth/status", h.handleAuthStatus)
+	r.Post("/api/auth/login", h.handleAuthLogin)
+	r.Post("/api/auth/logout", h.handleAuthLogout)
+	r.Get("/api/auth/settings", h.handleAuthSettingsGet)
+	r.Put("/api/auth/settings", h.handleAuthSettingsPut)
 	r.Get("/api/file", h.handleFile)
 	r.Get("/api/git/status", h.protectedEndpoint(h.handleGitStatus))
 	r.Get("/api/git/diff", h.protectedEndpoint(h.handleGitDiff))

@@ -1,4 +1,17 @@
 import { appURL } from "./base";
+import { notifyUnauthenticated } from "./auth";
+
+// notifyIfUnauthenticated inspects a 401 response and, when the server reports
+// the auth gate rejected the request, lets the app return to the login screen.
+async function notifyIfUnauthenticated(response: Response): Promise<void> {
+  if (response.status !== 401) {
+    return;
+  }
+  const payload = (await response.clone().json().catch(() => ({}))) as { error?: string };
+  if (String(payload?.error || "") === "unauthenticated") {
+    notifyUnauthenticated();
+  }
+}
 
 const SECRET_STORAGE_PREFIX = "mindfs.e2ee.secret.";
 export const E2EE_HEADER = "X-MindFS-E2EE";
@@ -263,7 +276,9 @@ class E2EEService {
 
   async protectedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
     if (!this.required) {
-      return fetch(input, init);
+      const response = await fetch(input, init);
+      await notifyIfUnauthenticated(response);
+      return response;
     }
     let request = await this.buildProtectedRequest(input, init);
     let response = await fetch(input, request.init);
@@ -274,6 +289,7 @@ class E2EEService {
         response = await fetch(input, request.init);
       }
     }
+    await notifyIfUnauthenticated(response);
     return response;
   }
 

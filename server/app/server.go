@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"mindfs/server/auth"
 	"mindfs/server/internal/agent"
 	"mindfs/server/internal/api"
 	"mindfs/server/internal/e2ee"
@@ -161,13 +162,19 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 		StaticDir:  resolveStaticDir(),
 		Version:    opts.Version,
 	}
+	authManager, err := auth.NewManager()
+	if err != nil {
+		log.Printf("[mindfs] auth: failed to load state, login gate stays disabled: %v", err)
+	} else {
+		httpHandler.Auth = authManager
+	}
 	wsHandler := &api.WSHandler{AppContext: services}
 
 	mux := http.NewServeMux()
 	mux.Handle("/", httpHandler.Routes())
 	mux.Handle("/ws", wsHandler)
 
-	handler := api.LoggingMiddleware(api.CORSMiddleware(mux))
+	handler := api.LoggingMiddleware(api.CORSMiddleware(httpHandler.AuthMiddleware(mux)))
 
 	server := &http.Server{
 		Addr:              addr,

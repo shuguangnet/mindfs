@@ -45,6 +45,14 @@ func main() {
 		}
 	}
 
+	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) == "auth" {
+		if err := handleAuthCommand(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		return
+	}
+
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
 		fmt.Fprintf(out, "Usage:\n")
@@ -62,6 +70,7 @@ func main() {
 		fmt.Fprintf(out, "  mindfs --update\n")
 		fmt.Fprintf(out, "  mindfs --uninstall\n")
 		fmt.Fprintf(out, "  mindfs --stop\n")
+		fmt.Fprintf(out, "  mindfs auth set-password\n")
 		fmt.Fprintf(out, "  mindfs -addr :9000 /path/to/project\n")
 		fmt.Fprintf(out, "  mindfs -remove /path/to/project\n")
 		fmt.Fprintf(out, "  mindfs <rootid> -task 12\n")
