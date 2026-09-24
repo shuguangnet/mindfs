@@ -271,7 +271,7 @@ function formatTurnTokenCount(value: number) {
   return String(Math.round(tokens));
 }
 
-function TurnTokenUsage({ usage }: { usage?: TokenUsage }) {
+function TurnTokenUsage({ usage, totalUsage }: { usage?: TokenUsage; totalUsage: TokenUsage }) {
   if (!usage) {
     return null;
   }
@@ -288,7 +288,7 @@ function TurnTokenUsage({ usage }: { usage?: TokenUsage }) {
   const cacheLabel = hitPercent === null ? "—" : `${hitPercent}%`;
   return (
     <span
-      title={`${inputTokens}(♻ ${cacheLabel})→${outputTokens}`}
+      title={`${inputTokens}(♻${cacheLabel}·Σ${totalUsage.inputTokens})→${outputTokens}(Σ${totalUsage.outputTokens})`}
       style={{
         display: "inline-flex",
         alignItems: "baseline",
@@ -298,9 +298,12 @@ function TurnTokenUsage({ usage }: { usage?: TokenUsage }) {
       }}
     >
       <span>{formatTurnTokenCount(inputTokens)}</span>
-      <span>{`(♻ ${cacheLabel})`}</span>
+      <span>
+        {`(♻${cacheLabel}·Σ${formatTurnTokenCount(totalUsage.inputTokens)})`}
+      </span>
       <span>→</span>
       <span>{formatTurnTokenCount(outputTokens)}</span>
+      <span>{`(Σ${formatTurnTokenCount(totalUsage.outputTokens)})`}</span>
     </span>
   );
 }
@@ -338,7 +341,7 @@ function formatAssistantExchangeMeta(
   if (`${item.fastService || ""}`.trim().toLowerCase() === "on") {
     parts.push("fast");
   }
-  return parts.join(" · ");
+  return parts.join("·").replace(/\s+/g, "");
 }
 
 function ContextWindowBadge({
@@ -1200,6 +1203,18 @@ function SessionViewerInner({
     copyResetTimersRef.current = {};
   }, [sessionKey]);
 
+  const cumulativeTokenUsage = useMemo(() => {
+    let inputTokens = 0;
+    let outputTokens = 0;
+    return timeline.map((item) => {
+      if (item.type === "assistant_text" && item.tokenUsage) {
+        inputTokens += Math.max(0, Number(item.tokenUsage.inputTokens || 0));
+        outputTokens += Math.max(0, Number(item.tokenUsage.outputTokens || 0));
+      }
+      return { inputTokens, outputTokens };
+    });
+  }, [timeline]);
+
   const userMessageSummaries = useMemo(
     () =>
       timeline
@@ -1946,7 +1961,6 @@ function SessionViewerInner({
               style={{
                 fontSize: "10px",
                 color: "var(--text-secondary)",
-                opacity: 0.5,
                 alignSelf: "flex-end",
                 display: "inline-flex",
                 alignItems: "center",
@@ -1967,7 +1981,7 @@ function SessionViewerInner({
                   }}
                 />
               ) : null}
-              <span>{time}</span>
+              <span style={{ opacity: 0.5 }}>{time}</span>
               <button
                 type="button"
                 onClick={() => {
@@ -2139,8 +2153,7 @@ function SessionViewerInner({
                   minWidth: 0,
                   fontSize: "10px",
                   color: "var(--text-secondary)",
-                  opacity: 0.5,
-                  marginTop: "-10px",
+                  marginTop: "0",
                   marginBottom: "4px",
                 }}
               >
@@ -2242,7 +2255,7 @@ function SessionViewerInner({
                   ) : null}
                   <AgentIcon
                     agentName={item.agent || ""}
-                    style={{ width: "12px", height: "12px", flexShrink: 0 }}
+                    style={{ width: "12px", height: "12px", flexShrink: 0, opacity: 0.5 }}
                   />
                 </span>
                 <span
@@ -2254,6 +2267,7 @@ function SessionViewerInner({
                     gap: "0 8px",
                     minWidth: 0,
                     lineHeight: "16px",
+                    opacity: 0.5,
                   }}
                 >
                   {assistantExchangeMeta ? (
@@ -2280,7 +2294,7 @@ function SessionViewerInner({
                       overflowWrap: "anywhere",
                     }}
                   >
-                    <TurnTokenUsage usage={item.tokenUsage} />
+                    <TurnTokenUsage usage={item.tokenUsage} totalUsage={cumulativeTokenUsage[idx]} />
                   </span>
                   <span
                     style={{
@@ -2293,7 +2307,7 @@ function SessionViewerInner({
                       overflowWrap: "anywhere",
                     }}
                   >
-                    {time}{assistantDurationLabel ? ` ${assistantDurationLabel}` : ""}
+                    {time}{assistantDurationLabel}
                   </span>
                   <span
                     style={{
@@ -3137,7 +3151,7 @@ function SessionViewerInner({
                       fontVariantNumeric: "tabular-nums",
                     }}
                   >
-                    {userMessageSummaries.length > 99 ? "99+" : userMessageSummaries.length}
+                    {userMessageSummaries.length}
                   </span>
                 </button>
               </div>
