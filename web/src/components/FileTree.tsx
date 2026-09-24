@@ -210,6 +210,7 @@ type FileTreeProps = {
   fontSizePreferences?: FontSizePreferences;
   onFontSizePreferencesChange?: (preferences: FontSizePreferences) => void;
   onRestartAgent?: (agentName: string) => void | Promise<void>;
+  onRestartAllAgents?: () => void | Promise<void>;
   onGoHome?: () => void;
   footerTopContent?: React.ReactNode;
 };
@@ -707,6 +708,8 @@ function AgentConfigPopover({
   onSave,
   onSwitch,
   onRestartAgent,
+  onRestartAllAgents,
+  restartingAll,
   onConfirm,
   onCancel,
 }: {
@@ -754,6 +757,8 @@ function AgentConfigPopover({
   onSave: () => void;
   onSwitch: () => void;
   onRestartAgent?: (agentName: string) => void | Promise<void>;
+  onRestartAllAgents?: () => void | Promise<void>;
+  restartingAll?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -783,8 +788,32 @@ function AgentConfigPopover({
       }}
     >
       {step === "agent" ? (
-        <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
-          {agentTitle}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+          <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
+            {agentTitle}
+          </div>
+          {onRestartAllAgents ? (
+            <button
+              type="button"
+              disabled={busy || Boolean(restartingAll) || restartingAgent !== ""}
+              onClick={(event) => {
+                event.stopPropagation();
+                void onRestartAllAgents();
+              }}
+              title={t("agent.restartAll")}
+              style={{
+                ...agentConfigSecondaryButtonStyle(busy || Boolean(restartingAll) || restartingAgent !== ""),
+                padding: "2px 8px",
+                height: "22px",
+                lineHeight: "14px",
+                fontSize: "11px",
+                borderRadius: "6px",
+                flexShrink: 0,
+              }}
+            >
+              {restartingAll ? <RestartSpinner /> : t("agent.restartAll")}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {step === "agent" ? (
@@ -1519,6 +1548,7 @@ export function FileTree({
   onFontSizePreferencesChange,
   onRunAgentLifecycleCommand,
   onRestartAgent,
+  onRestartAllAgents,
   onGoHome,
   footerTopContent,
 }: FileTreeProps) {
@@ -1601,6 +1631,7 @@ export function FileTree({
   const [agentConfigConfirmMessage, setAgentConfigConfirmMessage] = React.useState("");
   const [agentConfigBusy, setAgentConfigBusy] = React.useState(false);
   const [agentConfigRestartingAgent, setAgentConfigRestartingAgent] = React.useState("");
+  const [agentConfigRestartingAll, setAgentConfigRestartingAll] = React.useState(false);
   const [agentConfigError, setAgentConfigError] = React.useState("");
   const [agentConfigNotice, setAgentConfigNotice] = React.useState("");
   const [providerSyncBusy, setProviderSyncBusy] = React.useState(false);
@@ -2373,6 +2404,21 @@ export function FileTree({
       setAgentConfigRestartingAgent("");
     }
   }, [agentConfigRestartingAgent, onRestartAgent, t]);
+
+  const restartAllAgentsFromConfigList = React.useCallback(async () => {
+    if (!onRestartAllAgents || agentConfigRestartingAll || agentConfigRestartingAgent) {
+      return;
+    }
+    setAgentConfigRestartingAll(true);
+    setAgentConfigError("");
+    try {
+      await onRestartAllAgents();
+    } catch (error) {
+      setAgentConfigError(error instanceof Error ? error.message : t("agentConfig.restartFailed"));
+    } finally {
+      setAgentConfigRestartingAll(false);
+    }
+  }, [agentConfigRestartingAgent, agentConfigRestartingAll, onRestartAllAgents, t]);
 
   const chooseAgentForConfig = React.useCallback(async (agentName: string) => {
     setAgentConfigAgent(agentName);
@@ -3767,6 +3813,7 @@ export function FileTree({
               confirmMessage={agentConfigConfirmMessage}
               busy={agentConfigBusy}
               restartingAgent={agentConfigRestartingAgent}
+              restartingAll={agentConfigRestartingAll}
               error={agentConfigError}
               notice={agentConfigNotice}
               providerSyncBusy={providerSyncBusy}
@@ -3810,6 +3857,7 @@ export function FileTree({
                 void runAgentConfigSwitch(false);
               }}
               onRestartAgent={agentConfigFlow === "switch" ? restartAgentFromConfigList : undefined}
+              onRestartAllAgents={agentConfigFlow === "switch" ? restartAllAgentsFromConfigList : undefined}
               onConfirm={() => {
                 if (agentConfigFlow === "backup") {
                   void saveAgentConfigBackup(true);

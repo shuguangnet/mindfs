@@ -166,7 +166,7 @@ import {
   ProjectAddPopover,
   type ProjectAddMode,
 } from "./components/ProjectAddPopover";
-import { fetchAgents, restartAgent, type AgentStatus } from "./services/agents";
+import { fetchAgents, restartAgent, restartAllAgents, type AgentStatus } from "./services/agents";
 import { runAgentLifecycle } from "./services/agents";
 import { fetchCandidates, type CandidateItem } from "./services/candidates";
 import {
@@ -6830,6 +6830,47 @@ export function App({ onGoHome }: AppProps) {
     setAvailableAgents(items);
     setAgentsVersion((v) => v + 1);
   }, []);
+
+  const handleRestartAllAgents = useCallback(async () => {
+    let replyingCount = 0;
+    try {
+      const payload = await apiProtectedJSON<{ sessions?: unknown[] }>(
+        appPath("/api/replying-sessions"),
+      );
+      replyingCount = Array.isArray(payload?.sessions) ? payload.sessions.length : 0;
+    } catch (error) {
+      console.warn("[agent/restart-all] replying check failed", error);
+    }
+    if (
+      replyingCount > 0 &&
+      !window.confirm(t("agent.restartAllConfirm", { count: replyingCount }))
+    ) {
+      return;
+    }
+    const result = await restartAllAgents();
+    const results = Array.isArray(result?.results) ? result.results : [];
+    const failures = results.filter((item) => item.error);
+    if (results.length === 0) {
+      reportError("agent.restart_all_failed", t("agent.restartAllNoAgents"));
+    } else if (failures.length > 0) {
+      reportError(
+        "agent.restart_all_failed",
+        t("agent.restartAllPartial", {
+          ok: results.length - failures.length,
+          failed: failures.length,
+          agents: failures.map((item) => item.agent).join(", "),
+        }),
+      );
+    } else {
+      reportError(
+        "agent.restart_all_done",
+        t("agent.restartAllDone", { total: results.length }),
+      );
+    }
+    const items = await fetchAgents(true);
+    setAvailableAgents(items);
+    setAgentsVersion((v) => v + 1);
+  }, [t]);
 
   const handleCancelCurrentTurn = useCallback(
     async (sessionKey: string) => {
@@ -14446,6 +14487,7 @@ export function App({ onGoHome }: AppProps) {
             onFontSizePreferencesChange={setFontSizePreferences}
             onRunAgentLifecycleCommand={handleRunAgentLifecycleCommand}
             onRestartAgent={handleRestartAgent}
+            onRestartAllAgents={handleRestartAllAgents}
             onGoHome={onGoHome}
           />
         }
@@ -14537,6 +14579,7 @@ export function App({ onGoHome }: AppProps) {
               onSendMessage={handleSendMessage}
               onSetPlanMode={handleSetPlanMode}
               onCancelCurrentTurn={handleCancelCurrentTurn}
+              onRestartAllAgents={handleRestartAllAgents}
               onRemoveQueuedMessage={handleRemoveQueuedMessage}
               onUpdateQueuedMessage={handleUpdateQueuedMessage}
               onSendQueuedMessageNow={handleSendQueuedMessageNow}

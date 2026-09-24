@@ -385,6 +385,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	// Agent status API
 	r.Get("/api/agents", h.protectedEndpoint(h.handleAgentsList))
 	r.Post("/api/agents/restart", h.protectedEndpoint(h.handleAgentRestart))
+	r.Post("/api/agents/restart-all", h.protectedEndpoint(h.handleAgentRestartAll))
 	r.Post("/api/agents/lifecycle", h.protectedEndpoint(h.handleAgentLifecycle))
 	r.Get("/api/remote-servers", h.protectedEndpoint(h.handleRemoteServersList))
 	r.Post("/api/remote-servers", h.protectedEndpoint(h.handleRemoteServerSave))

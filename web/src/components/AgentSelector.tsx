@@ -29,6 +29,7 @@ type AgentSelectorProps = {
   onEffortChange?: (effort?: string) => void;
   onFastServiceChange?: (fastService?: "" | "on" | "off") => void;
   onAgentRestart?: (agent: string) => void | Promise<void>;
+  onRestartAll?: () => void | Promise<void>;
   compact?: boolean;
   warnUnavailable?: boolean;
   menuPlacement?: "top" | "bottom";
@@ -170,6 +171,7 @@ export function AgentSelector({
   onEffortChange,
   onFastServiceChange,
   onAgentRestart,
+  onRestartAll,
   compact = false,
   warnUnavailable = false,
   menuPlacement = "top",
@@ -189,6 +191,7 @@ export function AgentSelector({
   const [serviceTierSectionExpanded, setServiceTierSectionExpanded] =
     useState(false);
   const [restartingAgent, setRestartingAgent] = useState<string | null>(null);
+  const [restartingAll, setRestartingAll] = useState(false);
   const [menuBodyHeight, setMenuBodyHeight] = useState<number | null>(null);
   const [modelSearch, setModelSearch] = useState("");
   const [providerCatalog, setProviderCatalog] = useState<AgentAPIProvider[] | null>(null);
@@ -531,6 +534,18 @@ export function AgentSelector({
     [onAgentRestart, restartingAgent],
   );
 
+  const handleRestartAll = useCallback(async () => {
+    if (!onRestartAll || restartingAll || restartingAgent) {
+      return;
+    }
+    setRestartingAll(true);
+    try {
+      await onRestartAll();
+    } finally {
+      setRestartingAll(false);
+    }
+  }, [onRestartAll, restartingAgent, restartingAll]);
+
   return (
     <div ref={dropdownRef} data-onboarding={onboardingId} style={{ position: "relative" }}>
       <style>{`
@@ -690,13 +705,74 @@ export function AgentSelector({
             <div
               style={{
                 padding: "6px 12px",
-                fontSize: "11px",
-                fontWeight: 600,
-                color: "var(--text-secondary)",
-                textTransform: "uppercase",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
               }}
             >
-              Agent
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
+                  textTransform: "uppercase",
+                }}
+              >
+                Agent
+              </span>
+              {onRestartAll ? (
+                <button
+                  type="button"
+                  title={t("agent.restartAll")}
+                  aria-label={t("agent.restartAll")}
+                  disabled={restartingAll || restartingAgent !== null}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void handleRestartAll();
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    padding: "2px 8px",
+                    height: "20px",
+                    fontSize: "11px",
+                    fontWeight: 500,
+                    lineHeight: 1,
+                    borderRadius: "6px",
+                    border: "1px solid var(--menu-border)",
+                    background: "transparent",
+                    color: "var(--text-secondary)",
+                    cursor:
+                      restartingAll || restartingAgent !== null
+                        ? "default"
+                        : "pointer",
+                    opacity:
+                      restartingAll || restartingAgent !== null ? 0.62 : 1,
+                    whiteSpace: "nowrap",
+                    flex: "0 0 auto",
+                  }}
+                >
+                  {restartingAll ? (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: "10px",
+                        height: "10px",
+                        border: "1.5px solid currentColor",
+                        borderTopColor: "transparent",
+                        borderRadius: "50%",
+                        animation: "agent-refresh-spin 0.8s linear infinite",
+                        display: "inline-block",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  ) : null}
+                  {t("agent.restartAll")}
+                </button>
+              ) : null}
             </div>
             {agents.map((a) => {
               const hasModelOptions = hasAgentOptions(a);

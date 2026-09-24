@@ -122,6 +122,7 @@ type ActionBarProps = {
   onSessionClick?: () => void;
   onToggleLeftSidebar?: () => void;
   onToggleRightSidebar?: () => void;
+  onRestartAllAgents?: () => void | Promise<void>;
   sidebarsSwapped?: boolean;
 };
 
@@ -441,6 +442,7 @@ export function ActionBar({
   onSessionClick,
   onToggleLeftSidebar,
   onToggleRightSidebar,
+  onRestartAllAgents,
   mobileEnterKeySends = false,
   sendShortcut = null,
   sidebarsSwapped = false,
@@ -2100,6 +2102,7 @@ export function ActionBar({
                       const items = await fetchAgents(true);
                       setAgents(items);
                     }}
+                    onRestartAll={onRestartAllAgents}
                     compact={true}
                     warnUnavailable={isSelectedAgentUnavailable}
                     defaultExpandOptions

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -51,6 +52,12 @@ type agentConfigSwitchRequest struct {
 
 type agentRestartRequest struct {
 	Agent string `json:"agent"`
+}
+
+type agentRestartResult struct {
+	Agent      string `json:"agent"`
+	Restarting bool   `json:"restarting"`
+	Error      string `json:"error,omitempty"`
 }
 
 type agentLifecycleRequest struct {
@@ -188,6 +195,30 @@ func (h *HTTPHandler) handleAgentRestart(w http.ResponseWriter, r *http.Request)
 	respondJSON(w, http.StatusOK, map[string]any{
 		"restarting": true,
 		"agent":      strings.TrimSpace(req.Agent),
+	})
+}
+
+func (h *HTTPHandler) handleAgentRestartAll(w http.ResponseWriter, r *http.Request) {
+	results, err := restartAllAgents(h.AppContext)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	succeeded := 0
+	failed := 0
+	for _, item := range results {
+		if item.Error != "" {
+			failed++
+			continue
+		}
+		succeeded++
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"restarting": true,
+		"total":      len(results),
+		"succeeded":  succeeded,
+		"failed":     failed,
+		"results":    results,
 	})
 }
 
@@ -500,6 +531,40 @@ func restartAgent(agentName string, app *AppContext) error {
 	app.GetAgentPool().KillAgentProcess(agentName, 0)
 	triggerAgentConfigSwitchProbe(app, agentName)
 	return nil
+}
+
+// restartAllAgents restarts every locally configured agent (remote agents are
+// managed by their own host and are intentionally not included). Each agent
+// follows the same single-agent restart path: kill existing processes and
+// trigger a background availability probe. Failures are reported per agent so a
+// single broken definition does not abort the rest.
+func restartAllAgents(app *AppContext) ([]agentRestartResult, error) {
+	if app == nil || app.GetAgentPool() == nil {
+		return nil, errors.New("agent pool not configured")
+	}
+	cfg := app.GetAgentPool().Config()
+	names := make([]string, 0, len(cfg.Agents))
+	seen := make(map[string]bool, len(cfg.Agents))
+	for _, def := range cfg.Agents {
+		name := strings.TrimSpace(def.Name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	results := make([]agentRestartResult, 0, len(names))
+	for _, name := range names {
+		if err := restartAgent(name, app); err != nil {
+			log.Printf("[agent-config] restart_all.agent_failed agent=%s err=%v", name, err)
+			results = append(results, agentRestartResult{Agent: name, Error: err.Error()})
+			continue
+		}
+		results = append(results, agentRestartResult{Agent: name, Restarting: true})
+	}
+	log.Printf("[agent-config] restart_all.done total=%d", len(results))
+	return results, nil
 }
 
 func (h *HTTPHandler) runAgentLifecycle(ctx context.Context, req agentLifecycleRequest) (*agentLifecycleResponse, error) {

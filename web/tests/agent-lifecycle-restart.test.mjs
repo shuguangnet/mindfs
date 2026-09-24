@@ -74,7 +74,7 @@ assert.doesNotMatch(
 
 assert.match(
   app,
-  /import \{ fetchAgents, restartAgent, type AgentStatus \} from "\.\/services\/agents";/,
+  /import \{ fetchAgents, restartAgent, restartAllAgents, type AgentStatus \} from "\.\/services\/agents";/,
   "App should import the existing restartAgent service",
 );
 
@@ -82,4 +82,24 @@ assert.match(
   app,
   /onRestartAgent=\{handleRestartAgent\}/,
   "App should pass the restart handler to FileTree",
+);
+
+const agentsService = readFileSync(new URL("../src/services/agents.ts", import.meta.url), "utf8");
+
+assert.match(
+  agentsService,
+  /export async function restartAllAgents\(\): Promise<RestartAllAgentsResponse> \{[\s\S]*?appPath\("\/api\/agents\/restart-all"\)/,
+  "agents service should expose restartAllAgents hitting the restart-all endpoint",
+);
+
+assert.match(
+  app,
+  /const handleRestartAllAgents = useCallback\(async \(\) => \{[\s\S]*?appPath\("\/api\/replying-sessions"\)[\s\S]*?window\.confirm\(t\("agent\.restartAllConfirm", \{ count: replyingCount \}\)\)[\s\S]*?await restartAllAgents\(\)/,
+  "App should confirm when sessions are replying and then call restartAllAgents",
+);
+
+assert.match(
+  app,
+  /onRestartAllAgents=\{handleRestartAllAgents\}/,
+  "App should pass the restart-all handler to FileTree and ActionBar",
 );

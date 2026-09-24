@@ -28,6 +28,8 @@ export type ErrorCode =
   | "agent.timeout"
   | "agent.crashed"
   | "agent.permission_denied"
+  | "agent.restart_all_done"
+  | "agent.restart_all_failed"
   // View errors
   | "view.invalid"
   | "view.render_failed"
@@ -235,6 +237,16 @@ class ErrorService {
         messageKey: "error.agent.permissionDenied",
         severity: "warning",
         recoverable: false,
+      },
+      "agent.restart_all_done": {
+        messageKey: "error.agent.restartAllDone",
+        severity: "info",
+        recoverable: false,
+      },
+      "agent.restart_all_failed": {
+        messageKey: "error.agent.restartAllFailed",
+        severity: "error",
+        recoverable: true,
       },
       "view.invalid": {
         messageKey: "error.view.invalid",

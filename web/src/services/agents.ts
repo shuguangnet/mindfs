@@ -239,6 +239,28 @@ export async function restartAgent(agent: string): Promise<{ restarting: boolean
   });
 }
 
+export type RestartAllAgentsResult = {
+  agent: string;
+  restarting?: boolean;
+  error?: string;
+};
+
+export type RestartAllAgentsResponse = {
+  restarting: boolean;
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: RestartAllAgentsResult[];
+};
+
+export async function restartAllAgents(): Promise<RestartAllAgentsResponse> {
+  return protectedJSON<RestartAllAgentsResponse>(appPath("/api/agents/restart-all"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+}
+
 export type AgentLifecycleAction = "install" | "update";
 
 export type AgentLifecycleResult = {

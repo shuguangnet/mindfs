@@ -195,3 +195,46 @@ func writeJSON(t *testing.T, path string, value any) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
+
+func TestRestartAllAgentsRestartsEveryConfiguredAgent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("MINDFS_AGENTS_CONFIG", filepath.Join(home, "agents.json"))
+
+	cfg := agent.Config{
+		Agents: []agent.Definition{
+			{Name: "codex", Command: "codex", Protocol: agent.ProtocolCodexSDK},
+			{Name: "claude", Command: "claude", Protocol: agent.ProtocolClaudeSDK},
+			{Name: "  ", Command: "blank"},
+			{Name: "codex", Command: "codex-dup", Protocol: agent.ProtocolCodexSDK},
+		},
+	}
+	pool := agent.NewPool(cfg)
+	defer pool.CloseAll()
+
+	results, err := restartAllAgents(&AppContext{Agents: pool})
+	if err != nil {
+		t.Fatalf("restartAllAgents: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 deduped agents, got %d: %+v", len(results), results)
+	}
+	if results[0].Agent != "claude" || results[1].Agent != "codex" {
+		t.Fatalf("expected sorted agents [claude codex], got %+v", results)
+	}
+	for _, item := range results {
+		if item.Error != "" || !item.Restarting {
+			t.Fatalf("expected agent %s restarted, got %+v", item.Agent, item)
+		}
+	}
+}
+
+func TestRestartAllAgentsRejectsMissingPool(t *testing.T) {
+	if _, err := restartAllAgents(&AppContext{}); err == nil {
+		t.Fatal("expected error for missing agent pool")
+	}
+	if _, err := restartAllAgents(nil); err == nil {
+		t.Fatal("expected error for nil app context")
+	}
+}
