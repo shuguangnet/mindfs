@@ -388,6 +388,7 @@ func (h *WSHandler) broadcastSessionMetaUpdated(rootID string, sess *session.Ses
 				"source":              sess.Source,
 				"task_id":             sess.TaskID,
 				"name":                sess.Name,
+				"agent":               session.InferAgentFromSession(sess),
 				"model":               sess.Model,
 				"mode":                session.InferModeFromSession(sess),
 				"effort":              session.InferEffortFromSession(sess),

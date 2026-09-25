@@ -435,6 +435,7 @@ export const zhCN = {
   "session.planModeSwitchFailedNotReady": "Plan 模式切换失败：连接未就绪，请稍后重试",
   "session.generating": "正在生成...",
   "session.sentWaiting": "已发送，等待响应...",
+  "session.stalledHint": "长时间未收到响应，Agent 可能已卡住，可取消后重试",
   "session.relatedFiles": "关联文件 {count}",
   "session.expandRelatedFiles": "展开关联文件",
   "session.collapseRelatedFiles": "折叠关联文件",

@@ -1,3 +1,11 @@
+# MindFS v0.5.9
+
+## 修复
+- 修复会话的 Agent / 模型 / 思考模式（mode）/ 思考力度（effort）/ fast_service 切换后刷新页面就回退的问题：这些运行时配置现在持久化到会话记录（数据库新增 agent/mode/effort/fast_service 列，向后兼容旧会话），并在发送消息时（回合开始前）立即落库，即使回合失败或卡住也不会丢失；会话列表 / WebSocket 元数据广播同步携带 agent 字段
+- 修复 Agent 卡住时界面无限转圈无提示的问题：回合内超过闲置超时（默认 10 分钟，可用 MINDFS_TURN_IDLE_TIMEOUT 配置，"0" 关闭）无任何事件即自动取消该回合，界面显示明确错误「agent 闲置超时已自动取消，模型服务可能不可用」，并跳过自动重试；前端流式停滞约 90 秒后显示琥珀色提示「长时间未收到响应，Agent 可能已卡住，可取消后重试」
+- 新增运行时配置接口 PATCH /api/sessions/{key}/runtime-config：前端切换 Agent/模型/思考模式/思考力度/快速服务时即时持久化，无需等到发消息
+- fork 会话保留源会话的 mode/effort/fast_service 设置
+
 # MindFS v0.5.8
 
 ## 新功能

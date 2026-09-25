@@ -304,6 +304,7 @@ class SessionService {
   private handlers = new Map<string, Set<SessionEventHandler>>();
   private pendingStreams = new Map<string, StreamEvent[]>();
   private activeStreams = new Set<string>();
+  private lastStreamEventAt = new Map<string, number>();
   private eventCursors = new Map<string, string>();
   private pendingMessages = new Map<string, PendingMessage>();
   private listeners = new Set<(event: SessionServiceEvent) => void>();
@@ -812,6 +813,7 @@ class SessionService {
   ) {
     if (type === "session.done" || type === "session.error") {
       this.activeStreams.delete(sessionKey);
+      this.lastStreamEventAt.delete(sessionKey);
       return;
     }
     if (type !== "session.stream") return;
@@ -819,15 +821,29 @@ class SessionService {
     if (!event) return;
     if (event.type === "error") {
       this.activeStreams.delete(sessionKey);
+      this.lastStreamEventAt.delete(sessionKey);
       return;
     }
     if (event.type !== "message_done") {
       this.activeStreams.add(sessionKey);
+      this.lastStreamEventAt.set(sessionKey, Date.now());
     }
   }
 
   isSessionStreaming(sessionKey: string) {
     return this.activeStreams.has(sessionKey);
+  }
+
+  /**
+   * Milliseconds since the last stream event for the session (stream chunks,
+   * tool activity, thoughts, ...). Returns 0 when unknown (not streaming or no
+   * event seen yet), so callers can avoid false "stalled" impressions.
+   */
+  sinceLastStreamEvent(sessionKey: string): number {
+    if (!this.activeStreams.has(sessionKey)) return 0;
+    const last = this.lastStreamEventAt.get(sessionKey);
+    if (!last) return 0;
+    return Math.max(0, Date.now() - last);
   }
 
   private eventCursorKey(rootId: string, sessionKey: string): string {
@@ -1431,6 +1447,51 @@ class SessionService {
       return data as Session;
     } catch (err) {
       console.error("[Session] Failed to update session pin:", err);
+      return null;
+    }
+  }
+
+  /**
+   * Persist session-level runtime config (agent / model / mode / effort /
+   * fast service) immediately when the user switches it, so the selection
+   * survives page refreshes even if the next turn fails or hangs.
+   * Fields absent from the patch stay unchanged; empty strings reset the
+   * field to the agent default.
+   */
+  async updateSessionRuntimeConfig(
+    rootId: string,
+    sessionKey: string,
+    patch: {
+      agent?: string;
+      model?: string;
+      mode?: string;
+      effort?: string;
+      fast_service?: string;
+      shell?: string;
+      plan_mode?: boolean;
+    },
+  ): Promise<Session | null> {
+    try {
+      if (!rootId || !sessionKey) {
+        return null;
+      }
+      const params = new URLSearchParams({ root: rootId });
+      const data = await protectedJSON<Session>(
+        appURL(
+          `/api/sessions/${encodeURIComponent(sessionKey)}/runtime-config`,
+          params,
+        ),
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(patch),
+        },
+      );
+      return data as Session;
+    } catch (err) {
+      console.error("[Session] Failed to update session runtime config:", err);
       return null;
     }
   }

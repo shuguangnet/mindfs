@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -499,6 +501,9 @@ func (s *Service) ForkSession(ctx context.Context, in ForkSessionInput) (ForkSes
 		Source:           string(sourceJSON),
 		Agent:            agentName,
 		Model:            resolveForkModel(current, target),
+		Mode:             strings.TrimSpace(target.Mode),
+		Effort:           strings.TrimSpace(target.Effort),
+		FastService:      strings.TrimSpace(target.FastService),
 		Name:             buildForkSessionName(current, target.Seq),
 		PlanMode:         current.PlanMode,
 	})
@@ -1083,6 +1088,49 @@ func (s *Service) PinSession(ctx context.Context, in PinSessionInput) (*session.
 	return manager.SetPinned(ctx, in.Key, in.Pinned)
 }
 
+type UpdateSessionRuntimeConfigInput struct {
+	RootID string
+	Key    string
+	Patch  session.RuntimeConfigPatch
+}
+
+// UpdateSessionRuntimeConfig persists a partial runtime configuration update
+// (agent / model / mode / effort / fast service / shell / plan mode) on the
+// session immediately, then validates the agent/model combination. It returns
+// the updated session so callers can broadcast authoritative meta.
+func (s *Service) UpdateSessionRuntimeConfig(ctx context.Context, in UpdateSessionRuntimeConfigInput) (*session.Session, error) {
+	if err := s.ensureRegistry(); err != nil {
+		return nil, err
+	}
+	key := strings.TrimSpace(in.Key)
+	if key == "" {
+		return nil, errors.New("session key required")
+	}
+	manager, err := s.Registry.GetSessionManager(in.RootID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := manager.Get(ctx, key, 0)
+	if err != nil {
+		return nil, err
+	}
+	if current.ClosedAt != nil {
+		return nil, errors.New("session is closed")
+	}
+	// Validate agent/model before persisting so an invalid combination is
+	// rejected instead of silently stored.
+	agent := current.Agent
+	if in.Patch.Agent != nil {
+		agent = strings.TrimSpace(*in.Patch.Agent)
+	}
+	if in.Patch.Model != nil {
+		if err := s.ValidateAgentModel(agent, *in.Patch.Model); err != nil {
+			return nil, err
+		}
+	}
+	return manager.UpdateRuntimeConfig(ctx, key, in.Patch)
+}
+
 type BuildPromptInput struct {
 	Session                       *session.Session
 	Manager                       *session.Manager
@@ -1225,6 +1273,83 @@ func sendMessageUserTimestamp(in SendMessageInput, fallback time.Time) time.Time
 		return time.Now().UTC()
 	}
 	return fallback.UTC()
+}
+
+// Turn watchdog: if an agent turn produces no events (no chunks, no tool
+// activity, nothing) for longer than this duration, it is considered stuck and
+// canceled with an explicit error instead of hanging silently forever.
+// Configure with MINDFS_TURN_IDLE_TIMEOUT (e.g. 30s, 10m); "0" disables it.
+const defaultTurnIdleWatchdog = 10 * time.Minute
+
+var turnIdleWatchdog = sync.OnceValue(turnIdleWatchdogFromEnv)
+
+func turnIdleWatchdogFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MINDFS_TURN_IDLE_TIMEOUT"))
+	if raw == "" {
+		return defaultTurnIdleWatchdog
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return defaultTurnIdleWatchdog
+	}
+	return d
+}
+
+// runTurnWithIdleWatchdog invokes send while watching the atomic activity
+// timestamp. When no event has been observed for the configured idle timeout,
+// the turn's context is canceled and a descriptive error is returned so the
+// UI surfaces it, instead of the turn hanging silently.
+func runTurnWithIdleWatchdog(turnCtx context.Context, turnCancel context.CancelFunc, lastActivityNano *int64, send func() error) error {
+	idle := turnIdleWatchdog()
+	if idle <= 0 {
+		return send()
+	}
+	var fired atomic.Bool
+	stop := make(chan struct{})
+	stopOnce := sync.Once{}
+	go func() {
+		tick := idle / 4
+		if tick < 250*time.Millisecond {
+			tick = 250 * time.Millisecond
+		}
+		if tick > 15*time.Second {
+			tick = 15 * time.Second
+		}
+		ticker := time.NewTicker(tick)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-turnCtx.Done():
+				return
+			case <-ticker.C:
+				last := time.Unix(0, atomic.LoadInt64(lastActivityNano))
+				if last.IsZero() {
+					last = time.Now()
+				}
+				if time.Since(last) <= idle {
+					continue
+				}
+				if fired.CompareAndSwap(false, true) {
+					log.Printf("[session] turn.watchdog.fire idle=%s", idle)
+					turnCancel()
+				}
+				return
+			}
+		}
+	}()
+	err := send()
+	stopOnce.Do(func() { close(stop) })
+	if fired.Load() {
+		// The watchdog canceled the turn: turn the (usually canceled-context)
+		// error into an explicit, user-visible failure instead of suppressing
+		// it as a normal user cancel.
+		if err == nil || isCanceledTurnError(err) {
+			err = fmt.Errorf("agent idle for %s, automatically canceled this turn; the model service may be unavailable", idle)
+		}
+	}
+	return err
 }
 
 type RunTransientSlashCommandInput struct {
@@ -2176,6 +2301,55 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	}
 	resolvedMode := resolveRuntimeMode(current, in.Mode)
 	resolvedFastService := resolveRuntimeFastService(in.Agent, current, in.FastService)
+	// Persist the requested runtime configuration (agent/model/mode/effort/
+	// fast service) immediately, before the turn runs. Previously this only
+	// landed in the DB after the turn completed, so a failed/hung turn or a
+	// mid-turn page refresh reverted the UI to the previous agent/model.
+	if current.Type != session.TypeCommand {
+		runtimePatch := session.RuntimeConfigPatch{}
+		if agent := strings.TrimSpace(in.Agent); agent != "" && agent != current.Agent {
+			a := agent
+			runtimePatch.Agent = &a
+		}
+		if model := strings.TrimSpace(in.Model); model != "" && model != current.Model {
+			m := model
+			runtimePatch.Model = &m
+		}
+		if resolvedMode != current.Mode {
+			mode := resolvedMode
+			runtimePatch.Mode = &mode
+		}
+		if resolvedEffort := strings.TrimSpace(in.Effort); resolvedEffort != current.Effort {
+			e := resolvedEffort
+			runtimePatch.Effort = &e
+		}
+		if resolvedFastService != current.FastService {
+			fs := resolvedFastService
+			runtimePatch.FastService = &fs
+		}
+		if runtimePatch.Agent != nil || runtimePatch.Model != nil || runtimePatch.Mode != nil || runtimePatch.Effort != nil || runtimePatch.FastService != nil {
+			if _, err := manager.UpdateRuntimeConfig(ctx, current.Key, runtimePatch); err != nil {
+				log.Printf("[session] runtime_config.persist.error root=%s session=%s err=%v", in.RootID, current.Key, err)
+			} else {
+				// Keep the in-memory copy in sync for exchange records below.
+				if runtimePatch.Agent != nil {
+					current.Agent = *runtimePatch.Agent
+				}
+				if runtimePatch.Model != nil {
+					current.Model = *runtimePatch.Model
+				}
+				if runtimePatch.Mode != nil {
+					current.Mode = *runtimePatch.Mode
+				}
+				if runtimePatch.Effort != nil {
+					current.Effort = *runtimePatch.Effort
+				}
+				if runtimePatch.FastService != nil {
+					current.FastService = *runtimePatch.FastService
+				}
+			}
+		}
+	}
 	if in.OnStart != nil {
 		in.OnStart(MessageStart{
 			Model:           in.Model,
@@ -2274,8 +2448,12 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		OnCreated:   in.OnSubSessionCreated,
 		OnUpdate:    in.OnSubSessionUpdate,
 	})
+	var lastActivityNano int64
+	atomic.StoreInt64(&lastActivityNano, time.Now().UnixNano())
 	attachSessionUpdates := func(runtime agenttypes.Session) {
 		runtime.OnUpdate(func(update agenttypes.Event) {
+			// Any event (chunk, tool activity, ...) proves the turn is alive.
+			atomic.StoreInt64(&lastActivityNano, time.Now().UnixNano())
 			update = normalizeAgentUpdatePaths(root, update)
 			if claudeSubagents.Handle(context.Background(), update) {
 				return
@@ -2400,11 +2578,17 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		defer finishUse()
 		return runtime.SendMessage(turnCtx, content)
 	}
-	sendErr := sendWithAttachedUpdates(sess, prompt)
+	sendErr := runTurnWithIdleWatchdog(turnCtx, turnCancel, &lastActivityNano, func() error {
+		return sendWithAttachedUpdates(sess, prompt)
+	})
 	if sendErr != nil && !isCanceledTurnError(sendErr) {
 		if isNonRecoverableAgentError(sendErr) {
 			log.Printf("[session] turn.send.non_recoverable root=%s session=%s agent=%s action=fail_without_recovery err=%v", in.RootID, current.Key, in.Agent, sendErr)
 			cancelRuntimeAfterNonRecoverableError(sess, agentPool, in.Agent, sendErr)
+		} else if strings.Contains(sendErr.Error(), "agent idle for") {
+			// Watchdog fired: the model service is stuck/unresponsive. Retrying
+			// the same prompt would most likely hang again, so fail directly.
+			log.Printf("[session] turn.send.watchdog root=%s session=%s agent=%s action=fail_without_recovery", in.RootID, current.Key, in.Agent)
 		} else if !sawAssistantChunk {
 			log.Printf("[session] turn.send.no_response root=%s session=%s agent=%s action=fail_without_recovery", in.RootID, current.Key, in.Agent)
 		} else {
@@ -2446,6 +2630,14 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		// instead of silently persisting an empty assistant reply.
 		log.Printf("[session] turn.empty_response root=%s session=%s agent=%s", in.RootID, current.Key, in.Agent)
 		sendErr = errors.New("model returned no content (the model service may have failed)")
+	}
+	if sendErr != nil && strings.Contains(sendErr.Error(), "agent idle for") && in.OnUpdate != nil {
+		// Real-time notice so the UI can stop the "waiting for the agent" state
+		// immediately instead of only discovering the failure on the next sync.
+		in.OnUpdate(agenttypes.Event{
+			Type: agenttypes.EventTypeRecovery,
+			Data: agenttypes.RecoveryStatus{Message: sendErr.Error()},
+		})
 	}
 	if sendErr != nil && !isCanceledTurnError(sendErr) {
 		log.Printf("[session] turn.send.error root=%s session=%s agent=%s err=%v", in.RootID, current.Key, in.Agent, sendErr)
@@ -4100,6 +4292,12 @@ func normalizeDiffRef(root pathNormalizer, ref string) (string, bool) {
 }
 
 func (s *Service) validateAgentModel(agentName, model string) error {
+	return s.ValidateAgentModel(agentName, model)
+}
+
+// ValidateAgentModel checks that the model is offered by the given agent's
+// catalog. Unknown agents / empty models are always accepted (defaults apply).
+func (s *Service) ValidateAgentModel(agentName, model string) error {
 	agentName = strings.TrimSpace(agentName)
 	model = strings.TrimSpace(model)
 	if agentName == "" || model == "" || s.Registry == nil {

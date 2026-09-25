@@ -656,3 +656,56 @@ func TestManagerMarkPendingAskUserAnsweredMergesAnswers(t *testing.T) {
 		t.Fatalf("answeredAt = %#v, want %s", toolCall.Meta["answeredAt"], answeredAt.Format(time.RFC3339Nano))
 	}
 }
+
+func TestRuntimeConfigPersistedAcrossReload(t *testing.T) {
+	root := rootfs.NewRootInfo("mindfs", "mindfs", t.TempDir())
+	manager := NewManager(root)
+	ctx := context.Background()
+	created, err := manager.Create(ctx, CreateInput{Type: TypeChat, Agent: "pi", Model: "deepseek-chat", Mode: "off", Effort: "high", Name: "Runtime"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	patch := RuntimeConfigPatch{}
+	agent := "codex"
+	model := "gpt-5.2"
+	mode := ""
+	effort := "medium"
+	fast := "on"
+	patch.Agent = &agent
+	patch.Model = &model
+	patch.Mode = &mode
+	patch.Effort = &effort
+	patch.FastService = &fast
+	updated, err := manager.UpdateRuntimeConfig(ctx, created.Key, patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Agent != agent || updated.Model != model || updated.Mode != "" || updated.Effort != effort || updated.FastService != fast {
+		t.Fatalf("patched in-memory session = %#v", updated)
+	}
+
+	// Simulate a fresh process (new manager over the same meta dir): the
+	// persisted values must survive, otherwise a page refresh reverts the
+	// agent/model/mode/effort selection.
+	reloaded := NewManager(root)
+	got, err := reloaded.Get(ctx, created.Key, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Agent != agent || got.Model != model || got.Mode != "" || got.Effort != effort || got.FastService != fast {
+		t.Fatalf("reloaded session = agent=%q model=%q mode=%q effort=%q fast=%q", got.Agent, got.Model, got.Mode, got.Effort, got.FastService)
+	}
+	if InferAgentFromSession(got) != agent {
+		t.Fatalf("InferAgentFromSession = %q, want %q", InferAgentFromSession(got), agent)
+	}
+	if InferModeFromSession(got) != "" || InferEffortFromSession(got) != effort {
+		t.Fatalf("InferMode/Effort = %q/%q", InferModeFromSession(got), InferEffortFromSession(got))
+	}
+
+	// Legacy sessions (no persisted fields) still fall back to exchanges.
+	legacy := &Session{Exchanges: []Exchange{{Agent: "pi", Mode: "medium", Effort: "low", FastService: "on"}}}
+	if InferAgentFromSession(legacy) != "pi" || InferModeFromSession(legacy) != "medium" || InferEffortFromSession(legacy) != "low" {
+		t.Fatalf("legacy inference broken: %#v", legacy)
+	}
+}

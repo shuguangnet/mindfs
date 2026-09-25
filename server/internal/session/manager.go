@@ -32,7 +32,7 @@ const (
 	exchangeFileTpl  = "sessions/%s.jsonl"
 	auxFileTpl       = "sessions/%s.aux.jsonl"
 	selectSessionSQL = `
-	SELECT key, type, parent_session_key, parent_tool_call_id, source, task_id, model, shell, plan_mode, name, related_files_json, related_worktree_json, last_context_window_total_tokens, last_context_window_model_context_window, pinned_at, created_at, updated_at, closed_at
+	SELECT key, type, parent_session_key, parent_tool_call_id, source, task_id, model, agent, mode, effort, fast_service, shell, plan_mode, name, related_files_json, related_worktree_json, last_context_window_total_tokens, last_context_window_model_context_window, pinned_at, created_at, updated_at, closed_at
 	FROM sessions`
 	deleteSessionSQL = `
 DELETE FROM sessions
@@ -42,8 +42,8 @@ DELETE FROM session_agent_bindings
 WHERE session_key = ?`
 	upsertSessionMetaSQL = `
 INSERT INTO sessions (
-		key, type, parent_session_key, parent_tool_call_id, source, task_id, model, shell, plan_mode, name, related_files_json, related_worktree_json, last_context_window_total_tokens, last_context_window_model_context_window, pinned_at, created_at, updated_at, closed_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		key, type, parent_session_key, parent_tool_call_id, source, task_id, model, agent, mode, effort, fast_service, shell, plan_mode, name, related_files_json, related_worktree_json, last_context_window_total_tokens, last_context_window_model_context_window, pinned_at, created_at, updated_at, closed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(key) DO UPDATE SET
 	type = excluded.type,
 	parent_session_key = excluded.parent_session_key,
@@ -51,6 +51,10 @@ ON CONFLICT(key) DO UPDATE SET
 	source = excluded.source,
 	task_id = excluded.task_id,
 	model = excluded.model,
+	agent = excluded.agent,
+	mode = excluded.mode,
+	effort = excluded.effort,
+	fast_service = excluded.fast_service,
 	shell = excluded.shell,
 	plan_mode = excluded.plan_mode,
 	name = excluded.name,
@@ -71,6 +75,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 	source TEXT NOT NULL DEFAULT '',
 	task_id TEXT NOT NULL DEFAULT '',
 	model TEXT NOT NULL DEFAULT '',
+	agent TEXT NOT NULL DEFAULT '',
+	mode TEXT NOT NULL DEFAULT '',
+	effort TEXT NOT NULL DEFAULT '',
+	fast_service TEXT NOT NULL DEFAULT '',
 	shell TEXT NOT NULL DEFAULT '',
 	plan_mode INTEGER NOT NULL DEFAULT 0,
 	name TEXT NOT NULL,
@@ -140,6 +148,9 @@ type CreateInput struct {
 	TaskID           string
 	Agent            string
 	Model            string
+	Mode             string
+	Effort           string
+	FastService      string
 	Shell            string
 	PlanMode         bool
 	Name             string
@@ -214,7 +225,11 @@ func (m *Manager) Create(_ context.Context, input CreateInput) (*Session, error)
 		Source:           strings.TrimSpace(input.Source),
 		TaskID:           strings.TrimSpace(input.TaskID),
 		AgentCtxSeq:      agentCtxSeq,
+		Agent:            initialAgent,
 		Model:            strings.TrimSpace(input.Model),
+		Mode:             strings.TrimSpace(input.Mode),
+		Effort:           strings.TrimSpace(input.Effort),
+		FastService:      strings.TrimSpace(input.FastService),
 		Shell:            strings.TrimSpace(input.Shell),
 		PlanMode:         input.PlanMode,
 		Name:             name,
@@ -1047,6 +1062,50 @@ func (m *Manager) UpdatePlanMode(_ context.Context, session *Session, enabled bo
 	return m.upsertSessionMetaUnsafe(current)
 }
 
+// UpdateRuntimeConfig applies a partial patch of session-level runtime
+// configuration (agent / model / mode / effort / fast service / shell / plan
+// mode) and persists it immediately, so the selection survives page refreshes
+// even before the next exchange completes. Nil patch fields are unchanged.
+// Empty-string values explicitly clear the field (e.g. back to agent default).
+func (m *Manager) UpdateRuntimeConfig(_ context.Context, key string, patch RuntimeConfigPatch) (*Session, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, errors.New("session key required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, err := m.getSessionUnsafe(key, 0)
+	if err != nil {
+		return nil, err
+	}
+	if patch.Agent != nil {
+		current.Agent = strings.TrimSpace(*patch.Agent)
+	}
+	if patch.Model != nil {
+		current.Model = strings.TrimSpace(*patch.Model)
+	}
+	if patch.Mode != nil {
+		current.Mode = strings.TrimSpace(*patch.Mode)
+	}
+	if patch.Effort != nil {
+		current.Effort = strings.TrimSpace(*patch.Effort)
+	}
+	if patch.FastService != nil {
+		current.FastService = strings.TrimSpace(*patch.FastService)
+	}
+	if patch.Shell != nil {
+		current.Shell = strings.TrimSpace(*patch.Shell)
+	}
+	if patch.PlanMode != nil {
+		current.PlanMode = *patch.PlanMode
+	}
+	current.UpdatedAt = m.now().UTC()
+	if err := m.upsertSessionMetaUnsafe(current); err != nil {
+		return nil, err
+	}
+	return current, nil
+}
+
 func (m *Manager) UpdateLastContextWindow(_ context.Context, session *Session, contextWindow agenttypes.ContextWindow) error {
 	if session == nil || strings.TrimSpace(session.Key) == "" {
 		return errors.New("session required")
@@ -1770,6 +1829,10 @@ func openSessionMetaDB(dbFile string) (db *sql.DB, err error) {
 		`ALTER TABLE sessions ADD COLUMN last_context_window_total_tokens INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE sessions ADD COLUMN last_context_window_model_context_window INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE sessions ADD COLUMN pinned_at TEXT`,
+		`ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN effort TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN fast_service TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE session_agent_bindings ADD COLUMN external_source_path TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE session_agent_bindings ADD COLUMN external_source_offset INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE session_agent_bindings ADD COLUMN external_source_mtime_ns INTEGER NOT NULL DEFAULT 0`,
@@ -1857,6 +1920,10 @@ func sessionMetaUpsertArgs(session *Session) ([]any, error) {
 		session.Source,
 		session.TaskID,
 		session.Model,
+		strings.TrimSpace(session.Agent),
+		strings.TrimSpace(session.Mode),
+		strings.TrimSpace(session.Effort),
+		strings.TrimSpace(session.FastService),
 		session.Shell,
 		boolToSQLiteInt(session.PlanMode),
 		session.Name,
@@ -1895,6 +1962,10 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		source              string
 		taskID              string
 		model               string
+		agent               string
+		mode                string
+		effort              string
+		fastService         string
 		shell               string
 		planMode            int
 		name                string
@@ -1915,6 +1986,10 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		&source,
 		&taskID,
 		&model,
+		&agent,
+		&mode,
+		&effort,
+		&fastService,
 		&shell,
 		&planMode,
 		&name,
@@ -1937,6 +2012,10 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		Source:           source,
 		TaskID:           taskID,
 		Model:            model,
+		Agent:            agent,
+		Mode:             mode,
+		Effort:           effort,
+		FastService:      fastService,
 		Shell:            shell,
 		PlanMode:         planMode != 0,
 		Name:             name,

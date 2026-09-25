@@ -21,7 +21,11 @@ type Session struct {
 	Source            string                   `json:"source,omitempty"`
 	TaskID            string                   `json:"task_id,omitempty"`
 	AgentCtxSeq       map[string]int           `json:"agent_ctx_seq,omitempty"`
+	Agent             string                   `json:"agent,omitempty"`
 	Model             string                   `json:"model,omitempty"`
+	Mode              string                   `json:"mode,omitempty"`
+	Effort            string                   `json:"effort,omitempty"`
+	FastService       string                   `json:"fast_service,omitempty"`
 	Shell             string                   `json:"shell,omitempty"`
 	PlanMode          bool                     `json:"plan_mode,omitempty"`
 	Name              string                   `json:"name"`
@@ -59,6 +63,19 @@ type ExchangeAux struct {
 	Todo      *agenttypes.TodoUpdate    `json:"todo,omitempty"`
 	Plan      *agenttypes.PlanUpdate    `json:"plan,omitempty"`
 	Compact   *agenttypes.CompactNotice `json:"compact,omitempty"`
+}
+
+// RuntimeConfigPatch is a partial update of the session-level runtime
+// configuration (agent / model / mode / effort / fast service / shell / plan
+// mode). Nil fields are left unchanged so the caller can patch a subset.
+type RuntimeConfigPatch struct {
+	Agent       *string
+	Model       *string
+	Mode        *string
+	Effort      *string
+	FastService *string
+	Shell       *string
+	PlanMode    *bool
 }
 
 func CompactExchangeAux(aux ExchangeAux) (ExchangeAux, bool) {
@@ -260,9 +277,14 @@ type SearchHit struct {
 }
 
 // InferAgentFromSession derives the display agent from session data.
+// 会话级持久化的 Agent 字段优先（用户显式切换后立即生效），
+// 其次回退到最近一条带 agent 的 exchange，最后回退到唯一的 agent binding。
 func InferAgentFromSession(s *Session) string {
 	if s == nil {
 		return ""
+	}
+	if agent := strings.TrimSpace(s.Agent); agent != "" {
+		return agent
 	}
 	for i := len(s.Exchanges) - 1; i >= 0; i-- {
 		if agent := strings.TrimSpace(s.Exchanges[i].Agent); agent != "" {
@@ -277,25 +299,44 @@ func InferAgentFromSession(s *Session) string {
 	return ""
 }
 
-// InferEffortFromSession derives the latest non-empty effort from session data.
+// InferEffortFromSession derives the current effort from session data.
+// 会话级持久化值优先，回退到最后一条 exchange 的值（兼容旧数据）。
 func InferEffortFromSession(s *Session) string {
-	if s == nil || len(s.Exchanges) == 0 {
+	if s == nil {
+		return ""
+	}
+	if effort := strings.TrimSpace(s.Effort); effort != "" {
+		return effort
+	}
+	if len(s.Exchanges) == 0 {
 		return ""
 	}
 	return strings.TrimSpace(s.Exchanges[len(s.Exchanges)-1].Effort)
 }
 
-// InferFastServiceFromSession derives the latest fast-service setting from session data.
+// InferFastServiceFromSession derives the current fast-service setting from session data.
 func InferFastServiceFromSession(s *Session) string {
-	if s == nil || len(s.Exchanges) == 0 {
+	if s == nil {
+		return ""
+	}
+	if fastService := strings.TrimSpace(s.FastService); fastService != "" {
+		return fastService
+	}
+	if len(s.Exchanges) == 0 {
 		return ""
 	}
 	return strings.TrimSpace(s.Exchanges[len(s.Exchanges)-1].FastService)
 }
 
-// InferModeFromSession derives the latest non-empty mode from session data.
+// InferModeFromSession derives the current agent mode (e.g. thinking level) from session data.
 func InferModeFromSession(s *Session) string {
-	if s == nil || len(s.Exchanges) == 0 {
+	if s == nil {
+		return ""
+	}
+	if mode := strings.TrimSpace(s.Mode); mode != "" {
+		return mode
+	}
+	if len(s.Exchanges) == 0 {
 		return ""
 	}
 	return strings.TrimSpace(s.Exchanges[len(s.Exchanges)-1].Mode)

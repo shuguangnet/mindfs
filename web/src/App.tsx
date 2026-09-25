@@ -3827,6 +3827,55 @@ export function App({ onGoHome }: AppProps) {
     );
   }, []);
 
+  /**
+   * Persist session-level runtime config (agent/model/mode/effort/fast service)
+   * immediately when the user switches it in the action bar, so the selection
+   * survives page refreshes even if the next turn fails or hangs.
+   * Fire-and-forget: local state is updated optimistically; the authoritative
+   * value comes back via the session.meta.updated broadcast.
+   */
+  const handlePersistRuntimeConfig = useCallback(
+    (patch: {
+      agent?: string;
+      model?: string;
+      mode?: string;
+      effort?: string;
+      fast_service?: string;
+    }) => {
+      const rootID = currentRootIdRef.current;
+      const session = getInputSession();
+      const sessionKey = (session as any)?.key || (session as any)?.session_key || "";
+      if (!rootID || !sessionKey || String(sessionKey).startsWith("pending-")) {
+        // New chat without a bound session yet: the config is sent with the
+        // first message (session.message carries agent/model/mode/effort).
+        return;
+      }
+      if ((session as any)?.type === "command") {
+        return;
+      }
+      const currentAgent = (session as any)?.agent || "";
+      const currentModel = (session as any)?.model || "";
+      const currentMode = (session as any)?.mode || "";
+      const currentEffort = (session as any)?.effort || "";
+      const currentFastService = ((session as any)?.fast_service || "") as "" | "on" | "off";
+      const nextAgent = patch.agent !== undefined ? patch.agent : currentAgent;
+      if (!nextAgent) {
+        return;
+      }
+      updateSessionAgentForKey(
+        rootID,
+        sessionKey,
+        nextAgent,
+        patch.model !== undefined ? patch.model : currentModel,
+        patch.mode !== undefined ? patch.mode : currentMode,
+        patch.effort !== undefined ? patch.effort : currentEffort,
+        patch.fast_service !== undefined ? (patch.fast_service as "" | "on" | "off") : currentFastService,
+      );
+      void sessionService.updateSessionRuntimeConfig(rootID, sessionKey, patch);
+    },
+    [getInputSession, updateSessionAgentForKey],
+  );
+
   const handleSetPlanMode = useCallback(
     async (enabled: boolean, targetSessionKey?: string, targetRootId?: string) => {
       const activeRoot = targetRootId || currentRootIdRef.current;
@@ -14528,6 +14577,7 @@ export function App({ onGoHome }: AppProps) {
               sendShortcut={sendShortcut}
               onRequestFileContext={handleRequestFileContext}
               onClearFileContext={handleClearFileContext}
+              onPersistRuntimeConfig={handlePersistRuntimeConfig}
               onToggleLeftSidebar={() => setIsLeftOpen((v) => !v)}
               onToggleRightSidebar={() => setIsRightOpen((v) => !v)}
               sidebarsSwapped={sidebarsSwapped}

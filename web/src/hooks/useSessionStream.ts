@@ -67,7 +67,13 @@ type UseSessionStreamResult = {
   isStreaming: boolean;
   streamVersion: number;
   streamStatusText: string;
+  /** True while streaming but no stream event arrived for a long time — the agent may be stuck. */
+  stalled: boolean;
 };
+
+/** No stream event for this long while streaming → show a "may be stuck" hint. */
+const STREAM_STALL_HINT_MS = 90_000;
+const STREAM_STALL_POLL_MS = 10_000;
 
 type ContextWindowLike = {
   totalTokens: number;
@@ -490,6 +496,29 @@ export function useSessionStream(
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamVersion, setStreamVersion] = useState(0);
   const [streamStatusText, setStreamStatusText] = useState("");
+  const [stalled, setStalled] = useState(false);
+
+  // While streaming, watch for long gaps without any stream event so the UI
+  // can hint "no response for a long time" instead of waiting silently.
+  useEffect(() => {
+    if (!isStreaming || !sessionKey) {
+      setStalled(false);
+      return;
+    }
+    const evaluate = () => {
+      const since = sessionService.sinceLastStreamEvent(sessionKey);
+      if (since <= 0) {
+        setStalled(false);
+        return;
+      }
+      setStalled(since >= STREAM_STALL_HINT_MS);
+    };
+    evaluate();
+    const timer = window.setInterval(evaluate, STREAM_STALL_POLL_MS);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [isStreaming, sessionKey, streamVersion]);
 
   const baseTimeline = useMemo(
     () =>
@@ -552,5 +581,6 @@ export function useSessionStream(
     isStreaming,
     streamVersion,
     streamStatusText,
+    stalled,
   };
 }

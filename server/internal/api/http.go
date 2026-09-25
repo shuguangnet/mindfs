@@ -351,6 +351,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/sessions/{key}/related-files", h.protectedEndpoint(h.handleSessionRelatedFilesGet))
 	r.Post("/api/sessions/{key}/pin", h.protectedEndpoint(h.handleSessionPin))
 	r.Post("/api/sessions/{key}/rename", h.protectedEndpoint(h.handleSessionRename))
+	r.Patch("/api/sessions/{key}/runtime-config", h.protectedEndpoint(h.handleSessionRuntimeConfigPatch))
 	r.Delete("/api/sessions/{key}/related-files", h.protectedEndpoint(h.handleSessionRelatedFilesDelete))
 	r.Delete("/api/sessions/{key}", h.protectedEndpoint(h.handleSessionDelete))
 	r.Get("/api/scheduled-agent-tasks", h.protectedEndpoint(h.handleScheduledAgentTasksList))
@@ -1070,6 +1071,7 @@ func (h *HTTPHandler) handleSessionRename(w http.ResponseWriter, r *http.Request
 				"session": map[string]any{
 					"key":          renamed.Key,
 					"name":         renamed.Name,
+					"agent":        session.InferAgentFromSession(renamed),
 					"model":        renamed.Model,
 					"mode":         session.InferModeFromSession(renamed),
 					"effort":       session.InferEffortFromSession(renamed),
@@ -1119,8 +1121,59 @@ func (h *HTTPHandler) handleSessionPin(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, h.sessionListResponse(updated))
 }
 
-func (h *HTTPHandler) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
+// handleSessionRuntimeConfigPatch persists a partial runtime configuration
+// update (agent / model / mode / effort / fast service / shell / plan mode)
+// immediately when the user switches it, instead of waiting for the next turn
+// to complete. This keeps the UI selection stable across page refreshes even
+// if the turn fails or hangs. Fields absent from the body are left unchanged;
+// empty strings explicitly reset a field to the agent default.
+func (h *HTTPHandler) handleSessionRuntimeConfigPatch(w http.ResponseWriter, r *http.Request) {
 	rootID := r.URL.Query().Get("root")
+	key := chi.URLParam(r, "key")
+	if strings.TrimSpace(key) == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("session key required"))
+		return
+	}
+	var req struct {
+		Agent       *string `json:"agent"`
+		Model       *string `json:"model"`
+		Mode        *string `json:"mode"`
+		Effort      *string `json:"effort"`
+		FastService *string `json:"fast_service"`
+		Shell       *string `json:"shell"`
+		PlanMode    *bool   `json:"plan_mode"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json body"))
+		return
+	}
+	patch := session.RuntimeConfigPatch{
+		Agent:       req.Agent,
+		Model:       req.Model,
+		Mode:        req.Mode,
+		Effort:      req.Effort,
+		FastService: req.FastService,
+		Shell:       req.Shell,
+		PlanMode:    req.PlanMode,
+	}
+	updated, err := h.service().UpdateSessionRuntimeConfig(r.Context(), usecase.UpdateSessionRuntimeConfigInput{
+		RootID: rootID,
+		Key:    key,
+		Patch:  patch,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	if h.AppContext != nil {
+		// BroadcastSessionMetaUpdated always includes agent/model/mode/effort/
+		// fast_service so every connected client converges on the new config.
+		h.AppContext.BroadcastSessionMetaUpdated(rootID, updated)
+	}
+	respondJSON(w, http.StatusOK, h.sessionListResponse(updated))
+}
+
+func (h *HTTPHandler) handleSessionDelete(w http.ResponseWriter, r *http.Request) {	rootID := r.URL.Query().Get("root")
 	key := chi.URLParam(r, "key")
 	if strings.TrimSpace(key) == "" {
 		respondError(w, http.StatusBadRequest, errInvalidRequest("session key required"))

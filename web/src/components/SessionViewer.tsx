@@ -1135,7 +1135,7 @@ function SessionViewerInner({
   const sessionKey = session?.key || session?.session_key || null;
   const exchanges = Array.isArray(session?.exchanges) ? session.exchanges : [];
   const isAwaiting = !!(session as any)?.pending;
-  const { timeline, isStreaming, streamVersion, streamStatusText } = useSessionStream(
+  const { timeline, isStreaming, streamVersion, streamStatusText, stalled } = useSessionStream(
     sessionKey,
     exchanges,
     session?.exchange_aux || {},
@@ -2668,6 +2668,30 @@ function SessionViewerInner({
                 {isStreaming
                   ? streamStatusText || t("session.generating")
                   : t("session.sentWaiting")}
+              </div>
+            )}
+            {(isAwaiting || isStreaming) && stalled && (
+              <div
+                style={{
+                  marginTop: "6px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "12px",
+                  color: "#f59e0b",
+                }}
+                role="status"
+              >
+                <span
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    borderRadius: "50%",
+                    background: "#f59e0b",
+                    flexShrink: 0,
+                  }}
+                />
+                {t("session.stalledHint")}
               </div>
             )}
 

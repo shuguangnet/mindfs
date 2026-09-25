@@ -437,6 +437,7 @@ export const enUS = {
   "session.planModeSwitchFailedNotReady": "Plan mode switch failed: connection is not ready. Try again later.",
   "session.generating": "Generating...",
   "session.sentWaiting": "Sent, waiting for response...",
+  "session.stalledHint": "No response for a long time — the agent may be stuck. You can cancel and retry.",
   "session.relatedFiles": "Related files {count}",
   "session.expandRelatedFiles": "Expand related files",
   "session.collapseRelatedFiles": "Collapse related files",

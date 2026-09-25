@@ -118,6 +118,18 @@ type ActionBarProps = {
   onClearFileContext?: () => void;
   onToggleLeftSidebar?: () => void;
   onToggleRightSidebar?: () => void;
+  /**
+   * Persist session-level runtime config (agent/model/mode/effort/fast service)
+   * immediately when the user switches it on a bound session, so the selection
+   * survives page refreshes even if the next turn fails or hangs.
+   */
+  onPersistRuntimeConfig?: (patch: {
+    agent?: string;
+    model?: string;
+    mode?: string;
+    effort?: string;
+    fast_service?: string;
+  }) => void;
   sidebarsSwapped?: boolean;
 };
 
@@ -422,6 +434,7 @@ export function ActionBar({
   onClearFileContext,
   onToggleLeftSidebar,
   onToggleRightSidebar,
+  onPersistRuntimeConfig,
   mobileEnterKeySends = false,
   sendShortcut = null,
   sidebarsSwapped = false,
@@ -1935,15 +1948,37 @@ export function ActionBar({
                       const nextStatus = agents.find((item) => item.name === nextAgent);
                       const defaults = getAgentDefaults(nextStatus);
                       const resolvedModel = nextModel || defaults.model;
+                      const resolvedEffort = getModelDefaultEffort(nextStatus, resolvedModel);
                       setAgent(nextAgent);
                       setModel(resolvedModel);
                       setAgentMode("");
-                      setEffort(getModelDefaultEffort(nextStatus, resolvedModel));
+                      setEffort(resolvedEffort);
                       setFastService(defaults.fastService);
+                      // Persist immediately so a refresh (or a failed/hung turn)
+                      // keeps the newly selected agent + model + defaults.
+                      onPersistRuntimeConfig?.({
+                        agent: nextAgent,
+                        model: resolvedModel,
+                        mode: "",
+                        effort: resolvedEffort,
+                        fast_service: defaults.fastService,
+                      });
                     }}
-                    onModeChange={(nextAgentMode) => setAgentMode(nextAgentMode || "")}
-                    onEffortChange={(nextEffort) => setEffort(nextEffort || "")}
-                    onFastServiceChange={(nextFastService) => setFastService(nextFastService || "")}
+                    onModeChange={(nextAgentMode) => {
+                      const resolved = nextAgentMode || "";
+                      setAgentMode(resolved);
+                      onPersistRuntimeConfig?.({ mode: resolved });
+                    }}
+                    onEffortChange={(nextEffort) => {
+                      const resolved = nextEffort || "";
+                      setEffort(resolved);
+                      onPersistRuntimeConfig?.({ effort: resolved });
+                    }}
+                    onFastServiceChange={(nextFastService) => {
+                      const resolved = (nextFastService || "") as "" | "on" | "off";
+                      setFastService(resolved);
+                      onPersistRuntimeConfig?.({ fast_service: resolved });
+                    }}
                     onAgentRestart={async (targetAgent) => {
                       await restartAgent(targetAgent);
                       const items = await fetchAgents(true);
