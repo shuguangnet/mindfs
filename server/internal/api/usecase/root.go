@@ -8,6 +8,7 @@ import (
 	"mindfs/server/internal/fs"
 	"mindfs/server/internal/preferences"
 	"mindfs/server/internal/session"
+	"mindfs/server/internal/usage"
 )
 
 type Registry interface {
@@ -24,6 +25,8 @@ type Registry interface {
 	GetCandidateRegistry() *CandidateRegistry
 	GetFileWatcher(rootID string, manager *session.Manager) (*fs.SharedFileWatcher, error)
 	ReleaseFileWatcher(rootID, sessionKey string)
+	// GetUsageStore exposes the token price table and daily budget.
+	GetUsageStore() *usage.Store
 }
 
 type Service struct {

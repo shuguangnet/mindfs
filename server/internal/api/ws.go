@@ -1068,6 +1068,9 @@ func (h *WSHandler) handleSessionCancel(ctx context.Context, conn *websocket.Con
 		h.sendWSError(conn, clientID, req.ID, "session.cancel_failed", err.Error())
 		return
 	}
+	// The turn ends without an error from the caller's point of view. Mark it so
+	// the completion path does not notify about an interruption the user asked for.
+	h.AppContext.MarkSessionTurnCancelled(key)
 }
 
 func (h *WSHandler) handleSessionQueueRemove(_ context.Context, conn *websocket.Conn, clientID string, req WSRequest) {
@@ -1129,6 +1132,8 @@ func (h *WSHandler) handleSessionQueueSendNow(ctx context.Context, conn *websock
 	uc := &usecase.Service{Registry: h.AppContext}
 	if err := uc.CancelSessionTurn(ctx, usecase.CancelSessionTurnInput{RootID: rootID, Key: key}); err != nil {
 		log.Printf("[ws] session.queue.send_now.cancel.error root=%s session=%s request=%s err=%v", rootID, key, req.ID, err)
+	} else {
+		h.AppContext.MarkSessionTurnCancelled(key)
 	}
 }
 

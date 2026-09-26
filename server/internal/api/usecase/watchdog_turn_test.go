@@ -13,6 +13,7 @@ import (
 	rootfs "mindfs/server/internal/fs"
 	"mindfs/server/internal/preferences"
 	"mindfs/server/internal/session"
+	"mindfs/server/internal/usage"
 )
 
 // TestSendMessageWatchdogFailsHungTurn drives the real SendMessage flow with a
@@ -171,3 +172,5 @@ func (r *watchdogTestRegistry) GetFileWatcher(string, *session.Manager) (*rootfs
 }
 
 func (r *watchdogTestRegistry) ReleaseFileWatcher(string, string) {}
+
+func (r *watchdogTestRegistry) GetUsageStore() *usage.Store { return nil }

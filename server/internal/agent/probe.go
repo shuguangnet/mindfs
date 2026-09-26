@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -51,6 +52,14 @@ type Status struct {
 	SupportsOnlineUpdate          bool                     `json:"supports_online_update"`
 	InstallCommands               []string                 `json:"install_commands,omitempty"`
 	UpdateCommands                []string                 `json:"update_commands,omitempty"`
+	// LatestVersion is the newest published version, empty when unknown (no
+	// network, non-npm agent, or lookup failed).
+	LatestVersion string `json:"latest_version,omitempty"`
+	// UpdateAvailable is true only when both versions are known and the latest
+	// one is strictly newer.
+	UpdateAvailable bool `json:"update_available,omitempty"`
+	// VersionCheckedAt records when LatestVersion was resolved.
+	VersionCheckedAt time.Time `json:"version_checked_at,omitempty"`
 }
 
 const (
@@ -811,8 +820,118 @@ func probeInstallStatus(name string, def Definition, ts time.Time) Status {
 		return status
 	}
 	status.Installed = true
+	status.Version = detectAgentVersion(def)
 	status.ProbeError = "probe pending"
 	return status
+}
+
+// agentVersionTimeout bounds the version probe so a hung CLI cannot stall the
+// install pass.
+const agentVersionTimeout = 10 * time.Second
+
+// detectAgentVersion resolves the installed version of an agent twice over:
+// first by running its version command, then by falling back to the npm package
+// declared by its install command. The fallback matters for ACP wrappers such as
+// pi-acp that exit silently on --version.
+func detectAgentVersion(def Definition) string {
+	if version := detectVersionFromCommand(def); version != "" {
+		return version
+	}
+	return detectVersionFromInstallCommand(def)
+}
+
+func detectVersionFromCommand(def Definition) string {
+	command := strings.TrimSpace(def.Command)
+	if command == "" {
+		return ""
+	}
+	args := []string{"--version"}
+	if custom := strings.Fields(strings.TrimSpace(def.VersionCommand)); len(custom) > 0 {
+		command = custom[0]
+		args = custom[1:]
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), agentVersionTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, command, args...).CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return ""
+	}
+	return normalizeVersionString(string(out))
+}
+
+var npmPackagePattern = regexp.MustCompile(`npm\s+(?:install|i|add)\s+(?:-g|--global)?\s*([@a-zA-Z0-9._/-]+)`)
+
+func detectVersionFromInstallCommand(def Definition) string {
+	packageName := ""
+	for _, command := range def.InstallCommands {
+		if match := npmPackagePattern.FindStringSubmatch(command); len(match) == 2 {
+			packageName = strings.TrimSpace(match[1])
+			break
+		}
+	}
+	if packageName == "" {
+		return ""
+	}
+	packageName = strings.TrimSuffix(packageName, "@latest")
+	if packageName == "" {
+		return ""
+	}
+	return npmGlobalPackageVersion(packageName)
+}
+
+// npmGlobalPackageVersion reads the installed version from the global npm tree
+// without invoking npm on every probe for the package metadata itself.
+func npmGlobalPackageVersion(packageName string) string {
+	executable, err := exec.LookPath("npm")
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), agentVersionTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, executable, "root", "-g").Output()
+	if err != nil {
+		return ""
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return ""
+	}
+	manifest := filepath.Join(root, filepath.FromSlash(packageName), "package.json")
+	raw, err := os.ReadFile(manifest)
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Version)
+}
+
+// normalizeVersionString reduces arbitrary --version output to the version token
+// itself ("codex-cli 0.146.0" -> "0.146.0") so the UI can display and compare it.
+func normalizeVersionString(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	value = strings.TrimSpace(strings.SplitN(value, "\n", 2)[0])
+	if value == "" {
+		return ""
+	}
+	for _, field := range strings.Fields(value) {
+		candidate := strings.Trim(field, "vV")
+		if candidate == "" || candidate[0] < '0' || candidate[0] > '9' {
+			continue
+		}
+		if !strings.Contains(candidate, ".") {
+			continue
+		}
+		return candidate
+	}
+	return value
 }
 
 func definitionCapabilities(def Definition) []string {
@@ -992,6 +1111,13 @@ func preserveKnownCapabilities(prev Status, next Status) Status {
 	if len(next.UpdateCommands) == 0 {
 		next.UpdateCommands = prev.UpdateCommands
 	}
+	if next.LatestVersion == "" {
+		next.LatestVersion = prev.LatestVersion
+		next.VersionCheckedAt = prev.VersionCheckedAt
+	}
+	if !next.UpdateAvailable {
+		next.UpdateAvailable = prev.UpdateAvailable
+	}
 	return next
 }
 
@@ -1092,7 +1218,13 @@ func (p *Prober) probeConfiguredAgents(ctx context.Context, defs []Definition) {
 	}
 	p.runDefinitionsConcurrently(defs, func(_ int, def Definition) {
 		status := safeProbeConfiguredAgentWithPool(ctx, def.Name, def, p.pool, p.probeSessions, probePhaseInitial)
+		// The runtime probe does not resolve the version, so carry it over before
+		// publishing instead of dropping it on every probe cycle.
+		status.Version = firstNonEmptyValue(status.Version, p.currentVersion(def.Name), detectAgentVersion(def))
 		p.setStatus(status)
+		if status.Installed {
+			p.publishVersionCheck(def)
+		}
 	})
 }
 
@@ -1104,7 +1236,45 @@ func (p *Prober) probeInstallOnly(defs []Definition) {
 	p.runDefinitionsConcurrently(defs, func(_ int, def Definition) {
 		status := probeInstallStatus(def.Name, def, time.Now().UTC())
 		p.setStatus(status)
+		if status.Installed {
+			p.publishVersionCheck(def)
+		}
 	})
+}
+
+// publishVersionCheck asynchronously resolves the latest published version and
+// republishes the status so the UI can offer an update without blocking the
+// install probe on network access.
+func (p *Prober) publishVersionCheck(def Definition) {
+	pkg := npmPackageFromInstallCommands(def.InstallCommands)
+	if pkg == "" {
+		return
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[agent/version] check.panic agent=%s recovered=%v", def.Name, r)
+			}
+		}()
+		latest := latestNpmVersion(pkg)
+		if latest == "" {
+			return
+		}
+		p.mu.Lock()
+		current, ok := p.statuses[def.Name]
+		p.mu.Unlock()
+		if !ok || !current.Installed {
+			return
+		}
+		next := current
+		next.LatestVersion = latest
+		next.VersionCheckedAt = time.Now().UTC()
+		next.UpdateAvailable = versionIsNewer(current.Version, latest)
+		if next.UpdateAvailable {
+			log.Printf("[agent/version] update.available agent=%s current=%s latest=%s package=%s", def.Name, current.Version, latest, pkg)
+		}
+		p.setStatus(next)
+	}()
 }
 
 func (p *Prober) probeInstalledAgents(ctx context.Context, defs []Definition) {
@@ -1116,8 +1286,30 @@ func (p *Prober) probeInstalledAgents(ctx context.Context, defs []Definition) {
 		status := unavailableStatus(def.Name, true, "probe pending", time.Now().UTC())
 		status.Protocol = agentDefinitionProtocol(def.Name, def)
 		status = safeProbeInstalledAgentWithPool(ctx, def.Name, def, p.pool, p.probeSessions, status, probePhaseBackground)
+		// The runtime probe does not know the version, so carry it over from the
+		// install pass before publishing, otherwise the UI loses it on every probe.
+		status.Version = firstNonEmptyValue(status.Version, p.currentVersion(def.Name), detectAgentVersion(def))
 		p.setStatus(status)
+		if status.Installed {
+			p.publishVersionCheck(def)
+		}
 	})
+}
+
+// currentVersion returns the version already published for an agent, if any.
+func (p *Prober) currentVersion(name string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return strings.TrimSpace(p.statuses[name].Version)
+}
+
+func firstNonEmptyValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func safeProbeConfiguredAgentWithPool(ctx context.Context, name string, def Definition, pool *Pool, probeSessions *probeSessionStore, phase probePhase) (status Status) {

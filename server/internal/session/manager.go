@@ -412,6 +412,7 @@ func (m *Manager) Search(_ context.Context, opts SearchOptions) ([]SearchHit, er
 	}
 	limit := normalizeSearchLimit(opts.Limit)
 	qLower := strings.ToLower(query)
+	filter := newSearchFilter(opts)
 
 	m.mu.Lock()
 	sessions, err := m.listSessionMetasUnsafe()
@@ -420,9 +421,16 @@ func (m *Manager) Search(_ context.Context, opts SearchOptions) ([]SearchHit, er
 		return nil, err
 	}
 
+	candidates := make([]*Session, 0, len(sessions))
+	for _, item := range sessions {
+		if filter.matches(item) {
+			candidates = append(candidates, item)
+		}
+	}
+
 	nameHits := make([]SearchHit, 0, limit)
 	hitsByKey := make(map[string]SearchHit, limit)
-	for _, item := range sessions {
+	for _, item := range candidates {
 		score := scoreSessionName(item.Name, qLower)
 		if score <= 0 {
 			continue
@@ -436,7 +444,7 @@ func (m *Manager) Search(_ context.Context, opts SearchOptions) ([]SearchHit, er
 		return append([]SearchHit(nil), nameHits[:limit]...), nil
 	}
 
-	for _, item := range sessions {
+	for _, item := range candidates {
 		if len(hitsByKey) >= limit {
 			break
 		}
@@ -2114,6 +2122,38 @@ func cleanRelatedRepoPath(path string) string {
 }
 
 var errSessionNotFound = errors.New("session not found")
+
+// searchFilter applies the optional agent/time constraints of a search without
+// touching the session store.
+type searchFilter struct {
+	agent      string
+	afterTime  time.Time
+	beforeTime time.Time
+}
+
+func newSearchFilter(opts SearchOptions) searchFilter {
+	return searchFilter{
+		agent:      strings.ToLower(strings.TrimSpace(opts.Agent)),
+		afterTime:  opts.AfterTime.UTC(),
+		beforeTime: opts.BeforeTime.UTC(),
+	}
+}
+
+func (f searchFilter) matches(s *Session) bool {
+	if s == nil {
+		return false
+	}
+	if f.agent != "" && strings.ToLower(strings.TrimSpace(InferAgentFromSession(s))) != f.agent {
+		return false
+	}
+	if !f.afterTime.IsZero() && s.UpdatedAt.Before(f.afterTime) {
+		return false
+	}
+	if !f.beforeTime.IsZero() && s.UpdatedAt.After(f.beforeTime) {
+		return false
+	}
+	return true
+}
 
 func normalizeSearchLimit(limit int) int {
 	switch {

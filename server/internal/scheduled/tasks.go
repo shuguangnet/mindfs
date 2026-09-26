@@ -517,9 +517,11 @@ func (s *Service) runTask(ctx context.Context, task Task, force bool) error {
 	})
 	now := time.Now().UTC()
 	if err != nil {
+		// BroadcastSessionError already recorded the failure, so the completion
+		// below emits the scheduled failure notification. Do not also notify
+		// directly here or the user gets two pushes for one failure.
 		broadcaster.BroadcastSessionError(current.RootID, sessionKey, err.Error())
 		broadcaster.BroadcastSessionDone(current.RootID, sessionKey, "scheduled:"+current.ID)
-		broadcaster.BroadcastScheduledTaskFailed(current.RootID, current.ID, current.Name, sessionKey, err.Error())
 		_ = s.updateTask(current.RootID, current.ID, func(t *Task) {
 			t.LastRunAt = &now
 			t.LastError = err.Error()

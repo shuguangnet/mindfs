@@ -29,6 +29,12 @@ export type SessionItem = {
   search_match_type?: "name" | "user" | "reply";
 };
 
+type SessionSearchFilters = {
+  agent: string;
+  after: string;
+  before: string;
+};
+
 type SessionListProps = {
   sessions: SessionItem[];
   selectedKey?: string;
@@ -43,6 +49,11 @@ type SessionListProps = {
   onSearchQueryChange?: (query: string) => void;
   onSearchSubmit?: () => void;
   onSearchBlur?: () => void;
+  /** Optional filter values for the session search panel. */
+  searchFilters?: SessionSearchFilters;
+  searchAgents?: string[];
+  onSearchFiltersChange?: (filters: SessionSearchFilters) => void;
+  onSearchFiltersReset?: () => void;
   syncingSessionKeys?: Set<string>;
   onSelect?: (session: SessionItem) => void;
   onSync?: (session: SessionItem) => Promise<void> | void;
@@ -63,6 +74,23 @@ const MULTI_PROJECT_VISIBLE_LIMIT = 6;
 const MAIN_SESSION_ICON_OFFSET = "2px";
 const SUB_SESSION_ICON_OFFSET = "0px";
 const PINNED_PROJECTS_STORAGE_KEY = "mindfs-pinned-session-projects";
+
+/** RFC3339 timestamp for `days` before now, used by the search time filter. */
+function isoDaysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+const searchFilterControlStyle: React.CSSProperties = {
+  height: "24px",
+  maxWidth: "150px",
+  border: "1px solid rgba(148,163,184,0.22)",
+  borderRadius: "6px",
+  background: "transparent",
+  color: "var(--text-secondary)",
+  fontSize: "11px",
+  padding: "0 6px",
+  outline: "none",
+};
 
 type VisibleSessionRow =
   | { type: "session"; session: SessionItem }
@@ -305,6 +333,10 @@ export function SessionList({
   onSearchQueryChange,
   onSearchSubmit,
   onSearchBlur,
+  searchFilters,
+  searchAgents,
+  onSearchFiltersChange,
+  onSearchFiltersReset,
   syncingSessionKeys,
   onSelect,
   onSync,
@@ -621,6 +653,68 @@ export function SessionList({
               </button>
             ) : null}
           </div>
+          {onSearchFiltersChange ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                marginTop: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+              <select
+                aria-label={t("sessionList.filterAgent")}
+                value={searchFilters?.agent || ""}
+                onChange={(e) =>
+                  onSearchFiltersChange({
+                    agent: e.target.value,
+                    after: searchFilters?.after || "",
+                    before: searchFilters?.before || "",
+                  })
+                }
+                style={searchFilterControlStyle}
+              >
+                <option value="">{t("sessionList.filterAllAgents")}</option>
+                {(searchAgents || []).map((agent) => (
+                  <option key={agent} value={agent}>
+                    {agent}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label={t("sessionList.filterTime")}
+                value={searchFilters?.after || ""}
+                onChange={(e) =>
+                  onSearchFiltersChange({
+                    agent: searchFilters?.agent || "",
+                    after: e.target.value,
+                    before: "",
+                  })
+                }
+                style={searchFilterControlStyle}
+              >
+                <option value="">{t("sessionList.filterAnyTime")}</option>
+                <option value={isoDaysAgo(1)}>{t("sessionList.filterLastDay")}</option>
+                <option value={isoDaysAgo(7)}>{t("sessionList.filterLastWeek")}</option>
+                <option value={isoDaysAgo(30)}>{t("sessionList.filterLastMonth")}</option>
+              </select>
+              {searchFilters && (searchFilters.agent || searchFilters.after || searchFilters.before) ? (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onSearchFiltersReset?.()}
+                  style={{
+                    ...searchFilterControlStyle,
+                    cursor: "pointer",
+                    color: "var(--accent-color)",
+                  }}
+                >
+                  {t("sessionList.filterReset")}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

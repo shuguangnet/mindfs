@@ -28,6 +28,7 @@ type SessionNotification struct {
 	SessionKey   string
 	SessionTitle string
 	Summary      string
+	Error        string
 	EventID      string
 }
 
@@ -43,22 +44,46 @@ type ScheduledNotification struct {
 	EventID    string
 }
 
+// sessionDoneLikeKinds are the terminal kinds that carry the session result
+// summary. They renotify so repeated completions in the same session are not
+// silently coalesced into one notification.
+func sessionDoneLikeKind(kind string) bool {
+	switch kind {
+	case "session.done", "session.failed", "session.cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func sessionStatusLabel(kind string) string {
+	switch kind {
+	case "session.ask_user":
+		return "需要输入"
+	case "session.failed":
+		return "失败"
+	case "session.cancelled":
+		return "已取消"
+	default:
+		return "完成"
+	}
+}
+
 func BuildSessionPayload(in SessionNotification) Payload {
 	kind := strings.TrimSpace(in.Type)
 	if kind == "" {
 		kind = "session.done"
 	}
-	status := "完成"
-	if kind == "session.ask_user" {
-		status = "需要输入"
-	}
 	root := firstNonEmpty(in.RootTitle, in.RootID, "MindFS")
 	sessionTitle := firstNonEmpty(in.SessionTitle, "会话")
-	title := fmt.Sprintf("%s · %s · %s", root, sessionTitle, status)
+	title := fmt.Sprintf("%s · %s · %s", root, sessionTitle, sessionStatusLabel(kind))
 	body := truncateRunes(strings.TrimSpace(in.Summary), BodyMaxRunes)
+	if failure := truncateRunes(strings.TrimSpace(in.Error), BodyMaxRunes); failure != "" {
+		body = failure
+	}
 	tag := fmt.Sprintf("mindfs:%s:%s:%s", kind, in.RootID, in.SessionKey)
 	eventID := firstNonEmpty(in.EventID, tag)
-	if kind == "session.done" {
+	if sessionDoneLikeKind(kind) {
 		tag = fmt.Sprintf("mindfs:%s:%s:%s:%s", kind, in.RootID, in.SessionKey, eventID)
 	}
 	return Payload{
@@ -69,8 +94,8 @@ func BuildSessionPayload(in SessionNotification) Payload {
 		URL:                sessionURL(in.RootID, in.SessionKey),
 		Icon:               "./pwa-192.png",
 		Badge:              "./pwa-192.png",
-		Renotify:           kind == "session.ask_user" || kind == "session.done",
-		RequireInteraction: kind == "session.ask_user",
+		Renotify:           kind == "session.ask_user" || sessionDoneLikeKind(kind),
+		RequireInteraction: kind == "session.ask_user" || kind == "session.failed",
 		Data: map[string]any{
 			"type":       kind,
 			"rootId":     in.RootID,

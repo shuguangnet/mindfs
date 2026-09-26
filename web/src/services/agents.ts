@@ -10,6 +10,9 @@ export type AgentStatus = {
   installed: boolean;
   available: boolean;
   version?: string;
+  latest_version?: string;
+  update_available?: boolean;
+  version_checked_at?: string;
   error?: string;
   last_probe?: string;
   current_model_id?: string;

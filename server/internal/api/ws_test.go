@@ -434,3 +434,70 @@ func TestWSProofPathExcludesProofQueryParams(t *testing.T) {
 		t.Fatalf("wsProofPath() = %q, want %q", got, want)
 	}
 }
+
+func TestMarkSessionTurnFailedSurfacesOnPendingSnapshot(t *testing.T) {
+	hub := NewStreamHub(nil)
+	hub.SetPendingUserAt("root", "sess-1", "长任务", "codex", "", "", "", "", false, "prompt", time.Now(), 0)
+
+	hub.MarkSessionTurnFailed("sess-1", "agent idle for 10m0s, automatically canceled this turn")
+
+	snapshot := hub.PendingSessionSnapshot("sess-1")
+	if snapshot.TerminalError != "agent idle for 10m0s, automatically canceled this turn" {
+		t.Fatalf("TerminalError = %q", snapshot.TerminalError)
+	}
+	if snapshot.Cancelled {
+		t.Fatal("a failure must not be reported as a cancel")
+	}
+	if snapshot.SessionTitle != "长任务" {
+		t.Fatalf("SessionTitle = %q", snapshot.SessionTitle)
+	}
+}
+
+func TestMarkSessionTurnFailedKeepsFirstCause(t *testing.T) {
+	hub := NewStreamHub(nil)
+	hub.MarkSessionTurnFailed("sess-1", "first cause")
+	hub.MarkSessionTurnFailed("sess-1", "bookkeeping follow-up")
+
+	if got := hub.PendingSessionSnapshot("sess-1").TerminalError; got != "first cause" {
+		t.Fatalf("TerminalError = %q, want the first reported cause", got)
+	}
+}
+
+func TestMarkSessionTurnFailedWithoutPendingStateStillNotifies(t *testing.T) {
+	hub := NewStreamHub(nil)
+
+	hub.MarkSessionTurnFailed("sess-1", "boom")
+
+	snapshot := hub.PendingSessionSnapshot("sess-1")
+	if snapshot.TerminalError != "boom" {
+		t.Fatalf("TerminalError = %q, want the failure preserved without a live turn", snapshot.TerminalError)
+	}
+}
+
+func TestMarkSessionTurnCancelledIsIndependentFromFailure(t *testing.T) {
+	hub := NewStreamHub(nil)
+	hub.MarkSessionTurnCancelled("sess-1")
+
+	snapshot := hub.PendingSessionSnapshot("sess-1")
+	if !snapshot.Cancelled {
+		t.Fatal("Cancelled = false, want true")
+	}
+	if snapshot.TerminalError != "" {
+		t.Fatalf("TerminalError = %q, want empty for a plain cancel", snapshot.TerminalError)
+	}
+}
+
+func TestClearSessionPendingWithQueueResetsTerminalState(t *testing.T) {
+	hub := NewStreamHub(nil)
+	hub.SetPendingUserAt("root", "sess-1", "title", "codex", "", "", "", "", false, "first", time.Now(), 0)
+	hub.EnqueueSessionMessage("root", "sess-1", "title", QueuedUserMessage{ID: "q1", PendingUserMessage: PendingUserMessage{Content: "second"}})
+	hub.MarkSessionTurnFailed("sess-1", "boom")
+
+	hub.ClearSessionPending("sess-1")
+
+	// The queued message keeps the state alive, but the failed turn must not
+	// leak into it.
+	if got := hub.PendingSessionSnapshot("sess-1").TerminalError; got != "" {
+		t.Fatalf("TerminalError = %q, want reset after the turn settled", got)
+	}
+}

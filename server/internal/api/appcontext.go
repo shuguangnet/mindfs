@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -28,7 +30,9 @@ import (
 	"mindfs/server/internal/remote"
 	"mindfs/server/internal/scheduled"
 	"mindfs/server/internal/session"
+	"mindfs/server/internal/sshops"
 	"mindfs/server/internal/update"
+	"mindfs/server/internal/usage"
 	"mindfs/server/internal/webpush"
 )
 
@@ -44,6 +48,7 @@ type AppContext struct {
 	Prober    *agent.Prober
 	Relay     *relay.Manager
 	Remote    *remote.Manager
+	SSHOps    *sshops.Manager
 	RelayTips *relay.TipsService
 	Update    *update.Service
 	GitHub    *githubimport.Service
@@ -51,6 +56,7 @@ type AppContext struct {
 	WebPush   *webpush.Service
 	Notify    *notifyscript.Service
 	Prefs     *preferences.Store
+	Usage     *usage.Store
 	Scheduled *scheduled.Service
 	Kanban    *kanban.Service
 
@@ -70,6 +76,15 @@ func (s *AppContext) GetRemoteManager() *remote.Manager {
 		return nil
 	}
 	return s.Remote
+}
+
+// GetSSHOpsManager returns the SSH server alias manager (nil when the
+// encrypted store could not be initialized).
+func (s *AppContext) GetSSHOpsManager() *sshops.Manager {
+	if s == nil {
+		return nil
+	}
+	return s.SSHOps
 }
 
 func (s *AppContext) GetRootContext(rootID string) (*RootContext, error) {
@@ -121,6 +136,14 @@ func (s *AppContext) GetRoot(rootID string) (fs.RootInfo, error) {
 		return fs.RootInfo{}, err
 	}
 	return rootCtx.Root, nil
+}
+
+// GetUsageStore exposes the token price table and daily budget store.
+func (s *AppContext) GetUsageStore() *usage.Store {
+	if s == nil {
+		return nil
+	}
+	return s.Usage
 }
 
 func (s *AppContext) GetSessionManager(rootID string) (*session.Manager, error) {
@@ -846,6 +869,9 @@ func (s *AppContext) BroadcastAgentStatusChanged(agentName string) {
 			"modes_error":                      status.ModesError,
 			"commands":                         status.Commands,
 			"commands_error":                   status.CommandsError,
+			"latest_version":                   status.LatestVersion,
+			"update_available":                 status.UpdateAvailable,
+			"version_checked_at":               status.VersionCheckedAt,
 		},
 	})
 }
@@ -874,11 +900,21 @@ func (s *AppContext) BroadcastSessionUpdate(rootID, sessionKey string, update ag
 }
 
 func (s *AppContext) BroadcastSessionError(rootID, sessionKey, message string) {
-	s.UpdateTaskSessionErrorForSession(rootID, sessionKey, message)
+	normalized := normalizeAgentErrorMessage(errors.New(message))
+	// Remember the failure so the completion that follows notifies a failure
+	// instead of reporting a completed turn.
+	s.GetSessionStreamHub().MarkSessionTurnFailed(sessionKey, normalized)
+	s.UpdateTaskSessionErrorForSession(rootID, sessionKey, normalized)
 	s.GetSessionStreamHub().BroadcastSessionStream(rootID, sessionKey, &StreamEvent{
 		Type: "error",
-		Data: map[string]string{"message": normalizeAgentErrorMessage(errors.New(message))},
+		Data: map[string]string{"message": normalized},
 	})
+}
+
+// MarkSessionTurnCancelled records a user-requested cancel for the session turn
+// so the following completion stays silent and does not notify.
+func (s *AppContext) MarkSessionTurnCancelled(sessionKey string) {
+	s.GetSessionStreamHub().MarkSessionTurnCancelled(sessionKey)
 }
 
 func (s *AppContext) ClearTaskAuxFlagsForSession(rootID, sessionKey string) {
@@ -912,6 +948,50 @@ func (s *AppContext) BroadcastSessionDone(rootID, sessionKey, requestID string) 
 	if service, err := s.GetKanbanService(); err == nil {
 		service.Schedule(rootID)
 	}
+	s.scheduleUsageBudgetCheck()
+}
+
+// usageBudgetCheckDebounce collapses the burst of completions that happens when
+// several agents finish at once into a single report scan.
+const usageBudgetCheckDebounce = 30 * time.Second
+
+var usageBudgetCheckState struct {
+	mu      sync.Mutex
+	last    time.Time
+	running bool
+}
+
+// scheduleUsageBudgetCheck runs the daily budget check at most once per
+// debounce window, in the background so it never delays turn teardown.
+func (s *AppContext) scheduleUsageBudgetCheck() {
+	store := s.GetUsageStore()
+	if store == nil || store.Budget().DailyUSD <= 0 {
+		return
+	}
+	usageBudgetCheckState.mu.Lock()
+	if usageBudgetCheckState.running || time.Since(usageBudgetCheckState.last) < usageBudgetCheckDebounce {
+		usageBudgetCheckState.mu.Unlock()
+		return
+	}
+	usageBudgetCheckState.running = true
+	usageBudgetCheckState.last = time.Now()
+	usageBudgetCheckState.mu.Unlock()
+
+	go func() {
+		defer func() {
+			usageBudgetCheckState.mu.Lock()
+			usageBudgetCheckState.running = false
+			usageBudgetCheckState.mu.Unlock()
+			if r := recover(); r != nil {
+				log.Printf("[usage] budget.check.panic recovered=%v", r)
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if _, err := s.CheckUsageBudget(ctx); err != nil {
+			log.Printf("[usage] budget.check.error err=%v", err)
+		}
+	}()
 }
 
 func (s *AppContext) BroadcastScheduledTaskDone(rootID, taskID, taskName, sessionKey, summary string) {
@@ -922,33 +1002,116 @@ func (s *AppContext) BroadcastScheduledTaskFailed(rootID, taskID, taskName, sess
 	s.notifyScheduled(rootID, taskID, taskName, sessionKey, "", message, false)
 }
 
+// scheduledFailureKind marks a notification emitted by the scheduled-task
+// channel rather than the per-session channel.
+const scheduledFailureKind = "scheduled.failed"
+
+// failureDigest keeps the per-turn event id unique per failure without leaking
+// the whole message into a dedupe key.
+func failureDigest(message string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(message)))
+	return hex.EncodeToString(sum[:8])
+}
+
+// sessionNotificationDecision is the pure routing decision for a settled turn:
+// whether to notify at all, which channel owns it, and under which event id.
+type sessionNotificationDecision struct {
+	notify    bool
+	scheduled bool
+	taskID    string
+	kind      string
+	eventID   string
+}
+
+// decideSessionNotification centralizes the terminal-turn notification rules so
+// a failed turn can never be reported as a completion and a user-requested
+// cancel never notifies at all.
+func decideSessionNotification(requestID string, pending PendingSessionSnapshot) sessionNotificationDecision {
+	trimmedRequestID := strings.TrimSpace(requestID)
+	scheduled := strings.HasPrefix(trimmedRequestID, "scheduled:")
+	failure := strings.TrimSpace(pending.TerminalError)
+
+	if pending.Cancelled {
+		return sessionNotificationDecision{}
+	}
+	if scheduled {
+		// Scheduled runs own their notification so a failure is not pushed twice;
+		// successful runs are notified by the scheduled path directly. Only
+		// failures need an event id here, and it must not reuse the run marker:
+		// that marker is how scheduled runs are deduplicated.
+		eventID := trimmedRequestID
+		if failure != "" {
+			eventID = fmt.Sprintf("session.turn:%s:%s:%s", pending.RootID, pending.UpdatedAt.Format(time.RFC3339Nano), failureDigest(failure))
+		} else {
+			eventID = ""
+		}
+		return sessionNotificationDecision{
+			notify:    failure != "",
+			scheduled: true,
+			taskID:    scheduledTaskIDFromRequestID(trimmedRequestID),
+			kind:      scheduledFailureKind,
+			eventID:   eventID,
+		}
+	}
+	eventID := trimmedRequestID
+	if eventID == "" {
+		eventID = fmt.Sprintf("session.turn:%s:%s", pending.RootID, pending.UpdatedAt.Format(time.RFC3339Nano))
+	}
+	kind := "session.done"
+	if failure != "" {
+		kind = "session.failed"
+	}
+	return sessionNotificationDecision{
+		notify:  true,
+		kind:    kind,
+		eventID: eventID,
+	}
+}
+
 func (s *AppContext) notifySessionDone(rootID, sessionKey, requestID string, pending PendingSessionSnapshot) {
 	if s == nil {
 		return
 	}
-	if strings.HasPrefix(strings.TrimSpace(requestID), "scheduled:") {
+	pending.RootID = firstNonBlank(pending.RootID, rootID)
+	decision := decideSessionNotification(requestID, pending)
+	if decision.scheduled {
+		// A scheduled run reached here with an error, since the success path is
+		// notified by the scheduled service itself.
+		if strings.TrimSpace(pending.TerminalError) == "" {
+			return
+		}
+		s.notifyScheduled(rootID, decision.taskID, s.sessionDisplayTitle(rootID, sessionKey, pending), sessionKey, "", strings.TrimSpace(pending.TerminalError), false)
 		return
 	}
-	rootTitle := s.rootTitle(rootID)
-	sessionTitle := strings.TrimSpace(pending.SessionTitle)
-	if sessionTitle == "" {
-		sessionTitle = s.sessionTitle(rootID, sessionKey)
-	}
-	summary := strings.TrimSpace(pending.Summary)
-	eventID := strings.TrimSpace(requestID)
-	if eventID == "" {
-		eventID = "session.done:" + rootID + ":" + sessionKey + ":" + pending.UpdatedAt.Format(time.RFC3339Nano)
+	if !decision.notify {
+		return
 	}
 	payload := notify.BuildSessionPayload(notify.SessionNotification{
-		Type:         "session.done",
+		Type:         decision.kind,
 		RootID:       rootID,
-		RootTitle:    rootTitle,
+		RootTitle:    s.rootTitle(rootID),
 		SessionKey:   sessionKey,
-		SessionTitle: sessionTitle,
-		Summary:      summary,
-		EventID:      eventID,
+		SessionTitle: s.sessionDisplayTitle(rootID, sessionKey, pending),
+		Summary:      strings.TrimSpace(pending.Summary),
+		Error:        strings.TrimSpace(pending.TerminalError),
+		EventID:      decision.eventID,
 	})
-	s.notifyPayload(context.Background(), eventID, payload)
+	s.notifyPayload(context.Background(), decision.eventID, payload)
+}
+
+// sessionDisplayTitle prefers the title carried by the pending turn and falls
+// back to the persisted session name.
+func (s *AppContext) sessionDisplayTitle(rootID, sessionKey string, pending PendingSessionSnapshot) string {
+	if title := strings.TrimSpace(pending.SessionTitle); title != "" {
+		return title
+	}
+	return s.sessionTitle(rootID, sessionKey)
+}
+
+// scheduledTaskIDFromRequestID extracts the task id from a "scheduled:<id>"
+// run marker.
+func scheduledTaskIDFromRequestID(requestID string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(requestID), "scheduled:"))
 }
 
 func (s *AppContext) notifyAskUserIfNeeded(rootID, sessionKey string, event *StreamEvent) {
@@ -1070,6 +1233,46 @@ func (s *AppContext) notifyPayload(ctx context.Context, eventID string, payload 
 	if s.Notify != nil && s.Notify.Enabled() {
 		s.Notify.NotifyPayload(ctx, payload)
 	}
+}
+
+// notifyUsageBudget pushes the daily spend warning. The event id is keyed by
+// local date and threshold so a warning is sent at most once per day per level.
+func (s *AppContext) notifyUsageBudget(alert usage.Notification) {
+	if s == nil || strings.TrimSpace(alert.Tag) == "" {
+		return
+	}
+	log.Printf("[usage] budget.notify event=%s title=%q body=%q", alert.Tag, alert.Title, alert.Body)
+	payload := notify.Payload{
+		Type:               alert.Type,
+		Title:              alert.Title,
+		Body:               alert.Body,
+		Tag:                alert.Tag,
+		URL:                alert.URL,
+		Icon:               "./pwa-192.png",
+		Badge:              "./pwa-192.png",
+		RequireInteraction: alert.RequireInteraction,
+		Data: map[string]any{
+			"type":    alert.Type,
+			"eventId": alert.Tag,
+		},
+	}
+	s.notifyPayload(context.Background(), alert.Tag, payload)
+}
+
+// CheckUsageBudget builds the report, notifies if a threshold was crossed, and
+// returns the report so callers can avoid a second scan.
+func (s *AppContext) CheckUsageBudget(ctx context.Context) (usage.Report, error) {
+	uc := &usecase.Service{Registry: s}
+	report, err := uc.BuildUsageReport(ctx, usecase.UsageServiceInput{Days: 1})
+	if err != nil {
+		return usage.Report{}, err
+	}
+	title, body, eventID, ok := usage.BudgetAlert(report)
+	if ok {
+		alert := usage.BudgetNotification(title, body, eventID)
+		s.notifyUsageBudget(alert)
+	}
+	return report, nil
 }
 
 func (s *AppContext) rootTitle(rootID string) string {

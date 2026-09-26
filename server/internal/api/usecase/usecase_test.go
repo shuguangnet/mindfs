@@ -20,6 +20,7 @@ import (
 	rootfs "mindfs/server/internal/fs"
 	"mindfs/server/internal/preferences"
 	"mindfs/server/internal/session"
+	"mindfs/server/internal/usage"
 )
 
 func TestListTreeMissingPluginDirReturnsEmptyEntries(t *testing.T) {
@@ -2137,6 +2138,8 @@ func (uploadTestRegistry) GetFileWatcher(string, *session.Manager) (*rootfs.Shar
 
 func (uploadTestRegistry) ReleaseFileWatcher(string, string) {}
 
+func (uploadTestRegistry) GetUsageStore() *usage.Store { return nil }
+
 type fakeUsecaseAgentSession struct {
 	id          string
 	cancelCalls int
@@ -2280,6 +2283,8 @@ func (r *commandTestRegistry) GetFileWatcher(string, *session.Manager) (*rootfs.
 
 func (r *commandTestRegistry) ReleaseFileWatcher(string, string) {}
 
+func (r *commandTestRegistry) GetUsageStore() *usage.Store { return nil }
+
 type multiRootSearchTestRegistry struct {
 	roots    []rootfs.RootInfo
 	managers map[string]*session.Manager
@@ -2343,6 +2348,8 @@ func (r *multiRootSearchTestRegistry) GetFileWatcher(string, *session.Manager) (
 }
 
 func (r *multiRootSearchTestRegistry) ReleaseFileWatcher(string, string) {}
+
+func (r *multiRootSearchTestRegistry) GetUsageStore() *usage.Store { return nil }
 
 type renameManagedDirTestRegistry struct {
 	root                       rootfs.RootInfo
@@ -2418,6 +2425,8 @@ func (*renameManagedDirTestRegistry) GetFileWatcher(string, *session.Manager) (*
 }
 
 func (*renameManagedDirTestRegistry) ReleaseFileWatcher(string, string) {}
+
+func (*renameManagedDirTestRegistry) GetUsageStore() *usage.Store { return nil }
 
 type sessionCleanupRegistry struct {
 	*commandTestRegistry

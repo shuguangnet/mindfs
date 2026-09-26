@@ -1231,7 +1231,12 @@ class SessionService {
     rootId: string,
     query: string,
     limit?: number,
-    options?: { multiRoot?: boolean },
+    options?: {
+      multiRoot?: boolean;
+      agent?: string;
+      after?: string;
+      before?: string;
+    },
   ): Promise<SessionSearchHit[]> {
     try {
       const trimmed = query.trim();
@@ -1246,6 +1251,15 @@ class SessionService {
       }
       if (typeof limit === "number" && limit > 0) {
         params.set("limit", String(limit));
+      }
+      if (options?.agent?.trim()) {
+        params.set("agent", options.agent.trim());
+      }
+      if (options?.after?.trim()) {
+        params.set("after", options.after.trim());
+      }
+      if (options?.before?.trim()) {
+        params.set("before", options.before.trim());
       }
       const data = await protectedJSON<any>(appURL("/api/sessions/search", params));
       return Array.isArray(data?.items)

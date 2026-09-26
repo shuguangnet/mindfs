@@ -28,6 +28,7 @@ import { AgentSelector } from "./AgentSelector";
 import { SymlinkBadge } from "./SymlinkBadge";
 import { RelayLocalServicesDialog } from "./RelayLocalServicesDialog";
 import { RemoteServersDialog } from "./RemoteServersDialog";
+import { SSHServersDialog } from "./SSHServersDialog";
 import { fetchAgentCatalog, fetchAgents, type AgentStatus } from "../services/agents";
 import {
   createAgentAPIProvider,
@@ -1237,6 +1238,34 @@ function AgentLifecyclePopover({
                     <span style={{ fontSize: "12px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {item.name}
                     </span>
+                    {item.installed ? (
+                      <span
+                        title={
+                          item.latest_version
+                            ? item.update_available
+                              ? t("agentConfig.updateAvailable").replace("{version}", item.latest_version)
+                              : t("agentConfig.upToDate")
+                            : t("agentConfig.versionUnknown")
+                        }
+                        style={{
+                          fontSize: "10px",
+                          lineHeight: "14px",
+                          padding: "1px 5px",
+                          borderRadius: "4px",
+                          flexShrink: 0,
+                          whiteSpace: "nowrap",
+                          color: item.update_available ? "var(--text-primary)" : "var(--text-secondary)",
+                          background: item.update_available ? "rgba(245, 158, 11, 0.18)" : "transparent",
+                          border: `1px solid ${item.update_available ? "rgba(245, 158, 11, 0.5)" : "var(--border-color)"}`,
+                        }}
+                      >
+                        {item.update_available && item.latest_version
+                          ? `v${item.version || "?"} → v${item.latest_version}`
+                          : item.version
+                            ? `v${item.version}`
+                            : "—"}
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       disabled={disabled}
@@ -1594,6 +1623,7 @@ export function FileTree({
   const [agentLifecycleOpen, setAgentLifecycleOpen] = React.useState(false);
   const [relayServicesOpen, setRelayServicesOpen] = React.useState(false);
   const [remoteServersOpen, setRemoteServersOpen] = React.useState(false);
+  const [sshServersOpen, setSSHServersOpen] = React.useState(false);
   const [relayServicesEditing, setRelayServicesEditing] = React.useState(false);
   const [agentLifecycleAgents, setAgentLifecycleAgents] = React.useState<AgentStatus[]>([]);
   const [agentLifecycleBusy, setAgentLifecycleBusy] = React.useState(false);
@@ -1627,6 +1657,7 @@ export function FileTree({
   const agentLifecyclePopoverRef = React.useRef<HTMLDivElement | null>(null);
   const relayServicesPopoverRef = React.useRef<HTMLDivElement | null>(null);
   const remoteServersPopoverRef = React.useRef<HTMLDivElement | null>(null);
+  const sshServersPopoverRef = React.useRef<HTMLDivElement | null>(null);
   const sendShortcutPopoverRef = React.useRef<HTMLDivElement | null>(null);
   const updateNotesRef = React.useRef<HTMLDivElement | null>(null);
   const createInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -2331,6 +2362,19 @@ export function FileTree({
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [remoteServersOpen]);
+
+  React.useEffect(() => {
+    if (!sshServersOpen) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!sshServersPopoverRef.current?.contains(event.target as Node)) {
+        setSSHServersOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [sshServersOpen]);
 
   const closeRelayServices = React.useCallback(() => {
     setRelayServicesOpen(false);
@@ -3212,6 +3256,7 @@ export function FileTree({
                   type="button"
                   onClick={() => {
                     setRemoteServersOpen(true);
+                    setSSHServersOpen(false);
                     setRelayServicesOpen(false);
                     closeAgentConfigFlow();
                     setAgentLifecycleOpen(false);
@@ -3230,6 +3275,26 @@ export function FileTree({
                     <path d="M12 17h5" />
                   </svg>
                   <span>远端服务器</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSSHServersOpen(true);
+                    setRemoteServersOpen(false);
+                    setRelayServicesOpen(false);
+                    closeAgentConfigFlow();
+                    setAgentLifecycleOpen(false);
+                    setIsMenuOpen(false);
+                    setIsAppearanceMenuOpen(false);
+                    setIsSortMenuOpen(false);
+                  }}
+                  style={fileTreeMenuButtonStyle}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m7 11 2 2-2 2" />
+                    <path d="M12 21c-4.4 0-8-3.6-8-8s3.6-8 8-8 8 3.6 8 8c0 1.5-.4 2.9-1.1 4.1L21 21z" />
+                  </svg>
+                  <span>{t("sshServers.title")}</span>
                 </button>
                 <button
                   type="button"
@@ -4119,6 +4184,23 @@ export function FileTree({
             <RemoteServersDialog
               open={remoteServersOpen}
               onClose={() => setRemoteServersOpen(false)}
+            />
+          </div>
+        ) : null}
+        {sshServersOpen ? (
+          <div
+            ref={sshServersPopoverRef}
+            style={{
+              position: "absolute",
+              top: "calc(100% + 6px)",
+              left: "8px",
+              right: "3px",
+              zIndex: 35,
+            }}
+          >
+            <SSHServersDialog
+              open={sshServersOpen}
+              onClose={() => setSSHServersOpen(false)}
             />
           </div>
         ) : null}

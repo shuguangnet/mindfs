@@ -11,6 +11,7 @@ import (
 	"mindfs/server/internal/fs"
 	"mindfs/server/internal/preferences"
 	"mindfs/server/internal/session"
+	"mindfs/server/internal/usage"
 )
 
 func TestExternalSessionDeltaAfterCtxSeqSkipsCopiedPrefix(t *testing.T) {
@@ -373,3 +374,5 @@ func (r *syncDeltaTestRegistry) GetFileWatcher(string, *session.Manager) (*fs.Sh
 }
 
 func (r *syncDeltaTestRegistry) ReleaseFileWatcher(string, string) {}
+
+func (r *syncDeltaTestRegistry) GetUsageStore() *usage.Store { return nil }

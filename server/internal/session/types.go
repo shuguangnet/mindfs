@@ -256,6 +256,11 @@ type RelatedWorktree struct {
 type SearchOptions struct {
 	Query string
 	Limit int
+	// Agent filters hits to sessions last used by this agent. Empty means all.
+	Agent string
+	// AfterTime/BeforeTime filter hits by session updated time. Zero means unbounded.
+	AfterTime  time.Time
+	BeforeTime time.Time
 }
 
 type SearchHit struct {

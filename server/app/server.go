@@ -25,8 +25,10 @@ import (
 	"mindfs/server/internal/relay"
 	"mindfs/server/internal/remote"
 	"mindfs/server/internal/scheduled"
+	"mindfs/server/internal/sshops"
 	"mindfs/server/internal/tlsutil"
 	"mindfs/server/internal/update"
+	"mindfs/server/internal/usage"
 	"mindfs/server/internal/webpush"
 )
 
@@ -109,6 +111,15 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 	}
 	remoteManager := remote.NewManager(remoteStore)
 	agentPool.SetRemoteManager(remoteManager)
+	sshStore, err := sshops.NewStore()
+	if err != nil {
+		log.Printf("[sshops] init.error err=%v", err)
+	}
+	sshOpsManager, err := sshops.NewManager(sshStore, sshops.Options{})
+	if err != nil {
+		log.Printf("[sshops] manager.error err=%v", err)
+		sshOpsManager = nil
+	}
 	agentPool.StartIdleReleaseLoop(ctx, func() time.Duration {
 		hours := preferences.DefaultIdleSessionResourceReleaseHours
 		if prefs != nil {
@@ -128,13 +139,20 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 	updateSvc := update.NewService("shuguangnet/mindfs", opts.Version, executable, opts.Args, 10*time.Minute)
 	updateSvc.Start(ctx)
 
+	usageStore, err := usage.LoadStore()
+	if err != nil {
+		log.Printf("[usage] store.load.error err=%v", err)
+	}
+
 	services := &api.AppContext{
 		Dirs:   registry,
 		Agents: agentPool,
 		Prober: agentProber,
 		Remote: remoteManager,
+		SSHOps: sshOpsManager,
 		Update: updateSvc,
 		Prefs:  prefs,
+		Usage:  usageStore,
 		E2EE: e2ee.NewManager(e2ee.Config{
 			Enabled:       opts.E2EEConfig.Enabled,
 			NodeID:        opts.E2EEConfig.NodeID,

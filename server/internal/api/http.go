@@ -339,6 +339,9 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/preferences/new-project-meta-location", h.protectedEndpoint(h.handleNewProjectMetaLocationPreferenceGet))
 	r.Put("/api/preferences/new-project-meta-location", h.protectedEndpoint(h.handleNewProjectMetaLocationPreferencePut))
 	r.Get("/api/replying-sessions", h.protectedEndpoint(h.handleReplyingSessions))
+	r.Get("/api/usage/report", h.protectedEndpoint(h.handleUsageReport))
+	r.Get("/api/usage/preferences", h.protectedEndpoint(h.handleUsagePreferencesGet))
+	r.Put("/api/usage/preferences", h.protectedEndpoint(h.handleUsagePreferencesPut))
 	r.Get("/api/sessions/search", h.protectedEndpoint(h.handleSessionSearch))
 	r.Get("/api/sessions/children", h.protectedEndpoint(h.handleSessionChildren))
 	r.Get("/api/sessions/external", h.protectedEndpoint(h.handleExternalSessionsList))
@@ -418,6 +421,17 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Post("/api/remote-servers", h.protectedEndpoint(h.handleRemoteServerSave))
 	r.Post("/api/remote-servers/{id}/test", h.protectedEndpoint(h.handleRemoteServerTest))
 	r.Delete("/api/remote-servers/{id}", h.protectedEndpoint(h.handleRemoteServerDelete))
+
+	// SSH server alias management
+	r.Get("/api/ssh-servers", h.protectedEndpoint(h.handleSSHServersList))
+	r.Get("/api/ssh-servers/fs", h.protectedEndpoint(h.handleSSHServerFSList))
+	r.Post("/api/ssh-servers", h.protectedEndpoint(h.handleSSHServerSave))
+	r.Delete("/api/ssh-servers/{id}", h.protectedEndpoint(h.handleSSHServerDelete))
+	r.Post("/api/ssh-servers/{id}/test", h.protectedEndpoint(h.handleSSHServerTest))
+	r.Post("/api/ssh-servers/{id}/deploy-key", h.protectedEndpoint(h.handleSSHServerDeployKey))
+	r.Post("/api/ssh-servers/import/preview", h.protectedEndpoint(h.handleSSHServersImportPreview))
+	r.Post("/api/ssh-servers/import/apply", h.protectedEndpoint(h.handleSSHServersImportApply))
+	r.Post("/api/ssh-servers/export", h.protectedEndpoint(h.handleSSHServersExport))
 	r.Get("/api/agents/codex/rate-limits", h.protectedEndpoint(h.handleCodexRateLimitsGet))
 	r.Post("/api/agents/codex/rate-limit-reset", h.protectedEndpoint(h.handleCodexRateLimitReset))
 	r.Get("/api/agent-config/defaults", h.protectedEndpoint(h.handleAgentConfigDefaults))
@@ -619,11 +633,24 @@ func (h *HTTPHandler) handleSessionSearch(w http.ResponseWriter, r *http.Request
 		respondError(w, http.StatusBadRequest, errInvalidRequest("limit must be a positive integer"))
 		return
 	}
+	afterTime, err := parseTimeQuery(r, "after")
+	if err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("after must be an RFC3339 timestamp"))
+		return
+	}
+	beforeTime, err := parseTimeQuery(r, "before")
+	if err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("before must be an RFC3339 timestamp"))
+		return
+	}
 	out, err := h.service().SearchSessions(r.Context(), usecase.SearchSessionsInput{
-		RootID:    rootID,
-		Query:     query,
-		Limit:     limit,
-		MultiRoot: truthyQuery(r, "multi_root"),
+		RootID:     rootID,
+		Query:      query,
+		Limit:      limit,
+		MultiRoot:  truthyQuery(r, "multi_root"),
+		Agent:      strings.TrimSpace(r.URL.Query().Get("agent")),
+		AfterTime:  afterTime,
+		BeforeTime: beforeTime,
 	})
 	if err != nil {
 		respondError(w, http.StatusServiceUnavailable, err)
@@ -1173,7 +1200,8 @@ func (h *HTTPHandler) handleSessionRuntimeConfigPatch(w http.ResponseWriter, r *
 	respondJSON(w, http.StatusOK, h.sessionListResponse(updated))
 }
 
-func (h *HTTPHandler) handleSessionDelete(w http.ResponseWriter, r *http.Request) {	rootID := r.URL.Query().Get("root")
+func (h *HTTPHandler) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
+	rootID := r.URL.Query().Get("root")
 	key := chi.URLParam(r, "key")
 	if strings.TrimSpace(key) == "" {
 		respondError(w, http.StatusBadRequest, errInvalidRequest("session key required"))
@@ -2661,6 +2689,20 @@ func parsePositiveIntQuery(r *http.Request, key string) (int, error) {
 		return 0, errInvalidRequest(key + " must be positive")
 	}
 	return value, nil
+}
+
+// parseTimeQuery parses an optional RFC3339 timestamp query parameter. An empty
+// value yields the zero time so callers can treat it as "unbounded".
+func parseTimeQuery(r *http.Request, key string) (time.Time, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	value, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, errInvalidRequest(key + " must be an RFC3339 timestamp")
+	}
+	return value.UTC(), nil
 }
 
 func truthyQuery(r *http.Request, key string) bool {

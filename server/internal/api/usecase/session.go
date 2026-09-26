@@ -1,12 +1,14 @@
 package usecase
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -31,6 +33,10 @@ type ClientContext struct {
 	PluginCatalog string     `json:"plugin_catalog,omitempty"`
 	Selection     *Selection `json:"selection,omitempty"`
 }
+
+// errIdleWatchdog marks the watchdog-cancelled turn so callers can classify it
+// without parsing the human-readable message.
+var errIdleWatchdog = errors.New("turn idle watchdog")
 
 type Selection struct {
 	FilePath  string `json:"file_path"`
@@ -85,6 +91,11 @@ type SearchSessionsInput struct {
 	Query     string
 	Limit     int
 	MultiRoot bool
+	// Agent, AfterTime and BeforeTime are optional filters applied to every
+	// searched root.
+	Agent      string
+	AfterTime  time.Time
+	BeforeTime time.Time
 }
 
 type SearchSessionsOutput struct {
@@ -293,8 +304,11 @@ func (s *Service) SearchSessions(ctx context.Context, in SearchSessionsInput) (S
 		return SearchSessionsOutput{}, err
 	}
 	items, err := manager.Search(ctx, session.SearchOptions{
-		Query: in.Query,
-		Limit: in.Limit,
+		Query:      in.Query,
+		Limit:      in.Limit,
+		Agent:      in.Agent,
+		AfterTime:  in.AfterTime,
+		BeforeTime: in.BeforeTime,
 	})
 	if err != nil {
 		return SearchSessionsOutput{}, err
@@ -311,8 +325,11 @@ func (s *Service) searchMultiRootSessions(ctx context.Context, in SearchSessions
 			return SearchSessionsOutput{}, err
 		}
 		hits, err := manager.Search(ctx, session.SearchOptions{
-			Query: in.Query,
-			Limit: limit,
+			Query:      in.Query,
+			Limit:      limit,
+			Agent:      in.Agent,
+			AfterTime:  in.AfterTime,
+			BeforeTime: in.BeforeTime,
 		})
 		if err != nil {
 			return SearchSessionsOutput{}, err
@@ -1141,6 +1158,10 @@ type BuildPromptInput struct {
 	RuntimeRootAbs                string
 	IsInitial                     bool
 	IncludeReplyTipsInUserMessage bool
+	// AgentProtocol is the resolved transport for Agent. BuildPrompt fills it in
+	// so the switch hint can pick a strategy that the target agent can actually
+	// follow.
+	AgentProtocol agent.Protocol
 }
 
 func (s *Service) BuildPrompt(in BuildPromptInput) string {
@@ -1162,7 +1183,25 @@ func (s *Service) BuildPrompt(in BuildPromptInput) string {
 		}
 		prompt += ". If asked to orchestrate tasks, read mindfs -orchestration; create a task group with this parent session_key, then create ordinary template tasks in that group.\n"
 	}
+	in.AgentProtocol = s.resolveAgentProtocol(in.Agent)
 	return prependSwitchHint(in, prompt)
+}
+
+// resolveAgentProtocol resolves the configured transport for an agent,
+// falling back to the built-in default when the pool has no definition.
+func (s *Service) resolveAgentProtocol(agentName string) agent.Protocol {
+	name := strings.TrimSpace(agentName)
+	if name == "" {
+		return agent.ProtocolACP
+	}
+	if s != nil && s.Registry != nil {
+		if pool := s.Registry.GetAgentPool(); pool != nil {
+			if def, ok := pool.Config().GetAgent(name); ok && strings.TrimSpace(string(def.Protocol)) != "" {
+				return def.Protocol
+			}
+		}
+	}
+	return agent.DefaultProtocol(name)
 }
 
 func prependSwitchHint(in BuildPromptInput, prompt string) string {
@@ -1188,8 +1227,45 @@ func prependSwitchHint(in BuildPromptInput, prompt string) string {
 		return buildRemoteSwitchContextHint(in.Session, linesToRead) + prompt
 	}
 	logPath := switchReadHintPath(in.Manager, in.Session.Key, in.RuntimeRootAbs)
+	if readHint := buildInlineSwitchContextIfUnreadable(in, logPath, linesToRead); readHint != "" {
+		return readHint + prompt
+	}
 	readHint := buildSwitchReadHint(logPath, linesToRead)
 	return readHint + prompt
+}
+
+// buildInlineSwitchContextIfUnreadable returns inlined history when the next
+// agent cannot reasonably read the exchange log from its own working
+// directory. Codex-style app-server sessions are confined to the runtime root,
+// but the exchange log can live under ~/.mindfs (home meta location), so the
+// usual "go read this path" hint would fail and the agent would silently start
+// without context.
+func buildInlineSwitchContextIfUnreadable(in BuildPromptInput, logPath string, lines int) string {
+	if !switchHintNeedsInlineContext(in) {
+		return ""
+	}
+	entries := readExchangeTailLines(in.Manager.ExchangeLogAbsolutePath(in.Session.Key), lines)
+	if len(entries) == 0 {
+		return ""
+	}
+	log.Printf("[session/switch] inline_context session=%s agent=%s lines=%d log=%s", in.Session.Key, in.Agent, len(entries), logPath)
+	return buildInlineSwitchContext(entries, lines)
+}
+
+func switchHintNeedsInlineContext(in BuildPromptInput) bool {
+	if in.Manager == nil || in.Session == nil {
+		return false
+	}
+	if in.Manager.Root().EffectiveMetaLocation() != fs.MetaLocationHome {
+		// Project-local metadata sits inside the runtime root, so agents can read it.
+		return false
+	}
+	switch in.AgentProtocol {
+	case agent.ProtocolCodexSDK, agent.ProtocolClaudeSDK:
+		return true
+	default:
+		return false
+	}
 }
 
 type SendMessageInput struct {
@@ -1346,10 +1422,26 @@ func runTurnWithIdleWatchdog(turnCtx context.Context, turnCancel context.CancelF
 		// error into an explicit, user-visible failure instead of suppressing
 		// it as a normal user cancel.
 		if err == nil || isCanceledTurnError(err) {
-			err = fmt.Errorf("agent idle for %s, automatically canceled this turn; the model service may be unavailable", idle)
+			err = idleWatchdogError(idle)
 		}
 	}
 	return err
+}
+
+// idleWatchdogError builds the watchdog failure message. isIdleWatchdogError
+// matches it again later without relying on the human-readable wording alone.
+func idleWatchdogError(idle time.Duration) error {
+	return fmt.Errorf("%w: agent idle for %s, automatically canceled this turn; the model service may be unavailable", errIdleWatchdog, idle)
+}
+
+func isIdleWatchdogError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errIdleWatchdog) {
+		return true
+	}
+	return strings.Contains(err.Error(), "agent idle for")
 }
 
 type RunTransientSlashCommandInput struct {
@@ -1389,6 +1481,9 @@ const (
 	sessionNameMinMessageLen = 12
 	sessionRecoveryAttempts  = 3
 	sessionRecoveryDelay     = 30 * time.Second
+	// inlineSwitchContextEntryMaxRunes bounds each inlined history entry when
+	// the target agent cannot read the exchange log itself.
+	inlineSwitchContextEntryMaxRunes = 4000
 )
 
 type SuggestSessionNameInput struct {
@@ -1508,6 +1603,53 @@ func switchReadHintPath(manager *session.Manager, sessionKey, runtimeRootAbs str
 	return filepath.ToSlash(rel)
 }
 
+// readExchangeTailLines reads up to the last `lines` exchange log entries and
+// returns them verbatim. It is used to hand real conversation history to the
+// next agent instead of asking that agent to go read the log file itself.
+func readExchangeTailLines(path string, lines int) []string {
+	path = strings.TrimSpace(path)
+	if path == "" || lines <= 0 {
+		return nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	return tailLogicalLines(file, lines)
+}
+
+// tailLogicalLines returns the last `lines` logical lines of a reader, handling
+// arbitrarily long JSONL entries without loading the whole file into memory.
+func tailLogicalLines(reader io.Reader, lines int) []string {
+	if reader == nil || lines <= 0 {
+		return nil
+	}
+	buffer := make([]string, 0, lines)
+	var pending []byte
+	reader2 := bufio.NewReaderSize(reader, 256*1024)
+	for {
+		chunk, err := reader2.ReadBytes('\n')
+		pending = append(pending, chunk...)
+		if len(chunk) == 0 || chunk[len(chunk)-1] == '\n' || err != nil {
+			entry := strings.TrimSpace(string(pending))
+			pending = pending[:0]
+			if entry != "" {
+				if len(buffer) == lines {
+					copy(buffer, buffer[1:])
+					buffer[lines-1] = entry
+				} else {
+					buffer = append(buffer, entry)
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return buffer
+}
+
 func buildSwitchReadHint(exchangeLogPath string, lines int) string {
 	return "This session was migrated from elsewhere. Your context may lag behind this session;\n" +
 		"Before replying, read the last " + strconv.Itoa(lines) + " lines from " + exchangeLogPath + " to recover context.\n" +
@@ -1516,6 +1658,28 @@ func buildSwitchReadHint(exchangeLogPath string, lines int) string {
 		"Execution order: read history first, then compose the final answer.\n" +
 		"Note: do not send any natural-language response before finishing the required history reads. Start reading immediately via tools/commands.\n" +
 		"Only if reading fails, output a brief error and stop.\n\n"
+}
+
+// buildInlineSwitchContext renders the tail of the exchange log directly into
+// the prompt. It is used when the next agent cannot read the log file itself
+// (for example a remote agent, or a Codex session whose app-server is confined
+// to the scratch cwd), so history is never silently lost on a handoff.
+func buildInlineSwitchContext(entries []string, lines int) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("This session was migrated from another runtime. You cannot read the local session log directly.\n")
+	b.WriteString("Use the following recent conversation history as context before replying:\n\n")
+	for _, entry := range entries {
+		if strings.TrimSpace(entry) == "" {
+			continue
+		}
+		b.WriteString(truncateRunes(entry, inlineSwitchContextEntryMaxRunes))
+		b.WriteString("\n")
+	}
+	b.WriteString("\nNow answer the user's latest message below.\n\n")
+	return b.String()
 }
 
 func buildRemoteSwitchContextHint(current *session.Session, lines int) string {
@@ -2585,7 +2749,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		if isNonRecoverableAgentError(sendErr) {
 			log.Printf("[session] turn.send.non_recoverable root=%s session=%s agent=%s action=fail_without_recovery err=%v", in.RootID, current.Key, in.Agent, sendErr)
 			cancelRuntimeAfterNonRecoverableError(sess, agentPool, in.Agent, sendErr)
-		} else if strings.Contains(sendErr.Error(), "agent idle for") {
+		} else if isIdleWatchdogError(sendErr) {
 			// Watchdog fired: the model service is stuck/unresponsive. Retrying
 			// the same prompt would most likely hang again, so fail directly.
 			log.Printf("[session] turn.send.watchdog root=%s session=%s agent=%s action=fail_without_recovery", in.RootID, current.Key, in.Agent)
@@ -2631,7 +2795,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		log.Printf("[session] turn.empty_response root=%s session=%s agent=%s", in.RootID, current.Key, in.Agent)
 		sendErr = errors.New("model returned no content (the model service may have failed)")
 	}
-	if sendErr != nil && strings.Contains(sendErr.Error(), "agent idle for") && in.OnUpdate != nil {
+	if sendErr != nil && isIdleWatchdogError(sendErr) && in.OnUpdate != nil {
 		// Real-time notice so the UI can stop the "waiting for the agent" state
 		// immediately instead of only discovering the failure on the next sync.
 		in.OnUpdate(agenttypes.Event{

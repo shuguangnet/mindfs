@@ -164,6 +164,7 @@ import { CompactUploadProgress } from "./components/CompactUploadProgress";
 import { ToastContainer } from "./components/Toast";
 import { BottomSheet } from "./components/BottomSheet";
 import { ScheduledAgentTaskDialog } from "./components/ScheduledAgentTaskDialog";
+import { UsageReportPanel } from "./components/UsageReportPanel";
 import { TaskTemplateDialog } from "./components/TaskTemplateDialog";
 import { OnboardingTour } from "./components/OnboardingTour";
 import { WorktreeBranchSelector } from "./components/WorktreeBranchSelector";
@@ -1583,6 +1584,11 @@ export function App({ onGoHome }: AppProps) {
   const [multiProjectPendingByKey, setMultiProjectPendingByKey] = useState<Record<string, boolean>>({});
   const multiProjectPendingRef = useRef<Record<string, boolean>>({});
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
+  const [sessionSearchFilters, setSessionSearchFilters] = useState<{
+    agent: string;
+    after: string;
+    before: string;
+  }>({ agent: "", after: "", before: "" });
   const [sessionSearchResultsMode, setSessionSearchResultsMode] = useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
   const [sessionSearchAppliedQuery, setSessionSearchAppliedQuery] = useState("");
@@ -1624,6 +1630,7 @@ export function App({ onGoHome }: AppProps) {
   const taskCreateTemplateMenuRef = useRef<HTMLDivElement | null>(null);
   const [availableAgents, setAvailableAgents] = useState<AgentStatus[]>([]);
   const [scheduledAgentDialogOpen, setScheduledAgentDialogOpen] = useState(false);
+  const [usageReportOpen, setUsageReportOpen] = useState(false);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [taskTemplateDialogOpen, setTaskTemplateDialogOpen] = useState(false);
   const [taskTemplateDialogTemplate, setTaskTemplateDialogTemplate] = useState<TaskTemplate | null>(null);
@@ -2404,6 +2411,18 @@ export function App({ onGoHome }: AppProps) {
   const [managedRootIds, setManagedRootIds] = useState<string[]>([]);
   const managedRootByIdRef = useRef<Record<string, ManagedRootPayload>>({});
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
+  // Project picker options for the usage report, derived from the loaded roots.
+  // Root entries carry the project id in `path`.
+  const managedRootOptions = useMemo(
+    () =>
+      rootEntries
+        .filter((entry) => entry.is_dir && entry.is_root && entry.path)
+        .map((entry) => ({
+          id: String(entry.path),
+          name: String(entry.name || entry.path),
+        })),
+    [rootEntries],
+  );
   const [creatingRootName, setCreatingRootName] = useState<string | null>(null);
   const [creatingRootParentPath, setCreatingRootParentPath] = useState<string | null>(null);
   const [creatingRootKind, setCreatingRootKind] = useState<"root" | "worktree">("root");
@@ -2707,6 +2726,41 @@ export function App({ onGoHome }: AppProps) {
     } catch (error) {
       if (completionAudioUnlockedRef.current) {
         console.error("Failed to play completion sound:", error);
+      }
+    }
+  }, [ensureCompletionAudioContext]);
+
+  /**
+   * Failure counterpart of the completion chime: a descending two-note cue so a
+   * failed or watchdog-cancelled turn is audible even when the tab is in the
+   * background.
+   */
+  const playFailureSound = useCallback(() => {
+    const audioContext = ensureCompletionAudioContext();
+    if (!audioContext) {
+      return;
+    }
+    try {
+      if (audioContext.state !== "running") {
+        return;
+      }
+      completionAudioUnlockedRef.current = true;
+      const now = audioContext.currentTime;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      oscillator.type = "triangle";
+      oscillator.frequency.setValueAtTime(420, now);
+      oscillator.frequency.exponentialRampToValueAtTime(240, now + 0.22);
+      gainNode.gain.setValueAtTime(0.0001, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.2, now + 0.012);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.32);
+    } catch (error) {
+      if (completionAudioUnlockedRef.current) {
+        console.error("Failed to play failure sound:", error);
       }
     }
   }, [ensureCompletionAudioContext]);
@@ -5175,6 +5229,19 @@ export function App({ onGoHome }: AppProps) {
     setSessionSearchAppliedQuery(trimmed);
   }, [sessionSearchQuery]);
 
+  const availableSearchAgents = useMemo(() => {
+    const names = new Set<string>();
+    for (const agent of availableAgents) {
+      const name = String(agent?.name || "").trim();
+      if (name) names.add(name);
+    }
+    for (const session of sessions) {
+      const name = String((session as { agent?: string }).agent || "").trim();
+      if (name) names.add(name);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [availableAgents, sessions]);
+
   useEffect(() => {
     if (
       sessionListMode !== "local" ||
@@ -5192,6 +5259,9 @@ export function App({ onGoHome }: AppProps) {
     void sessionService
       .searchSessions(currentRootId, sessionSearchAppliedQuery, 20, {
         multiRoot: searchAcrossRoots,
+        agent: sessionSearchFilters.agent || undefined,
+        after: sessionSearchFilters.after || undefined,
+        before: sessionSearchFilters.before || undefined,
       })
       .then((hits) => {
         if (cancelled) return;
@@ -5228,7 +5298,7 @@ export function App({ onGoHome }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [currentRootId, multiProjectSessionsEnabled, sessionListMode, sessionSearchAppliedQuery, sessionSearchOpen]);
+  }, [currentRootId, multiProjectSessionsEnabled, sessionListMode, sessionSearchAppliedQuery, sessionSearchFilters, sessionSearchOpen]);
 
   const openGitDiff = useCallback(
     async (rootID: string, item: GitStatusItem, options?: { preserveRelatedSelection?: boolean; repoPath?: string }) => {
@@ -10076,6 +10146,7 @@ export function App({ onGoHome }: AppProps) {
             break;
           }
           console.warn("[session/ws] error", { requestId, rootId: pending.rootId, sessionKey: pending.sessionKey || null, tempKey: pending.tempKey || null });
+          playFailureSound();
           delete pendingRequestRef.current[requestId];
           const targetKey = pending.tempKey || "";
           const failedKey = pending.sessionKey || targetKey;
@@ -10597,6 +10668,7 @@ export function App({ onGoHome }: AppProps) {
     refreshTasksForRelatedSession,
     updateSessionAgentForKey,
     treeCacheKey,
+    playFailureSound,
     t,
   ]);
 
@@ -13740,6 +13812,7 @@ export function App({ onGoHome }: AppProps) {
         onSwitchWorktree={handleSwitchWorktreeStart}
         onRemoveWorktree={handleRemoveCurrentWorktree}
         onOpenScheduledAgentTasks={() => setScheduledAgentDialogOpen(true)}
+        onOpenUsageReport={() => setUsageReportOpen(true)}
         menuOverlay={
           projectAddMode === "worktree_location"
             ? projectAddOverlay
@@ -14152,6 +14225,10 @@ export function App({ onGoHome }: AppProps) {
         searchResultsMode={sessionSearchResultsMode}
         searchQuery={sessionSearchQuery}
         searchLoading={sessionSearchLoading}
+        searchFilters={sessionSearchFilters}
+        searchAgents={availableSearchAgents}
+        onSearchFiltersChange={setSessionSearchFilters}
+        onSearchFiltersReset={() => setSessionSearchFilters({ agent: "", after: "", before: "" })}
         syncingSessionKeys={syncingSessionKeys}
         emptyText={
           sessionSearchResultsMode
@@ -14174,6 +14251,7 @@ export function App({ onGoHome }: AppProps) {
               setSessionSearchResultsMode(false);
               setSessionSearchQuery("");
               setSessionSearchAppliedQuery("");
+              setSessionSearchFilters({ agent: "", after: "", before: "" });
               setSessionSearchResults([]);
               setSessionSearchLoading(false);
             }
@@ -14194,6 +14272,7 @@ export function App({ onGoHome }: AppProps) {
           setSessionSearchResultsMode(false);
           setSessionSearchQuery("");
           setSessionSearchAppliedQuery("");
+          setSessionSearchFilters({ agent: "", after: "", before: "" });
           setSessionSearchResults([]);
           setSessionSearchLoading(false);
         }}
@@ -14201,6 +14280,7 @@ export function App({ onGoHome }: AppProps) {
           setSessionSearchResultsMode(false);
           setSessionSearchQuery("");
           setSessionSearchAppliedQuery("");
+          setSessionSearchFilters({ agent: "", after: "", before: "" });
           setSessionSearchResults([]);
           setSessionSearchLoading(false);
           setSessionSearchOpen(false);
@@ -15195,6 +15275,13 @@ export function App({ onGoHome }: AppProps) {
             ))}
           </div>
         </Modal>
+      ) : null}
+      {usageReportOpen ? (
+        <UsageReportPanel
+          rootId={currentRootId}
+          projects={managedRootOptions}
+          onClose={() => setUsageReportOpen(false)}
+        />
       ) : null}
       <ScheduledAgentTaskDialog
         open={scheduledAgentDialogOpen}

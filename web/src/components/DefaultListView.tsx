@@ -70,6 +70,7 @@ type DefaultListViewProps = {
   onSwitchWorktree?: () => void;
   onRemoveWorktree?: () => void;
   onOpenScheduledAgentTasks?: () => void;
+  onOpenUsageReport?: () => void;
   currentViewMode?: MainContentViewMode;
   onViewModeChange?: (mode: MainContentViewMode) => void;
   menuOverlay?: React.ReactNode;
@@ -441,6 +442,7 @@ export function DefaultListView({
   onSwitchWorktree,
   onRemoveWorktree,
   onOpenScheduledAgentTasks,
+  onOpenUsageReport,
   currentViewMode = "task-kanban",
   onViewModeChange,
   menuOverlay = null,
@@ -1059,6 +1061,46 @@ export function DefaultListView({
                         <path d="M12 7v5l3 2" />
                       </svg>
                       <span>{t("directory.scheduledTasks")}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenUsageReport?.();
+                        setIsMenuOpen(false);
+                      }}
+                      style={{
+                        width: "100%",
+                        border: "none",
+                        background: "transparent",
+                        color: "var(--text-primary)",
+                        borderRadius: "8px",
+                        padding: "8px 10px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                      }}
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M4 19V5" />
+                        <path d="M4 19h16" />
+                        <path d="M8 16v-5" />
+                        <path d="M13 16V7" />
+                        <path d="M18 16v-9" />
+                      </svg>
+                      <span>{t("directory.usageReport")}</span>
                     </button>
                     <button
                       type="button"

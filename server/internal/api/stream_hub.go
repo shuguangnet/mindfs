@@ -58,7 +58,12 @@ type SessionPendingState struct {
 	BaseExchangeSeq int
 	NextEventSeq    uint64
 	Summary         string
-	UpdatedAt       time.Time
+	// TerminalError holds the turn error reported through BroadcastSessionError
+	// so the completion path can notify a failure instead of a silent success.
+	TerminalError string
+	// Cancelled marks a user-requested cancel, which should not notify.
+	Cancelled bool
+	UpdatedAt time.Time
 }
 
 type ClientStreamStatus string
@@ -88,10 +93,12 @@ type ReplyingSessionState struct {
 }
 
 type PendingSessionSnapshot struct {
-	RootID       string
-	SessionTitle string
-	Summary      string
-	UpdatedAt    time.Time
+	RootID        string
+	SessionTitle  string
+	Summary       string
+	TerminalError string
+	Cancelled     bool
+	UpdatedAt     time.Time
 }
 
 type replayStep struct {
@@ -616,11 +623,49 @@ func (h *StreamHub) PendingSessionSnapshot(sessionKey string) PendingSessionSnap
 		return PendingSessionSnapshot{}
 	}
 	return PendingSessionSnapshot{
-		RootID:       state.RootID,
-		SessionTitle: state.SessionTitle,
-		Summary:      state.Summary,
-		UpdatedAt:    state.UpdatedAt,
+		RootID:        state.RootID,
+		SessionTitle:  state.SessionTitle,
+		Summary:       state.Summary,
+		TerminalError: state.TerminalError,
+		Cancelled:     state.Cancelled,
+		UpdatedAt:     state.UpdatedAt,
 	}
+}
+
+// MarkSessionTurnFailed records the error of the turn that just ended so the
+// following BroadcastSessionDone can notify a failure instead of a completion.
+// The first error wins: later bookkeeping errors must not overwrite the cause
+// the user needs to see.
+func (h *StreamHub) MarkSessionTurnFailed(sessionKey, message string) {
+	if blank(sessionKey) {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	state := h.pendingSessions[sessionKey]
+	if state == nil {
+		// No live pending state (for example after a restart): remember the
+		// failure so the notification still fires once the turn completes.
+		state = h.ensurePendingSessionLocked(sessionKey)
+	}
+	if strings.TrimSpace(state.TerminalError) == "" {
+		state.TerminalError = strings.TrimSpace(message)
+	}
+	state.UpdatedAt = time.Now().UTC()
+}
+
+// MarkSessionTurnCancelled records a user-requested cancel so the completion
+// path stays silent instead of notifying an interruption the user caused.
+func (h *StreamHub) MarkSessionTurnCancelled(sessionKey string) {
+	if blank(sessionKey) {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	state := h.ensurePendingSessionLocked(sessionKey)
+	state.Cancelled = true
+	state.UpdatedAt = time.Now().UTC()
 }
 
 func (h *StreamHub) AppendReplyEvent(sessionKey string, event StreamEvent) StreamEvent {
@@ -805,6 +850,8 @@ func (h *StreamHub) ClearSessionPending(sessionKey string) {
 		state.User = nil
 		state.ReplyingList = nil
 		state.Summary = ""
+		state.TerminalError = ""
+		state.Cancelled = false
 		state.UpdatedAt = time.Now().UTC()
 	} else {
 		delete(h.pendingSessions, sessionKey)

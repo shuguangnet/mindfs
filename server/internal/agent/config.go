@@ -96,6 +96,11 @@ type Definition struct {
 
 	// ProbeArgs are arguments for availability check.
 	ProbeArgs []string `json:"probeArgs,omitempty"`
+
+	// VersionCommand is a shell command that prints the installed agent version.
+	// Defaults to "<command> --version" when empty. It runs with a short timeout
+	// during install probing and its output is cached.
+	VersionCommand string `json:"versionCommand,omitempty"`
 }
 
 type ConfigBackupDefaults struct {
@@ -337,6 +342,9 @@ func mergeAgentDefinition(base Definition, override Definition) Definition {
 	}
 	if len(merged.ProbeArgs) == 0 {
 		merged.ProbeArgs = append([]string(nil), base.ProbeArgs...)
+	}
+	if merged.VersionCommand == "" {
+		merged.VersionCommand = base.VersionCommand
 	}
 	return merged
 }
