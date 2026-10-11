@@ -408,7 +408,7 @@ function ModePanel({
   );
 }
 
-function LocalPanel({
+export function LocalPanel({
   localState,
   onLocalNavigate,
   onLocalSelect,

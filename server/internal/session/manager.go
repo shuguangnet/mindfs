@@ -32,7 +32,7 @@ const (
 	exchangeFileTpl  = "sessions/%s.jsonl"
 	auxFileTpl       = "sessions/%s.aux.jsonl"
 	selectSessionSQL = `
-	SELECT key, type, parent_session_key, parent_tool_call_id, source, task_id, model, agent, mode, effort, fast_service, shell, plan_mode, name, related_files_json, related_worktree_json, last_context_window_total_tokens, last_context_window_model_context_window, pinned_at, created_at, updated_at, closed_at
+	SELECT key, type, parent_session_key, parent_tool_call_id, source, task_id, model, agent, mode, effort, fast_service, shell, plan_mode, name, related_files_json, related_worktree_json, last_context_window_total_tokens, last_context_window_model_context_window, pinned_at, created_at, updated_at, closed_at, history_revision
 	FROM sessions`
 	deleteSessionSQL = `
 DELETE FROM sessions
@@ -1265,6 +1265,9 @@ func (m *Manager) createSessionUnsafe(session *Session) error {
 }
 
 func (m *Manager) getSessionUnsafe(key string, afterSeq int) (*Session, error) {
+	if err := m.recoverHistoryEdit(key); err != nil {
+		return nil, err
+	}
 	if afterSeq <= 0 {
 		if cached, ok := m.sessions[key]; ok && cached != nil {
 			return cached, nil
@@ -1529,6 +1532,7 @@ func (m *Manager) loadExchanges(key string, afterSeq int) ([]Exchange, int, erro
 		return nil, 0, err
 	}
 	exchanges := make([]Exchange, 0)
+	indexBySeq := make(map[int]int)
 	total := 0
 	scanner := jsonlScanner(payload)
 	for scanner.Scan() {
@@ -1549,6 +1553,21 @@ func (m *Manager) loadExchanges(key string, afterSeq int) ([]Exchange, int, erro
 		if afterSeq > 0 && entry.Seq <= afterSeq {
 			continue
 		}
+		if index, exists := indexBySeq[entry.Seq]; exists {
+			previous := exchanges[index]
+			// Prefer a completed reply over an empty placeholder, regardless of
+			// append order. Otherwise the last record in the log wins. Keep the
+			// original position and seq so aux references and cursors stay valid.
+			if strings.TrimSpace(previous.Content) != "" && strings.TrimSpace(entry.Content) == "" {
+				continue
+			}
+			if strings.TrimSpace(previous.Content) != "" && previous.Content != entry.Content {
+				log.Printf("[session/load] conflicting duplicate seq session=%s seq=%d; using last non-empty record", key, entry.Seq)
+			}
+			exchanges[index] = entry
+			continue
+		}
+		indexBySeq[entry.Seq] = len(exchanges)
 		exchanges = append(exchanges, entry)
 	}
 	if err := scanner.Err(); err != nil {
@@ -1829,6 +1848,8 @@ func openSessionMetaDB(dbFile string) (db *sql.DB, err error) {
 		return nil, err
 	}
 	for _, stmt := range []string{
+		`CREATE TABLE IF NOT EXISTS session_edit_journal (session_key TEXT PRIMARY KEY, history BLOB, auxiliary BLOB)`,
+		`ALTER TABLE sessions ADD COLUMN history_revision INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE sessions ADD COLUMN parent_session_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN parent_tool_call_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN source TEXT NOT NULL DEFAULT ''`,
@@ -1985,6 +2006,7 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		createdAtRaw        string
 		updatedAtRaw        string
 		closedAtRaw         sql.NullString
+		historyRevision     int
 	)
 	if err := scanner.Scan(
 		&key,
@@ -2009,10 +2031,12 @@ func scanSessionMetaRow(scanner rowScanner) (*Session, error) {
 		&createdAtRaw,
 		&updatedAtRaw,
 		&closedAtRaw,
+		&historyRevision,
 	); err != nil {
 		return nil, err
 	}
 	session := &Session{
+		HistoryRevision:  historyRevision,
 		Key:              key,
 		Type:             typ,
 		ParentSessionKey: parentSessionKey,

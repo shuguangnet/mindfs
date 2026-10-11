@@ -7,6 +7,7 @@ import {
   Modal,
   Popconfirm,
   Space,
+  Spin,
   Typography,
 } from "antd";
 import {
@@ -36,6 +37,10 @@ import { useI18n, type MessageKey, type MessageParams } from "../i18n";
 
 type LoginProps = {
   onOpenNode: (nodeURL: string) => void;
+  repository?: {
+    load: () => Promise<LauncherNode[]>;
+    save: (nodes: LauncherNode[]) => Promise<LauncherNode[]>;
+  };
 };
 
 const LAUNCHER_BG =
@@ -58,7 +63,7 @@ function normalizeNodeURL(value: string): string {
   const withScheme = /^[a-z]+:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   try {
     const parsed = new URL(withScheme);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password) {
       return "";
     }
     parsed.hash = "";
@@ -139,9 +144,13 @@ function appUpdateSummary(state: AppUpdateState, t: (key: MessageKey, params?: M
   return "";
 }
 
-export function Login({ onOpenNode }: LoginProps): ReactElement {
+export function Login({ onOpenNode, repository }: LoginProps): ReactElement {
   const { t } = useI18n();
-  const [nodes, setNodes] = useState<LauncherNode[]>(() => sortNodes(getStoredLauncherNodes()));
+  const [nodes, setNodes] = useState<LauncherNode[]>(() => repository ? [] : sortNodes(getStoredLauncherNodes()));
+  const [busy, setBusy] = useState(!!repository);
+  const [loaded, setLoaded] = useState(!repository);
+  const [storageError, setStorageError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [composerOpen, setComposerOpen] = useState(false);
   const [nodeName, setNodeName] = useState("");
   const [nodeURL, setNodeURL] = useState("");
@@ -153,11 +162,46 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
   const [appUpdateNotesOpen, setAppUpdateNotesOpen] = useState(false);
   const [appUpdateBusy, setAppUpdateBusy] = useState(false);
 
-  function persistNodes(nextNodes: LauncherNode[]): void {
+  useEffect(() => {
+    if (!repository) return;
+    let cancelled = false;
+    setBusy(true);
+    setStorageError("");
+    void repository.load().then((items) => {
+      if (!cancelled) {
+        setNodes(sortNodes(items));
+        setLoaded(true);
+      }
+    }).catch((error) => {
+      if (!cancelled) {
+        setStorageError(String(error instanceof Error ? error.message : error));
+      }
+    }).finally(() => {
+      if (!cancelled) setBusy(false);
+    });
+    return () => { cancelled = true; };
+  }, [repository, loadAttempt]);
+
+  async function persistNodes(nextNodes: LauncherNode[]): Promise<boolean> {
+    if (busy || !loaded) return false;
     const sorted = sortNodes(nextNodes);
+    if (repository) {
+      setBusy(true);
+      setStorageError("");
+      try {
+        setNodes(sortNodes(await repository.save(sorted)));
+        return true;
+      } catch (error) {
+        setStorageError(String(error instanceof Error ? error.message : error));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    }
     setNodes(sorted);
     setStoredLauncherNodes(sorted);
     void setNativeLauncherNodes(sorted);
+    return true;
   }
 
   function openNode(node: LauncherNode): void {
@@ -203,7 +247,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
     setEditingNodeName("");
   }
 
-  function handleSaveNode(event: React.FormEvent): void {
+  async function handleSaveNode(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     const trimmedName = nodeName.trim();
     const normalizedURL = normalizeNodeURL(nodeURL);
@@ -226,7 +270,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
       url: normalizedURL,
       createdAt,
     };
-    persistNodes([nextNode, ...nodes]);
+    if (!await persistNodes([nextNode, ...nodes])) return;
     setNodeName("");
     setNodeURL("");
     setFormError("");
@@ -272,6 +316,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
   }
 
   useEffect(() => {
+    if (repository) return;
     let cancelled = false;
     const timers: number[] = [];
 
@@ -333,7 +378,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
       window.removeEventListener("mindfs:launcher-nodes-updated", handleLauncherNodesUpdated);
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, []);
+  }, [repository]);
 
   useEffect(() => {
     if (!isUpdatableNativeRuntime() || nodes.length === 0) {
@@ -442,12 +487,54 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
           </div>
         </Card>
 
+        {busy ? (
+          <div
+            role="status"
+            aria-busy="true"
+            style={{ display: "flex", alignItems: "center", gap: "8px", color: MUTED, fontSize: "13px" }}
+          >
+            <Spin size="small" />
+            {t("common.loading")}
+          </div>
+        ) : null}
+        {storageError ? <Alert type="error" showIcon message={storageError} /> : null}
+        {!loaded && !busy ? (
+          <Button
+            type="link"
+            style={{ paddingLeft: 0, alignSelf: "flex-start" }}
+            onClick={() => setLoadAttempt((value) => value + 1)}
+          >
+            {t("nodes.retry")}
+          </Button>
+        ) : null}
+        {repository && loaded && nodes.length === 0 ? (
+          <Card
+            style={{
+              width: "100%",
+              border: `1px solid ${BORDER}`,
+              background: SURFACE,
+              boxShadow: SHADOW,
+            }}
+            styles={{ body: { padding: 18 } }}
+          >
+            <Text type="secondary">{t("nodes.empty")}</Text>
+          </Card>
+        ) : null}
+
         {nodes.map((node) => (
           <Card
             hoverable={editingNodeID !== node.id}
             key={node.id}
+            role={editingNodeID === node.id ? undefined : "link"}
+            tabIndex={editingNodeID === node.id ? undefined : 0}
+            onKeyDown={(event) => {
+              if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ") && !busy) {
+                event.preventDefault();
+                openNode(node);
+              }
+            }}
             onClick={() => {
-              if (editingNodeID !== node.id) {
+              if (!busy && editingNodeID !== node.id) {
                 openNode(node);
               }
             }}
@@ -688,6 +775,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
           block
           icon={<PlusOutlined />}
           aria-label="新增节点"
+          disabled={busy || !loaded}
           onClick={() => {
             setComposerOpen(true);
             setFormError("");
@@ -757,6 +845,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
           />
 
           {formError ? <Alert type="error" showIcon message={formError} /> : null}
+          {storageError ? <Alert type="error" showIcon message={storageError} /> : null}
 
           <Space.Compact block>
             <Button
@@ -771,6 +860,7 @@ export function Login({ onOpenNode }: LoginProps): ReactElement {
             <Button
               type="primary"
               htmlType="submit"
+              disabled={busy || !loaded}
               style={{ width: "50%" }}
             >
               保存

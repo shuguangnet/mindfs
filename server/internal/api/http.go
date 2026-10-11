@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mindfs/server/internal/agent"
@@ -42,10 +43,11 @@ import (
 
 // HTTPHandler provides REST endpoints for health, tree, file, and action.
 type HTTPHandler struct {
-	AppContext    *AppContext
-	StaticDir     string
-	Version       string
-	LocalCLIToken string
+	AppContext     *AppContext
+	StaticDir      string
+	Version        string
+	LocalCLIToken  string
+	pairingLimiter pairingLimiter
 }
 
 type protectedResponseWriter struct {
@@ -67,6 +69,9 @@ const (
 	e2eeTSHeaderName      = "X-MindFS-TS"
 	localCLIHeaderName    = "X-MindFS-Local-CLI-Token"
 	requestProofMaxSkew   = 5 * time.Minute
+	pairingInterval       = 3 * time.Second
+	pairingMaxInFlight    = 4
+	pairingRequestTimeout = 10 * time.Second
 )
 
 var indexResourceRefPattern = regexp.MustCompile(`(?i)\b(?:src|href)\s*=\s*["']([^"']+)["']`)
@@ -239,10 +244,16 @@ func isLocalCLIPath(r *http.Request) bool {
 	if strings.HasSuffix(r.URL.Path, "/approve-plan") {
 		return false
 	}
+	if r.Method == http.MethodPost {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
+		if len(parts) == 4 && parts[0] == "api" && parts[1] == "sessions" && parts[2] != "" && parts[3] == "messages" {
+			return true
+		}
+	}
 	if r.URL.Path == "/api/task-groups" || strings.HasPrefix(r.URL.Path, "/api/task-groups/") {
 		return r.Method == http.MethodGet || r.Method == http.MethodPost
 	}
-	if r.Method == http.MethodGet && (r.URL.Path == "/api/agents" || r.URL.Path == "/api/task-templates" || r.URL.Path == "/api/tasks") {
+	if r.Method == http.MethodGet && (r.URL.Path == "/api/agents" || r.URL.Path == "/api/task-templates" || r.URL.Path == "/api/tasks" || r.URL.Path == "/api/relay/status") {
 		return true
 	}
 	if r.Method == http.MethodPost && r.URL.Path == "/api/tasks" {
@@ -301,6 +312,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/file", h.handleFile)
 	r.Put("/api/file", h.protectedEndpoint(h.handleFileSave))
 	r.Post("/api/file", h.protectedEndpoint(h.handleFileCreate))
+	r.Post("/api/file/operation", h.protectedEndpoint(h.handleFileOperation))
 	r.Get("/api/git/status", h.protectedEndpoint(h.handleGitStatus))
 	r.Get("/api/git/diff", h.protectedEndpoint(h.handleGitDiff))
 	r.Get("/api/git/history", h.protectedEndpoint(h.handleGitHistory))
@@ -331,6 +343,8 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Delete("/api/prompts", h.protectedEndpoint(h.handlePromptDelete))
 	r.Get("/api/sessions", h.protectedEndpoint(h.handleSessions))
 	r.Get("/api/preferences/session-naming", h.protectedEndpoint(h.handleSessionNamingPreferenceGet))
+	r.Get("/api/nodes", h.protectedEndpoint(h.handleLauncherNodes))
+	r.Put("/api/nodes", h.protectedEndpoint(h.handleLauncherNodes))
 	r.Put("/api/preferences/session-naming", h.protectedEndpoint(h.handleSessionNamingPreferencePut))
 	r.Get("/api/preferences/idle-session-resource-release", h.protectedEndpoint(h.handleIdleSessionResourceReleasePreferenceGet))
 	r.Put("/api/preferences/idle-session-resource-release", h.protectedEndpoint(h.handleIdleSessionResourceReleasePreferencePut))
@@ -348,6 +362,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Post("/api/sessions/import", h.protectedEndpoint(h.handleExternalSessionImport))
 	r.Post("/api/sessions/import/batch", h.protectedEndpoint(h.handleExternalSessionImportBatch))
 	r.Post("/api/sessions/fork", h.protectedEndpoint(h.handleSessionFork))
+	r.Post("/api/sessions/edit", h.protectedEndpoint(h.handleSessionEdit))
 	r.Get("/api/sessions/{key}/toolcalls/{callID}", h.protectedEndpoint(h.handleSessionToolCallGet))
 	r.Post("/api/sessions/{key}/sync", h.protectedEndpoint(h.handleSessionSync))
 	r.Post("/api/sessions/{key}/export-native", h.protectedEndpoint(h.handleSessionExportNative))
@@ -355,6 +370,8 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Post("/api/backup/import", h.protectedEndpoint(h.handleBackupImport))
 	r.Post("/api/backup/apply", h.protectedEndpoint(h.handleBackupApply))
 	r.Get("/api/sessions/{key}", h.protectedEndpoint(h.handleSessionGet))
+	r.Get("/api/sessions/{key}/log-path", h.protectedEndpoint(h.handleSessionLogPathGet))
+	r.Post("/api/sessions/{key}/messages", h.protectedEndpoint(h.handleSessionUserMessage))
 	r.Get("/api/sessions/{key}/related-files", h.protectedEndpoint(h.handleSessionRelatedFilesGet))
 	r.Post("/api/sessions/{key}/pin", h.protectedEndpoint(h.handleSessionPin))
 	r.Post("/api/sessions/{key}/rename", h.protectedEndpoint(h.handleSessionRename))
@@ -863,6 +880,7 @@ func (h *HTTPHandler) handleExternalSessionImportBatch(w http.ResponseWriter, r 
 }
 
 func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
+	historyRevision, _ := strconv.Atoi(r.URL.Query().Get("history_revision"))
 	rootID := r.URL.Query().Get("root")
 	key := chi.URLParam(r, "key")
 	if strings.TrimSpace(key) == "" {
@@ -888,13 +906,17 @@ func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out, err := uc.GetSession(r.Context(), usecase.GetSessionInput{
-		RootID: rootID,
-		Key:    key,
-		Seq:    afterSeq,
+		RootID:          rootID,
+		Key:             key,
+		Seq:             afterSeq,
+		HistoryRevision: historyRevision,
 	})
 	if err != nil {
 		respondError(w, http.StatusNotFound, err)
 		return
+	}
+	if out.HistoryRevision != historyRevision {
+		afterSeq = 0
 	}
 	contextWindow, _ := uc.GetSessionContextWindow(r.Context(), usecase.GetSessionContextWindowInput{
 		RootID: rootID,
@@ -908,7 +930,20 @@ func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, h.sessionResponse(out, pendingUser, contextWindow, exchangeAux))
 }
 
+func (h *HTTPHandler) handleSessionLogPathGet(w http.ResponseWriter, r *http.Request) {
+	path, err := h.service().GetSessionLogPath(r.Context(), usecase.GetSessionInput{
+		RootID: r.URL.Query().Get("root"),
+		Key:    chi.URLParam(r, "key"),
+	})
+	if err != nil {
+		respondError(w, http.StatusNotFound, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"path": path})
+}
+
 func (h *HTTPHandler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
+	historyRevision, _ := strconv.Atoi(r.URL.Query().Get("history_revision"))
 	rootID := r.URL.Query().Get("root")
 	key := chi.URLParam(r, "key")
 	if strings.TrimSpace(key) == "" {
@@ -930,13 +965,17 @@ func (h *HTTPHandler) handleSessionSync(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	out, err := uc.GetSession(r.Context(), usecase.GetSessionInput{
-		RootID: rootID,
-		Key:    key,
-		Seq:    afterSeq,
+		RootID:          rootID,
+		Key:             key,
+		Seq:             afterSeq,
+		HistoryRevision: historyRevision,
 	})
 	if err != nil {
 		respondError(w, http.StatusNotFound, err)
 		return
+	}
+	if out.HistoryRevision != historyRevision {
+		afterSeq = 0
 	}
 	contextWindow, _ := uc.GetSessionContextWindow(r.Context(), usecase.GetSessionContextWindowInput{
 		RootID: rootID,
@@ -1052,6 +1091,7 @@ func (h *HTTPHandler) handleSessionFork(w http.ResponseWriter, r *http.Request) 
 		Seq:    req.Seq,
 	})
 	if err != nil {
+		log.Printf("[session/fork] failed root=%s parent=%s seq=%d err=%v", req.RootID, req.SessionKey, req.Seq, err)
 		respondError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -1260,6 +1300,7 @@ func (h *HTTPHandler) sessionResponse(
 		"name":                s.Name,
 		"exchanges":           exchanges,
 		"exchange_aux":        auxPayload,
+		"history_revision":    s.HistoryRevision,
 		"related_files":       s.RelatedFiles,
 		"related_worktree":    s.RelatedWorktree,
 		"context_window":      contextWindow,
@@ -2831,7 +2872,7 @@ func (h *HTTPHandler) handleRelayStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	status := h.relayStatusWithE2EE(manager.Status())
-	if !status.E2EERequired {
+	if !status.E2EERequired || h.isLocalCLIRequest(r) {
 		respondJSON(w, http.StatusOK, status)
 		return
 	}
@@ -2915,12 +2956,55 @@ func (h *HTTPHandler) handleRelayTips(w http.ResponseWriter, _ *http.Request) {
 	respondJSON(w, http.StatusOK, h.AppContext.GetRelayTipsService().Get())
 }
 
+// pairingLimiter bounds work per handler, without retaining client identities or
+// authentication failures. Admitted requests are spaced at least three seconds apart.
+type pairingLimiter struct {
+	mu       sync.Mutex
+	next     time.Time
+	inFlight int
+}
+
+func (l *pairingLimiter) begin(now time.Time) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delay := max(0, l.next.Sub(now))
+	if l.inFlight >= pairingMaxInFlight {
+		delay = max(delay, time.Second)
+	}
+	if delay > 0 {
+		return false, delay
+	}
+	l.next = now.Add(pairingInterval)
+	l.inFlight++
+	return true, 0
+}
+
+func (l *pairingLimiter) finish() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.inFlight--
+}
+
 func (h *HTTPHandler) handleE2EEOpen(w http.ResponseWriter, r *http.Request) {
+	// Keep the deadline through net/http's post-handler body drain, including
+	// rejected requests. net/http resets it for the next keep-alive request.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(pairingRequestTimeout))
+	w.Header().Set("Cache-Control", "no-store")
 	manager := h.AppContext.GetE2EEManager()
 	if manager == nil || !manager.Enabled() {
 		respondError(w, http.StatusForbidden, errServiceUnavailable("e2ee_required"))
 		return
 	}
+	if allowed, delay := h.pairingLimiter.begin(time.Now()); !allowed {
+		seconds := max(1, int((delay+time.Second-1)/time.Second))
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		respondJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":       "e2ee_rate_limited",
+			"retry_after": seconds,
+		})
+		return
+	}
+	defer h.pairingLimiter.finish()
 	var req struct {
 		ClientID    string `json:"client_id"`
 		NodeID      string `json:"node_id"`
