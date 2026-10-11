@@ -378,3 +378,92 @@ func makeEventsChannel() <-chan codexsdk.ThreadEvent {
 	close(events)
 	return events
 }
+
+func TestHandleStreamedEventsEmptyCompletedTurnHoldsMessageDone(t *testing.T) {
+	s := &session{sessionKey: "test-session"}
+	var updates []agenttypes.Event
+	s.OnUpdate(func(event agenttypes.Event) {
+		updates = append(updates, event)
+	})
+
+	// A completed turn that never delivered an assistant message (aborted
+	// turn surfaced as completed, or an upstream failure without items) must
+	// not emit message_done: that would make the session layer persist an
+	// empty "successful" reply.
+	events := make(chan codexsdk.ThreadEvent, 2)
+	events <- &codexsdk.TurnCompletedEvent{}
+	close(events)
+	if err := s.handleStreamedEvents(events, true); err != nil {
+		t.Fatalf("empty completed turn should not fail the stream, got %v", err)
+	}
+	for _, update := range updates {
+		if update.Type == agenttypes.EventTypeMessageDone {
+			t.Fatalf("message_done emitted for turn without assistant text: %#v", update)
+		}
+	}
+
+	// Background subscriptions keep message_done so replay UI stays consistent.
+	updates = nil
+	events = make(chan codexsdk.ThreadEvent, 2)
+	events <- &codexsdk.TurnCompletedEvent{}
+	close(events)
+	if err := s.handleStreamedEvents(events, false); err != nil {
+		t.Fatalf("background stream should not fail, got %v", err)
+	}
+	sawDone := false
+	for _, update := range updates {
+		if update.Type == agenttypes.EventTypeMessageDone {
+			sawDone = true
+		}
+	}
+	if !sawDone {
+		t.Fatal("background subscription should still emit message_done")
+	}
+}
+
+func TestHandleStreamedEventsCompletedTurnWithTextEmitsMessageDone(t *testing.T) {
+	s := &session{sessionKey: "test-session"}
+	var updates []agenttypes.Event
+	s.OnUpdate(func(event agenttypes.Event) {
+		updates = append(updates, event)
+	})
+
+	events := make(chan codexsdk.ThreadEvent, 3)
+	events <- &codexsdk.ItemCompletedEvent{Item: &codexsdk.AgentMessageItem{ID: "m1", Type: "agentMessage", Text: "hello"}}
+	events <- &codexsdk.TurnCompletedEvent{}
+	close(events)
+	if err := s.handleStreamedEvents(events, true); err != nil {
+		t.Fatalf("normal turn should not fail, got %v", err)
+	}
+	sawChunk, sawDone := false, false
+	for _, update := range updates {
+		switch update.Type {
+		case agenttypes.EventTypeMessageChunk:
+			sawChunk = true
+		case agenttypes.EventTypeMessageDone:
+			sawDone = true
+		}
+	}
+	if !sawChunk || !sawDone {
+		t.Fatalf("updates = %#v, want message chunk and message_done", updates)
+	}
+}
+
+func TestHandleStreamedEventsSwallowsUserMessageEcho(t *testing.T) {
+	s := &session{sessionKey: "test-session"}
+	var updates []agenttypes.Event
+	s.OnUpdate(func(event agenttypes.Event) {
+		updates = append(updates, event)
+	})
+
+	events := make(chan codexsdk.ThreadEvent, 2)
+	events <- &codexsdk.ItemStartedEvent{Item: &codexsdk.UserMessageItem{ID: "u1", Type: "userMessage", Text: "1111"}}
+	events <- &codexsdk.ItemCompletedEvent{Item: &codexsdk.UserMessageItem{ID: "u1", Type: "userMessage", Text: "1111"}}
+	close(events)
+	if err := s.handleStreamedEvents(events, false); err != nil {
+		t.Fatalf("user message echo should not fail, got %v", err)
+	}
+	if len(updates) != 0 {
+		t.Fatalf("user message echo should not emit updates, got %#v", updates)
+	}
+}

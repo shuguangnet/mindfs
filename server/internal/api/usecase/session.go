@@ -2824,6 +2824,12 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	agentExchangeCtx := session.WithExchangeTokenUsage(exchangeCtx, turnTokenUsage)
 	if sendErr != nil && !isCanceledTurnError(sendErr) {
 		agentExchangeCtx = session.WithExchangeError(agentExchangeCtx, sendErr.Error())
+	} else if sendErr != nil && strings.TrimSpace(responseText) == "" {
+		// A canceled turn that never produced any output would otherwise be
+		// persisted as a silent empty assistant reply, which looks like the
+		// agent hung ("no response"). Record an explicit cancel marker so the
+		// transcript shows what actually happened. Partial replies are kept.
+		agentExchangeCtx = session.WithExchangeError(agentExchangeCtx, "turn canceled before the model replied")
 	}
 	if err := manager.UpdateModel(ctx, current, resolvedModel); err != nil {
 		return err

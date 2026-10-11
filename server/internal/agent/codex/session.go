@@ -316,6 +316,7 @@ func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent, requi
 	textByID := map[string]string{}
 	turnCompleted := false
 	lastErrorNotice := ""
+	sawAssistantText := false
 	for event := range events {
 		raw, _ := json.Marshal(event)
 		switch e := event.(type) {
@@ -358,7 +359,9 @@ func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent, requi
 				logUnhandledEvent(s.sessionKey, "item.updated", raw)
 				continue
 			}
-			s.emitMessageDelta(msg, textByID)
+			if s.emitMessageDelta(msg, textByID) {
+				sawAssistantText = true
+			}
 		case *codexsdk.ItemCompletedEvent:
 			s.logRawToolItem(e.Item)
 			if toolCall, ok := mapToolItem(e.Item, false); ok {
@@ -370,7 +373,9 @@ func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent, requi
 			}
 			msg, ok := e.Item.(*codexsdk.AgentMessageItem)
 			if ok {
-				s.emitMessageDelta(msg, textByID)
+				if s.emitMessageDelta(msg, textByID) {
+					sawAssistantText = true
+				}
 				continue
 			}
 			if thought, ok := e.Item.(*codexsdk.ReasoningItem); ok {
@@ -385,6 +390,15 @@ func (s *session) handleStreamedEvents(events <-chan codexsdk.ThreadEvent, requi
 			turnCompleted = true
 			s.updateThreadIDFromThread()
 			log.Printf("[agent/codex] output.done session=%s", s.sessionKey)
+			if requireTurnCompletion && !sawAssistantText {
+				// The turn ended without a single assistant message (for example an
+				// aborted turn surfaced as completed, or an upstream failure that
+				// produced no items). Emitting message_done would make the session
+				// layer treat this as a successful (empty) reply. Hold the event back
+				// so the "no content" guard can surface a real error instead.
+				log.Printf("[agent/codex] output.empty session=%s", s.sessionKey)
+				continue
+			}
 			contextWindow, _ := s.ContextWindow(context.Background())
 			tokenUsage := codexTokenUsage(e.Usage)
 			s.emit(types.Event{
@@ -451,6 +465,11 @@ func rawErrorMessage(raw json.RawMessage) string {
 
 func (s *session) handleNonToolItem(item codexsdk.ThreadItem, started bool) bool {
 	switch v := item.(type) {
+	case *codexsdk.UserMessageItem:
+		// The app server echoes the submitted prompt back as a userMessage
+		// item; it is already recorded on our side, so swallow it quietly.
+		_ = v
+		return true
 	case *codexsdk.ReasoningItem:
 		if started {
 			return true
@@ -901,13 +920,14 @@ func (s *session) ListCommands(ctx context.Context) (types.CommandList, error) {
 	return types.CommandList{Commands: commands}, nil
 }
 
-func (s *session) emitMessageDelta(msg *codexsdk.AgentMessageItem, textByID map[string]string) {
+func (s *session) emitMessageDelta(msg *codexsdk.AgentMessageItem, textByID map[string]string) bool {
 	delta := messageDelta(textByID[msg.ID], msg.Text)
 	textByID[msg.ID] = msg.Text
 	if delta == "" {
-		return
+		return false
 	}
 	s.emit(types.Event{Type: types.EventTypeMessageChunk, SessionID: s.SessionID(), Data: types.MessageChunk{Content: delta}})
+	return true
 }
 
 func (s *session) emit(event types.Event) {

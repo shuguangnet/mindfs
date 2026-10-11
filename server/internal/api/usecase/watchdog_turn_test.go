@@ -174,3 +174,74 @@ func (r *watchdogTestRegistry) GetFileWatcher(string, *session.Manager) (*rootfs
 func (r *watchdogTestRegistry) ReleaseFileWatcher(string, string) {}
 
 func (r *watchdogTestRegistry) GetUsageStore() *usage.Store { return nil }
+
+// TestSendMessageUserCancelPersistsVisibleMarker reproduces the "codex no
+// response" symptom: a turn canceled before any output used to be persisted as
+// a silent empty assistant reply. It must now carry an explicit cancel marker.
+func TestSendMessageUserCancelPersistsVisibleMarker(t *testing.T) {
+	fakeAgent, err := filepath.Abs(filepath.Join("testdata", "fake_acp_agent.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := turnIdleWatchdog
+	turnIdleWatchdog = func() time.Duration { return 10 * time.Minute }
+	defer func() { turnIdleWatchdog = prev }()
+
+	root := rootfs.NewRootInfo("mindfs", "mindfs", t.TempDir())
+	manager := session.NewManager(root)
+	pool := agent.NewPool(agent.Config{
+		Shells: []agent.Shell{{Command: "sh", Args: []string{"-lc"}}},
+		Agents: []agent.Definition{
+			{
+				Name:     "fake-hang",
+				Command:  "python3",
+				Args:     []string{fakeAgent},
+				Protocol: agent.ProtocolACP,
+			},
+		},
+	})
+	registry := &watchdogTestRegistry{root: root, manager: manager, pool: pool}
+	service := Service{Registry: registry}
+	defer pool.CloseAll()
+
+	created, err := manager.Create(context.Background(), session.CreateInput{Type: session.TypeChat, Agent: "fake-hang", Name: "Cancel"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(800 * time.Millisecond)
+		cancel()
+	}()
+	sendErr := service.SendMessage(ctx, SendMessageInput{
+		RootID:  root.ID,
+		Key:     created.Key,
+		Agent:   "fake-hang",
+		Content: "hello there, please answer",
+	})
+	cancel()
+	if sendErr != nil {
+		t.Fatalf("SendMessage = %v, want nil for user-canceled turn", sendErr)
+	}
+
+	got, err := manager.Get(context.Background(), created.Key, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var agentExchange *session.Exchange
+	for i := range got.Exchanges {
+		if got.Exchanges[i].Role == "agent" {
+			agentExchange = &got.Exchanges[i]
+		}
+	}
+	if agentExchange == nil {
+		t.Fatalf("no agent exchange persisted: %+v", got.Exchanges)
+	}
+	if strings.TrimSpace(agentExchange.Error) == "" {
+		t.Fatalf("canceled empty turn persisted without marker: %+v", agentExchange)
+	}
+	if !strings.Contains(agentExchange.Error, "canceled") {
+		t.Fatalf("agent exchange error = %q, want cancel marker", agentExchange.Error)
+	}
+}
