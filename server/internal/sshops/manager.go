@@ -338,3 +338,19 @@ func looksLikePrivateKey(content string) bool {
 	}
 	return strings.Contains(head, "-----BEGIN")
 }
+
+// Rematerialize reloads the store from disk and regenerates the managed SSH
+// configuration. Used after an external restore (backup import) replaced the
+// encrypted store under a running instance.
+func (m *Manager) Rematerialize() error {
+	m.store.mu.Lock()
+	defer m.store.mu.Unlock()
+	servers, err := m.store.loadLocked()
+	if err != nil {
+		return err
+	}
+	if warn := m.materialize(servers); warn != "" {
+		return errf(ErrCodeMaterialize, "%s", warn)
+	}
+	return nil
+}

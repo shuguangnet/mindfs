@@ -35,6 +35,7 @@ import {
   type TokenUsage,
   type QueuedUserMessage,
 } from "./services/session";
+import { exportSessionNative } from "./services/backup";
 import { buildClientContext } from "./services/context";
 import { e2eeService, type E2EEState } from "./services/e2ee";
 import {
@@ -5918,6 +5919,28 @@ export function App({ onGoHome }: AppProps) {
       setDrawerSessionForRoot,
       setMultiProjectSessionPending,
     ],
+  );
+
+  const handleExportNativeSession = useCallback(
+    async (session: SessionItem) => {
+      const sessionKey = session?.key || session?.session_key;
+      const rootID =
+        (session?.root_id as string | undefined) || currentRootIdRef.current;
+      if (!rootID || !sessionKey) return false;
+      try {
+        const result = await exportSessionNative(rootID, sessionKey, "write");
+        console.info(
+          result.existed
+            ? t("session.exportNativeExisted", { path: result.path || "" })
+            : t("session.exportNativeDone", { path: result.path || "" }),
+        );
+        return true;
+      } catch (err) {
+        reportError("session.sync_failed", String((err as Error)?.message || t("session.exportNativeFailed")));
+        return false;
+      }
+    },
+    [t],
   );
 
   const handleRenameSession = useCallback(
@@ -14200,6 +14223,7 @@ export function App({ onGoHome }: AppProps) {
         onPin={handlePinSession}
         onRename={handleRenameSession}
         onDelete={handleDeleteSession}
+        onExportNative={handleExportNativeSession}
         onProjectClick={(rootId) => {
           actionHandlers.open_dir({
             path: rootId,
@@ -14293,6 +14317,7 @@ export function App({ onGoHome }: AppProps) {
         onPin={handlePinSession}
         onRename={handleRenameSession}
         onDelete={handleDeleteSession}
+        onExportNative={handleExportNativeSession}
         onLoadChildren={
           sessionSearchOpen && sessionSearchResultsMode
             ? undefined

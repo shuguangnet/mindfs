@@ -29,6 +29,7 @@ import { SymlinkBadge } from "./SymlinkBadge";
 import { RelayLocalServicesDialog } from "./RelayLocalServicesDialog";
 import { RemoteServersDialog } from "./RemoteServersDialog";
 import { SSHServersDialog } from "./SSHServersDialog";
+import { BackupDialog } from "./BackupDialog";
 import { fetchAgentCatalog, fetchAgents, type AgentStatus } from "../services/agents";
 import {
   createAgentAPIProvider,
@@ -1624,6 +1625,7 @@ export function FileTree({
   const [relayServicesOpen, setRelayServicesOpen] = React.useState(false);
   const [remoteServersOpen, setRemoteServersOpen] = React.useState(false);
   const [sshServersOpen, setSSHServersOpen] = React.useState(false);
+  const [backupOpen, setBackupOpen] = React.useState(false);
   const [relayServicesEditing, setRelayServicesEditing] = React.useState(false);
   const [agentLifecycleAgents, setAgentLifecycleAgents] = React.useState<AgentStatus[]>([]);
   const [agentLifecycleBusy, setAgentLifecycleBusy] = React.useState(false);
@@ -1658,6 +1660,7 @@ export function FileTree({
   const relayServicesPopoverRef = React.useRef<HTMLDivElement | null>(null);
   const remoteServersPopoverRef = React.useRef<HTMLDivElement | null>(null);
   const sshServersPopoverRef = React.useRef<HTMLDivElement | null>(null);
+  const backupPopoverRef = React.useRef<HTMLDivElement | null>(null);
   const sendShortcutPopoverRef = React.useRef<HTMLDivElement | null>(null);
   const updateNotesRef = React.useRef<HTMLDivElement | null>(null);
   const createInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -2362,6 +2365,23 @@ export function FileTree({
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [remoteServersOpen]);
+
+  React.useEffect(() => {
+    if (!backupOpen) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const dialog = backupPopoverRef.current?.querySelector("[data-backup-overlay]");
+      if (dialog && event.target instanceof Node && dialog.contains(event.target)) {
+        return; // clicks inside the modal itself are handled there
+      }
+      if (!backupPopoverRef.current?.contains(event.target as Node)) {
+        setBackupOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [backupOpen]);
 
   React.useEffect(() => {
     if (!sshServersOpen) {
@@ -3299,6 +3319,28 @@ export function FileTree({
                 <button
                   type="button"
                   onClick={() => {
+                    setBackupOpen(true);
+                    setSSHServersOpen(false);
+                    setRemoteServersOpen(false);
+                    setRelayServicesOpen(false);
+                    closeAgentConfigFlow();
+                    setAgentLifecycleOpen(false);
+                    setIsMenuOpen(false);
+                    setIsAppearanceMenuOpen(false);
+                    setIsSortMenuOpen(false);
+                  }}
+                  style={fileTreeMenuButtonStyle}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <ellipse cx="12" cy="5" rx="9" ry="3" />
+                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+                    <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+                  </svg>
+                  <span>{t("backup.title")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
                     setRelayServicesOpen(true);
                     setRelayServicesEditing(false);
                     closeAgentConfigFlow();
@@ -4202,6 +4244,20 @@ export function FileTree({
               open={sshServersOpen}
               onClose={() => setSSHServersOpen(false)}
             />
+          </div>
+        ) : null}
+        {backupOpen ? (
+          <div
+            ref={backupPopoverRef}
+            style={{
+              position: "absolute",
+              top: "calc(100% + 6px)",
+              left: "8px",
+              right: "3px",
+              zIndex: 35,
+            }}
+          >
+            <BackupDialog open={backupOpen} onClose={() => setBackupOpen(false)} />
           </div>
         ) : null}
         {agentLifecycleOpen ? (

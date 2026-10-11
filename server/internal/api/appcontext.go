@@ -17,6 +17,7 @@ import (
 	"mindfs/server/internal/agent"
 	agenttypes "mindfs/server/internal/agent/types"
 	"mindfs/server/internal/api/usecase"
+	"mindfs/server/internal/backup"
 	"mindfs/server/internal/commandexec"
 	"mindfs/server/internal/e2ee"
 	"mindfs/server/internal/fs"
@@ -49,6 +50,7 @@ type AppContext struct {
 	Relay     *relay.Manager
 	Remote    *remote.Manager
 	SSHOps    *sshops.Manager
+	Backup    *backup.Manager
 	RelayTips *relay.TipsService
 	Update    *update.Service
 	GitHub    *githubimport.Service
@@ -1421,4 +1423,61 @@ func (s *AppContext) ValidateTaskAgent(stage kanban.StageTemplate) error {
 
 func (s *AppContext) TaskDeleted(root, id string) {
 	s.GetSessionStreamHub().BroadcastAll(WSResponse{Type: "task.deleted", Payload: map[string]any{"root_id": root, "task_id": id}})
+}
+
+// GetBackupManager returns the instance backup manager (nil when backup is
+// not configured).
+func (s *AppContext) GetBackupManager() *backup.Manager {
+	if s == nil {
+		return nil
+	}
+	return s.Backup
+}
+
+// InvalidateRootContext drops cached handles (session manager, watcher) for a
+// root so the next access reloads state from disk. Used after a backup
+// restore rewrote a root's metadata.
+func (s *AppContext) InvalidateRootContext(rootID string) {
+	if s == nil || strings.TrimSpace(rootID) == "" {
+		return
+	}
+	s.mu.Lock()
+	ctx, ok := s.roots[rootID]
+	if ok {
+		delete(s.roots, rootID)
+	}
+	s.mu.Unlock()
+	if ok && ctx != nil {
+		if ctx.Session != nil {
+			_ = ctx.Session.Shutdown()
+		}
+		if ctx.Watcher != nil {
+			s.ReleaseFileWatcher(rootID, "")
+		}
+	}
+}
+
+// InvalidateGlobalStores reloads machine-global stores that a backup restore
+// may have replaced on disk (currently the SSH server store + generated SSH
+// configuration).
+func (s *AppContext) InvalidateGlobalStores() {
+	if s == nil {
+		return
+	}
+	sshStore, err := sshops.NewStore()
+	if err != nil {
+		log.Printf("[backup] ssh reload store.error err=%v", err)
+		return
+	}
+	manager, err := sshops.NewManager(sshStore, sshops.Options{})
+	if err != nil {
+		log.Printf("[backup] ssh reload manager.error err=%v", err)
+		return
+	}
+	s.mu.Lock()
+	s.SSHOps = manager
+	s.mu.Unlock()
+	if err := manager.Rematerialize(); err != nil {
+		log.Printf("[backup] ssh rematerialize.warn err=%v", err)
+	}
 }

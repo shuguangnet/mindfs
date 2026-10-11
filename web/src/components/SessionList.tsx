@@ -60,6 +60,7 @@ type SessionListProps = {
   onPin?: (session: SessionItem, pinned: boolean) => Promise<boolean> | boolean;
   onRename?: (session: SessionItem, nextName: string) => Promise<boolean> | boolean;
   onDelete?: (session: SessionItem) => void;
+  onExportNative?: (session: SessionItem) => Promise<boolean> | boolean;
   onLoadChildren?: (
     session: SessionItem,
     options?: { beforeTime?: string },
@@ -124,6 +125,7 @@ type ProjectSessionListProps = {
   onPin?: (session: SessionItem, pinned: boolean) => Promise<boolean> | boolean;
   onRename?: (session: SessionItem, nextName: string) => Promise<boolean> | boolean;
   onDelete?: (session: SessionItem) => void;
+  onExportNative?: (session: SessionItem) => Promise<boolean> | boolean;
   onProjectClick?: (rootId: string) => void;
   onLoadMoreProject?: (group: ProjectSessionGroup) => Promise<void> | void;
   onLoadChildren?: (
@@ -343,6 +345,7 @@ export function SessionList({
   onPin,
   onRename,
   onDelete,
+  onExportNative,
   onLoadChildren,
   onLoadOlder,
   loadingOlder = false,
@@ -786,6 +789,7 @@ export function SessionList({
                   onPin={onPin}
                   onRename={onRename}
                   onDelete={onDelete}
+                  onExportNative={onExportNative}
                 />
               );
             })}
@@ -839,6 +843,7 @@ export function MultiProjectSessionList({
   onPin,
   onRename,
   onDelete,
+  onExportNative,
   onProjectClick,
   onLoadMoreProject,
   onLoadChildren,
@@ -1260,6 +1265,7 @@ export function MultiProjectSessionList({
                           onPin={onPin}
                           onRename={onRename}
                           onDelete={onDelete}
+                          onExportNative={onExportNative}
                         />
                       );
                     })}
@@ -1316,6 +1322,7 @@ function SessionCard({
   onPin,
   onRename,
   onDelete,
+  onExportNative,
 }: {
   session: SessionItem;
   sessionByKey: Map<string, SessionItem>;
@@ -1329,6 +1336,7 @@ function SessionCard({
   onPin?: (session: SessionItem, pinned: boolean) => Promise<boolean> | boolean;
   onRename?: (session: SessionItem, nextName: string) => Promise<boolean> | boolean;
   onDelete?: (session: SessionItem) => void;
+  onExportNative?: (session: SessionItem) => Promise<boolean> | boolean;
 }) {
   const { locale, t } = useI18n();
   const isClosed = !!session.closed_at;
@@ -1909,6 +1917,37 @@ function SessionCard({
               </span>
               {isPinned ? t("sessionList.unpin") : t("sessionList.pin")}
             </button>
+            {(session.agent || "").trim().toLowerCase() === "pi" && onExportNative ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  void onExportNative(session);
+                }}
+                style={{
+                  ...menuItemStyle,
+                  color: "var(--text-primary)",
+                }}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                {t("sessionList.exportNativePi")}
+              </button>
+            ) : null}
             <button
               type="button"
               disabled={syncing}

@@ -15,6 +15,7 @@ import (
 
 	"mindfs/server/internal/agent"
 	"mindfs/server/internal/api"
+	"mindfs/server/internal/backup"
 	"mindfs/server/internal/e2ee"
 	"mindfs/server/internal/fs"
 	"mindfs/server/internal/githubimport"
@@ -144,12 +145,15 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 		log.Printf("[usage] store.load.error err=%v", err)
 	}
 
+	backupManager := backup.NewManager(backup.AdaptRegistry(registry), backup.Options{MindfsVersion: opts.Version})
+
 	services := &api.AppContext{
 		Dirs:   registry,
 		Agents: agentPool,
 		Prober: agentProber,
 		Remote: remoteManager,
 		SSHOps: sshOpsManager,
+		Backup: backupManager,
 		Update: updateSvc,
 		Prefs:  prefs,
 		Usage:  usageStore,
@@ -162,6 +166,7 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 		Notify:  notifyscript.NewService(notifyscript.Config{Script: opts.NotifyScript}),
 	}
 	services.Scheduled = scheduled.NewService(services, services)
+	backupManager.SetInvalidator(services)
 	services.Scheduled.Start(ctx)
 	taskTemplates, err := kanban.NewTemplateStore()
 	if err != nil {
