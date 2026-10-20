@@ -46,6 +46,7 @@ type StartOptions struct {
 	E2EEConfig      E2EEConfig
 	WebPushEnabled  bool
 	NotifyScript    string
+	UITitle         string
 	UseTLS          bool
 	CertFile        string
 	KeyFile         string
@@ -184,6 +185,7 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 		AppContext: services,
 		StaticDir:  resolveStaticDir(),
 		Version:    opts.Version,
+		UITitle:    opts.UITitle,
 	}
 	wsHandler := &api.WSHandler{AppContext: services}
 

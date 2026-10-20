@@ -48,6 +48,7 @@ type HTTPHandler struct {
 	Version        string
 	LocalCLIToken  string
 	pairingLimiter pairingLimiter
+	UITitle        string
 }
 
 type protectedResponseWriter struct {
@@ -343,6 +344,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Delete("/api/prompts", h.protectedEndpoint(h.handlePromptDelete))
 	r.Get("/api/sessions", h.protectedEndpoint(h.handleSessions))
 	r.Get("/api/preferences/session-naming", h.protectedEndpoint(h.handleSessionNamingPreferenceGet))
+	r.Put("/api/preferences/model-pins", h.protectedEndpoint(h.handleModelPinsPut))
 	r.Get("/api/nodes", h.protectedEndpoint(h.handleLauncherNodes))
 	r.Put("/api/nodes", h.protectedEndpoint(h.handleLauncherNodes))
 	r.Put("/api/preferences/session-naming", h.protectedEndpoint(h.handleSessionNamingPreferencePut))
@@ -931,7 +933,7 @@ func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTPHandler) handleSessionLogPathGet(w http.ResponseWriter, r *http.Request) {
-	path, err := h.service().GetSessionLogPath(r.Context(), usecase.GetSessionInput{
+	out, err := h.service().GetSessionLogPath(r.Context(), usecase.GetSessionInput{
 		RootID: r.URL.Query().Get("root"),
 		Key:    chi.URLParam(r, "key"),
 	})
@@ -939,7 +941,10 @@ func (h *HTTPHandler) handleSessionLogPathGet(w http.ResponseWriter, r *http.Req
 		respondError(w, http.StatusNotFound, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]string{"path": path})
+	respondJSON(w, http.StatusOK, map[string]string{
+		"path":             out.Path,
+		"agent_session_id": out.AgentSessionID,
+	})
 }
 
 func (h *HTTPHandler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
@@ -1708,11 +1713,13 @@ func (h *HTTPHandler) handleFrontend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	content := indexHTML
 	if h.shouldRewriteRelayedAssets(r) {
-		w.Write([]byte(rewriteRelayedFrontendContent(indexHTML)))
-		return
+		content = rewriteRelayedFrontendContent(content)
+	} else {
+		content = renderFallbackFrontend(content, frontendAssetMissingNotice(r.URL.Path))
 	}
-	w.Write([]byte(renderFallbackFrontend(indexHTML, frontendAssetMissingNotice(r.URL.Path))))
+	w.Write(h.applyUITitle([]byte(content)))
 }
 
 func (h *HTTPHandler) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -1774,20 +1781,34 @@ func (h *HTTPHandler) serveFrontendIndex(w http.ResponseWriter, r *http.Request,
 	content, err := os.ReadFile(indexPath)
 	if err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(renderFallbackFrontend(indexHTML, frontendAssetMissingNotice(r.URL.Path))))
+		w.Write(h.applyUITitle([]byte(renderFallbackFrontend(indexHTML, frontendAssetMissingNotice(r.URL.Path)))))
 		return
 	}
 	if missing := missingFrontendIndexResource(staticDir, content); missing != "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(renderFallbackFrontend(indexHTML, frontendAssetMissingNotice(missing))))
+		w.Write(h.applyUITitle([]byte(renderFallbackFrontend(indexHTML, frontendAssetMissingNotice(missing)))))
 		return
 	}
+	content = h.applyUITitle(content)
 	if h.shouldRewriteRelayedAssets(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(rewriteRelayedFrontendContent(string(content))))
 		return
 	}
-	http.ServeFile(w, r, indexPath)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(content)
+}
+
+// applyUITitle swaps the page <title> for the -title flag (e.g. MindFS-TX) so
+// multiple instances can be told apart in the browser tab. Empty or the
+// default value leaves the served HTML untouched.
+func (h *HTTPHandler) applyUITitle(content []byte) []byte {
+	title := strings.TrimSpace(h.UITitle)
+	if title == "" || title == "MindFS" {
+		return content
+	}
+	replacement := []byte("<title>" + htmpl.HTMLEscapeString(title) + "</title>")
+	return bytes.Replace(content, []byte("<title>MindFS</title>"), replacement, 1)
 }
 
 func missingFrontendIndexResource(staticDir string, indexContent []byte) string {

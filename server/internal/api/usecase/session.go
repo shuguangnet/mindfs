@@ -747,22 +747,39 @@ type GetSessionExchangeAuxInput struct {
 	Seq    int
 }
 
-func (s *Service) GetSessionLogPath(ctx context.Context, in GetSessionInput) (string, error) {
+type SessionLogPath struct {
+	Path           string
+	AgentSessionID string
+}
+
+func (s *Service) GetSessionLogPath(ctx context.Context, in GetSessionInput) (SessionLogPath, error) {
 	if err := s.ensureRegistry(); err != nil {
-		return "", err
+		return SessionLogPath{}, err
 	}
 	manager, err := s.Registry.GetSessionManager(in.RootID)
 	if err != nil {
-		return "", err
+		return SessionLogPath{}, err
 	}
-	if _, err := manager.Get(ctx, in.Key, 0); err != nil {
-		return "", err
+	current, err := manager.Get(ctx, in.Key, 0)
+	if err != nil {
+		return SessionLogPath{}, err
 	}
 	path := manager.ExchangeLogAbsolutePath(in.Key)
 	if path == "" {
-		return "", errors.New("session log path unavailable")
+		return SessionLogPath{}, errors.New("session log path unavailable")
 	}
-	return path, nil
+	out := SessionLogPath{Path: path}
+	agentName := strings.TrimSpace(session.InferAgentFromSession(current))
+	if agentName != "" {
+		binding, err := manager.FindAgentBinding(ctx, in.Key, agentName)
+		if err != nil {
+			// 静默降级为空 agent_session_id，但留日志便于排查接力包缺 ID 的反馈
+			log.Printf("[session] FindAgentBinding failed for %s/%s: %v", in.RootID, in.Key, err)
+		} else if binding != nil {
+			out.AgentSessionID = strings.TrimSpace(binding.AgentSessionID)
+		}
+	}
+	return out, nil
 }
 
 func (s *Service) GetSessionExchangeAux(ctx context.Context, in GetSessionExchangeAuxInput) (map[int][]session.ExchangeAux, error) {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AgentIcon } from "./AgentIcon";
+import { PinIcon } from "./PinIcon";
 import { ModeIcon } from "./ModeIcon";
 import { rootBadgeButtonStyle, rootBadgeStyle } from "./rootBadgeStyle";
 import { useI18n, type Locale } from "../i18n";
@@ -65,6 +66,7 @@ type SessionListProps = {
   onScheduledTask?: (session: SessionItem) => void;
   onDelete?: (session: SessionItem) => void;
   onExportNative?: (session: SessionItem) => Promise<boolean> | boolean;
+  onHandoffPack?: (session: SessionItem) => void;
   onLoadChildren?: (
     session: SessionItem,
     options?: { beforeTime?: string },
@@ -131,6 +133,7 @@ type ProjectSessionListProps = {
   onScheduledTask?: (session: SessionItem) => void;
   onDelete?: (session: SessionItem) => void;
   onExportNative?: (session: SessionItem) => Promise<boolean> | boolean;
+  onHandoffPack?: (session: SessionItem) => void;
   onProjectClick?: (rootId: string) => void;
   onLoadMoreProject?: (group: ProjectSessionGroup) => Promise<void> | void;
   onLoadChildren?: (
@@ -238,21 +241,6 @@ function ToggleRowButton({
   );
 }
 
-function PinIcon({ pinned }: { pinned: boolean }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M0 0h24v24H0z" fill="none" />
-      <path
-        fill="currentColor"
-        fillRule="evenodd"
-        d="m16.219 4.838l2.964 2.967c2.012 2.014 3.018 3.021 2.784 4.107c-.235 1.085-1.567 1.585-4.23 2.586l-1.845.693c-.713.268-1.07.402-1.345.64q-.181.158-.322.352c-.212.297-.313.664-.515 1.4c-.46 1.672-.69 2.508-1.239 2.821c-.23.132-.492.2-.758.2c-.63 0-1.243-.614-2.469-1.84l-1.466-1.468l-1.079-1.08L5.285 14.8c-1.218-1.219-1.827-1.828-1.83-2.455a1.53 1.53 0 0 1 .203-.773c.313-.543 1.143-.772 2.803-1.23c.737-.203 1.105-.304 1.402-.517q.199-.144.36-.332c.236-.278.368-.637.63-1.355l.669-1.823c.987-2.693 1.48-4.04 2.568-4.28s2.102.774 4.129 2.803"
-        clipRule="evenodd"
-        opacity={pinned ? 1 : 0.5}
-      />
-      <path fill="currentColor" d="m3.302 21.776l4.476-4.48l-1.079-1.08l-4.476 4.48a.764.764 0 0 0 1.08 1.08" />
-    </svg>
-  );
-}
 
 function shellBadgeLabel(shell?: string): string {
   const normalized = String(shell || "").trim().replace(/\\/g, "/");
@@ -353,6 +341,7 @@ export function SessionList({
   onScheduledTask,
   onDelete,
   onExportNative,
+  onHandoffPack,
   onLoadChildren,
   onLoadOlder,
   loadingOlder = false,
@@ -798,6 +787,7 @@ export function SessionList({
                   onScheduledTask={onScheduledTask}
                   onDelete={onDelete}
                   onExportNative={onExportNative}
+                  onHandoffPack={onHandoffPack}
                 />
               );
             })}
@@ -853,6 +843,7 @@ export function MultiProjectSessionList({
   onScheduledTask,
   onDelete,
   onExportNative,
+  onHandoffPack,
   onProjectClick,
   onLoadMoreProject,
   onLoadChildren,
@@ -1276,6 +1267,7 @@ export function MultiProjectSessionList({
                           onScheduledTask={onScheduledTask}
                           onDelete={onDelete}
                           onExportNative={onExportNative}
+                          onHandoffPack={onHandoffPack}
                         />
                       );
                     })}
@@ -1334,6 +1326,7 @@ function SessionCard({
   onScheduledTask,
   onDelete,
   onExportNative,
+  onHandoffPack,
 }: {
   session: SessionItem;
   sessionByKey: Map<string, SessionItem>;
@@ -1349,6 +1342,7 @@ function SessionCard({
   onScheduledTask?: (session: SessionItem) => void;
   onDelete?: (session: SessionItem) => void;
   onExportNative?: (session: SessionItem) => Promise<boolean> | boolean;
+  onHandoffPack?: (session: SessionItem) => void;
 }) {
   const { locale, t } = useI18n();
   const isClosed = !!session.closed_at;
@@ -2079,7 +2073,7 @@ function SessionCard({
                 if (!session.root_id || copyingPath) return;
                 setCopyingPath(true);
                 void sessionService.getSessionLogPath(session.root_id, session.session_key || session.key)
-                  .then(copySessionValue)
+                  .then(({ path }) => copySessionValue(path))
                   .catch((err) => {
                     reportError("clipboard.write_failed", String((err as Error)?.message || t("session.copyFailed")));
                   })
@@ -2093,6 +2087,25 @@ function SessionCard({
               </svg>
               {copyingPath ? t("common.loading") : t("sessionList.copyPath")}
             </button>
+            {onHandoffPack ? (
+              <button
+                type="button"
+                disabled={!session.root_id || session.pending}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  onHandoffPack(session);
+                }}
+                style={{ ...menuItemStyle, color: "var(--text-primary)", whiteSpace: "nowrap", opacity: !session.root_id || session.pending ? 0.55 : 1 }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                  <path d="M10 17l5-5-5-5" />
+                  <path d="M15 12H3" />
+                </svg>
+                {t("sessionList.handoffPack")}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={(e) => {
