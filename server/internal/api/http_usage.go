@@ -50,7 +50,7 @@ func (h *HTTPHandler) handleUsagePreferencesPut(w http.ResponseWriter, r *http.R
 		Prices usage.PriceTable `json:"prices"`
 		Budget usage.Budget     `json:"budget"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxUploadRequestBytes)).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxJSONRequestBytes)).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid request body"))
 		return
 	}

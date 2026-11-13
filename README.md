@@ -19,6 +19,24 @@ Access your personal AI agents and workstation data anywhere, anytime through Mi
 
 ---
 
+## Model API Gateway
+
+MindFS includes [**Token Station**](https://token.a9gent.com/) integration with real-time balance display and one-click activation. Choose from GPT, Claude, Gemini, Grok, DeepSeek, and Chinese model groups based on your model preferences, tasks, and budget. **Top-ups are credited 1:1**.
+
+| Group | Group multiplier | Description |
+| --- | --- | --- |
+| 国产模型 (Chinese models) | 0.16 | Access Kimi, GLM, MiniMax, and MiMo in one group. |
+| `deepseek-官key` | 0.46 | Official API keys, with direct Search and Fetch support. |
+| `gpt-pro-保真` | 0.24 | First-party Pro account pool. |
+| `gpt-pro` | 0.16 | Lower-cost Pro account pool for budget-conscious use. |
+| `claude-ccmax-0注入` | 1.1 | CCMax with zero prompt injection, for coding tasks with no client restriction. |
+| `claude-ccmax-微注入` | 0.9 | CCMax with light prompt injection, supporting distillation and thinking output. |
+| `claude-kiro` | 0.35 | Suitable for copywriting and smaller tasks. |
+| `grok-heavy` | 0.18 | Grok Heavy account pool. |
+| `gemini-ultra` | 0.36 | Gemini Ultra account pool. |
+
+---
+
 ## Features
 
 ### Agent Sessions
@@ -36,7 +54,7 @@ Access your personal AI agents and workstation data anywhere, anytime through Mi
 - **session fork**: Session can forked from historical replies.
 - **Scheduled tasks**: Trigger agents to run tasks at specified times.
 - **Codex Remote Login**: Login to Codex remotely via the /login command.
-- **Built-in Token Stagion**: Real-time balance display and one-click activation.
+- **Built-in [Token Station](https://token.a9gent.com/)**: Real-time balance display and one-click activation.
 - **Token Usage data**: Record and display token usage and context-window usage.
 
 ### Task Board
